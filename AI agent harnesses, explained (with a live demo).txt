@@ -1,0 +1,243 @@
+So in July 2025, a developer named Jason Lemkin was nine days into building an app with an AI coding agent.
+He told it in plain English to stop.
+The code froze, no changes.
+The agent deleted his production database anyway.
+It wiped out records for over 1200 executives and over 1100 companies.
+Then it told him that the data could not be recovered.
+And that part was not even true because the backups did exist and the data was later restored.
+That is the story that I keep coming back to because it's not really a story about a bad model.
+It's a story about a missing layer.
+That layer is supposed to sit between a model and the things that it can break.
+And that layer is called agent hardness.
+A new open source one launches today, Trueforge, open source agent hardness by True Foundry.
+I'll leave the links in the description below for you to check out their GitHub.
+I have been through the repository, the docs and their benchmarks.
+I've been through some early access, so shout out to their team.
+And in this video, I want to show you what an agent harness actually is, why this category exists.
+And I'm going to show you a demo so that you can see the differences on the screen as well.
+Let's get started.
+Here's the thing nobody tells you when you build your first agent.
+Getting one to work is easy just for once.
+You wire a model to a couple of tools.
+You give it a prompt and it does something impressive in the afternoon.
+Then you point it at something real and it breaks the very specific ways, if you will.
+So it cannot reach your actual systems like in a safe way.
+Security is a big concern.
+It runs code that can damage things and it takes actions that you cannot undo with nobody watching.
+This is not just a feeling.
+Researchers at Carnegie Mellon built a fake company and staffed it with the best AI agents to see how many office tasks they could finish.
+In their paper, it's called the agent company.
+The top performer was Google's Gemini 2.5 Pro at that time and it completed only about 30% of the tasks on its own.
+On the hard multi-step work, most agents failed most of the time.
+Some even faked task completion to look successful.
+So the gap between a demo and something you would trust is huge.
+And almost all of that gap is the same plumbing.
+Rebate badly by every team.
+The loop.
+The tool wiring.
+The sandbox.
+The approvals.
+The logging.
+So what is an agent harness?
+Let me make it very simple for you.
+The model is not the agent.
+The model is the brain.
+Text goes in.
+Text comes out.
+It can say delete that file.
+But it's not actually going to delete anything.
+It cannot remember what happened yesterday.
+It cannot check whether the thing that it tried before a few days ago actually worked.
+Something else has to do all of that around the model.
+Hopefully this comparison makes sense.
+The model is like an engine.
+An engine on a stand in a garage is very powerful, but it takes you nowhere.
+In order to drive it, you need the car built around the engine.
+You need a transmission that turns raw power into motion.
+You need a steering wheel to point it to where you want to go.
+You need the brakes to stop it before you hit something.
+And a dashboard so you can see what is going on.
+The harness is this car.
+It runs the loop.
+So think, act, check the results, decide the next step.
+That is the transmission.
+It connects the model to real tools, your files, your APIs, your systems.
+And that is the steering.
+It pauses and asks a human before anything irreversible happens.
+That's, as you guessed, the brakes.
+And it runs untrusted code in an isolated space and writes down every step that it takes.
+You can guess it.
+Seed belts and dashboards.
+So that's the generic idea.
+The model is the engine.
+The harness is the car.
+And nobody is just shipping an engine to the customer.
+When you buy a car, you get the whole thing.
+So where does Trueforge fit in?
+Trueforge is open source under the MIT license.
+You drive it three ways.
+There's a chart UI in the browser.
+An HTTP API with a TypeScript SDK.
+And an MBWISDK for your own application.
+Everything that UI does, the API can do it as well.
+And it is bring your own.
+So bring your own model.
+So it open AI, anthropic, Gemini, Deepseak, any other open AI compatible endpoint.
+Switchable from the UI.
+You can bring your own tools over MCP with the Hetheroth or OAuth plus a set of built-in tools and web search.
+Bring your own sandbox for running code as well.
+So one design choice that they highlight actually is what they call Sandbox as a tool.
+A lot of harnesses run the whole agent inside a Sandbox.
+Trueforge only spins up a Sandbox when the agent actually needs to run the code
+and keeps your secrets in the harness rather than the Sandbox itself.
+So their claim is that this lets one server run many agents at once
+and makes ordinary turns cheaper and much faster.
+On cost, TrueFounder published a benchmark against a Claude managed agent
+and the open source deep agents on the same 14 enterprise tasks,
+the same tools and the same model.
+Their numbers, by the way, I'll leave the links in the description below,
+show the same accuracy as Claude managed agents on the same model at about 30% lower cost
+and cheaper again on a smaller open model.
+To their credit, they have put the whole benchmark kit on GitHub
+so you can run it yourself and you can also run the whole thing locally with just one command,
+no account required.
+Now why is the whole product category forming around this now?
+Because the failures are piling up and they are documented.
+In a press release dated June 25, 2025, last year,
+Gartner predicted that more than 40% of agent KI projects will be cancelled by the end of 2027.
+Their analyst Anushri Varma pointed to escalating costs,
+unclear business value and inadequate risk controls.
+That forecast came off a pole of more than 3,400 people.
+MIT has a research group called Project Nanda.
+In July 2025, there was a report titled the Jenny I Divide.
+They found that about 95% of enterprise generative AI pilots
+delivered no measurable return on the bottom line.
+Against an estimated $30 to $40 billion in spending, that's a lot of money.
+And only about 5% were pulling real value.
+On security, researchers discovered a flaw in Microsoft 365 co-pilot in 2025,
+a single crafted email could make the assistant leak internal data with no click from the user itself.
+Microsoft patched it and said that there was no sign that it was used in the wild.
+It is described as the first documented case of prompt injection being used to pull data out of a production AI system.
+And on accountability back in 2024, a tribunal in Canada held an Air Canada liable
+when its website chatbot gave a customer wrong information about some fares or something.
+And the airline argued that the chatbot was responsible for its own words.
+And they did not buy it.
+So none of this means that the agents do not work.
+It just means that the runtime around them, the harness, the approvals, the logging,
+that is where the rear risk lives.
+So, which is exactly the layer that we are about to look at.
+Let me show you a demo of this in action.
+The setup is quite interesting and I have one folder on my machine.
+It has a report inside it and an agent with a tool can overwrite these files in my folder.
+I'm going to make the same dangerous request twice.
+So two runs.
+One is the difference between them and you will see that in a moment when it happens.
+Let's run it.
+So here's an example of my report.
+It says revenue and the churn and there's a note in this text file that says do not modify.
+Final numbers are pending from finance.
+So if I give an AI agent a task like hey, if I'm telling a model like hey, modify this file without proper guidelines,
+guardrails and rules, it's going to do it, which is dangerous.
+First thing we're going to do is install Trueforge itself.
+One command, just NPX True Foundry Trueforge and that is it.
+No account, no signup required, no cloud required and the server and the UI are both starting on my machine right now.
+And everything gets stored into a local SQLite file for this demo purposes.
+It's going to print this address that I can just open in the browser and this is the chat UI and it ships with the server.
+The same port.
+Nothing extra to deploy.
+Now the tool, this is a standard MCP file server, the official one.
+So I am pointing it at the one demo folder that I showed you.
+The command basically puts it on a local URL.
+So Trueforge can connect to it and this server can read files in the folder and it can override them.
+So reading is harmless, but overwriting is the part with no undo and one detail that matters later.
+This server labels its own tools.
+So the right tools are marked as destructive.
+Remember that next we need a model.
+So I go to settings, the models, there's a catalog here.
+You can use OpenAI and Tropic, Google and more.
+I'm using a cloud.
+So I just pick anthropic and I click configure and I just paste my API key and create done.
+So the key basically lives here in the settings and I never have to touch it again.
+And this is the, you know, bring your own model idea.
+Now I introduced the file server to Trueforge.
+So I go to settings and connectors and there's a catalog of readymade servers here, but mine is custom.
+So I just click add mcp server.
+I name it local files.
+I paste the local URL.
+No authentication is needed and I just click save.
+Notice where this lives and you know the credentials and all the connections that all sits here at the hardness level.
+So the agents just borrow them by name.
+No agent ever holds a key.
+Here is where it gets interesting.
+I want to show you an agent with no safety gate and Trueforge will not let me build that into the UI.
+So the only way to strip away the approval gate is through the API.
+So watch what I have to do.
+First, I list the models to grab the exact name from, for cloud.
+Then this call creates an agent that I am calling with no guardrails and look at this one line in the request.
+It's going to require approval for tools set to like an empty list.
+So I am explicitly telling the harness do not pause anything.
+Right do not pause for anything and that is the whole point.
+A reckless agent is not the default here.
+It is something that you have to ask for in writing.
+Let's run it the agents library.
+There is no guardrail and I hit try and I send it this.
+I'm going to say replace the entire content of the q3 report.txt file with the single line called archived.
+Watch how fast this basically goes.
+It picked the right tool.
+It ran it.
+All done.
+No questions.
+No pause.
+And let me show you the file here.
+If you go back there it is.
+The report.
+It originally said do not modify but now it has only one word in it.
+Arcived.
+Nobody was asked like it didn't ask me you know whether I want to do it or not.
+This is the same story that I opened this video with again and you know just at a scale where nobody gets hurt for this demo purpose.
+But quite dangerous.
+So that's me replicating what we spoke about earlier with Jason Lemkin.
+Now the other side.
+First I put the report back from the backup and at this time no special agent at all.
+I open a plain new chat.
+I pick Claude and I switch on the local files tool and that is it.
+I have not touched a single safety setting.
+Everything here is stock.
+Same request word to word.
+I'm going to replace the entire content of q3 report.txt with a single line archive.
+And let's see what happens.
+You will see that it stops.
+It's going to basically catch the right call.
+It's going to freeze it and it's going to show me exactly which tool.
+Wants to run and exactly what it wants to write.
+So two buttons allow or deny.
+I configured none of this.
+So the files are marked that tool as destructive and true forges default is to never run a destructive tool without a human.
+Safe is the default.
+Unguarded was the thing that I had to build on purpose.
+So I can use the buttons.
+I can hit deny and the file completely untouched.
+The model wanted to act and I simply did not allow it to.
+Now I send the same request again and at this time if I hit allow it's going to run only for now and the overwrite.
+If it wants to happen like if I want to have if I wanted to happen it's going to happen after my click not before.
+So I am the gate not the model right and I'm not like prompt telling it to please be careful or whatever.
+One last thing and honestly really good part this panel here the agent steps you can see every single thing that just happened is recorded what the agent was thinking the exact tool call with the exact arguments.
+My approval decisions the results when an agent does something weird at like midnight or 2am or so.
+This is the difference between reading like a post modern and like starting from a black box.
+So that is the case for agent harnesses in general and true forges in particular.
+By the way we are running hackathon next week.
+The true foundry AI agents hackathon you're going to be learning how to use true forges build awesome stuff learn about agent harnesses and we are giving away an immediate DJX spark.
+This is a personal AI supercomputer by NVIDIA that we're giving away.
+So the links for that can be found in the description as well.
+You can take part solo online take part in a team of four people.
+All the rules can be found in the event page that I will leave in the description.
+You can also join us in San Francisco on 29th if you're around in the city and we're also giving away like Mac mini's and some other fun prizes.
+So yeah I recommend taking part and building cool stuff using the true forges open source agent harness.
+And you know the model is the easy part the layer that decides what the model is allowed to touch and stops it before it does something that you cannot undo.
+That's the part that is worth paying attention to true for as I mentioned already is open source and MIT licensed.
+So you can literally read every single line of code.
+You can run it on your own machine and you can decide for yourself.
+Check out the links in the description below take part in the hackathon check out their GitHub repository.
+And let me know if you have any questions in the comments below I will read those and I will answer those.
+See you in the next one.
+Bye.

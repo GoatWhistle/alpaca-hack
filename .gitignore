@@ -1,0 +1,10 @@
+.env
+.env.local
+logs/*
+!logs/.gitkeep
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+dist/
+.DS_Store
