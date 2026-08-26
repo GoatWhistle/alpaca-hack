@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 Percentage = Annotated[Decimal, Field(ge=Decimal("0"), le=Decimal("100"))]
 Instrument = Literal["equity"]
-OrderType = Literal["limit", "market", "stop", "stop_limit", "trailing_stop"]
+OrderType = Literal["limit", "market"]
 SessionPolicy = Literal["regular_hours_only"]
 
 

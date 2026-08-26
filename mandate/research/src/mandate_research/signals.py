@@ -63,6 +63,8 @@ def momentum_signal(
 ) -> TradeSignal:
     if lookback < 1:
         raise ValueError("lookback must be positive")
+    if threshold_pct < ZERO:
+        raise ValueError("threshold_pct cannot be negative")
     if len(bars) <= lookback:
         return _flat(bars, f"need {lookback + 1} bars")
     change_pct = (bars[-1].close / bars[-1 - lookback].close - ONE) * Decimal("100")
@@ -78,6 +80,8 @@ def mean_reversion_signal(
 ) -> TradeSignal:
     if lookback < 2:
         raise ValueError("lookback must be at least 2")
+    if z_threshold <= ZERO:
+        raise ValueError("z_threshold must be positive")
     if len(bars) < lookback:
         return _flat(bars, f"need {lookback} bars")
     closes = [bar.close for bar in bars[-lookback:]]
@@ -99,6 +103,8 @@ def breakout_volume_signal(
 ) -> TradeSignal:
     if lookback < 2:
         raise ValueError("lookback must be at least 2")
+    if min_volume_ratio <= ZERO:
+        raise ValueError("min_volume_ratio must be positive")
     if len(bars) <= lookback:
         return _flat(bars, f"need {lookback + 1} bars")
     history = bars[-1 - lookback : -1]
@@ -171,9 +177,14 @@ def news_price_confirmation_signal(
     lookback: int = 3,
     news_threshold: Decimal = Decimal("0.25"),
 ) -> TradeSignal:
-    if not events:
+    if not bars:
+        raise ValueError("at least one bar is required")
+    if not ZERO <= news_threshold <= ONE:
+        raise ValueError("news_threshold must be between 0 and 1")
+    eligible_events = [event for event in events if event.published_at <= bars[-1].timestamp]
+    if not eligible_events:
         return _flat(bars, "no recent news")
-    scores = [score_news(event, symbol=symbol) for event in events]
+    scores = [score_news(event, symbol=symbol) for event in eligible_events]
     news_score = sum(scores, ZERO) / Decimal(len(scores))
     price = momentum_signal(bars, lookback=lookback, threshold_pct=Decimal("0"))
     news_direction = Direction.BUY if news_score > ZERO else Direction.SELL if news_score < ZERO else Direction.FLAT

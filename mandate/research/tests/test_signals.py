@@ -65,7 +65,7 @@ def test_news_score_respects_symbol_and_balances_words() -> None:
     event = NewsEvent(
         "alpaca",
         "1",
-        datetime(2026, 8, 26, 14, tzinfo=timezone.utc),
+        datetime(2026, 8, 26, 13, 30, tzinfo=timezone.utc),
         "AAPL beats estimates",
         "Growth offsets one loss",
         ("AAPL",),
@@ -78,7 +78,7 @@ def test_news_signal_requires_matching_price_direction() -> None:
     positive = NewsEvent(
         "alpaca",
         "1",
-        datetime(2026, 8, 26, 14, tzinfo=timezone.utc),
+        datetime(2026, 8, 26, 13, 30, tzinfo=timezone.utc),
         "AAPL beats estimates and raises guidance",
         symbols=("AAPL",),
     )
@@ -90,3 +90,29 @@ def test_news_signal_requires_matching_price_direction() -> None:
     )
     assert confirmed.direction is Direction.BUY
     assert contradicted.direction is Direction.FLAT
+
+
+def test_future_news_is_excluded_from_signal() -> None:
+    future = NewsEvent(
+        "alpaca",
+        "future",
+        datetime(2026, 8, 26, 15, tzinfo=timezone.utc),
+        "AAPL beats estimates and raises guidance",
+        symbols=("AAPL",),
+    )
+    result = news_price_confirmation_signal(
+        bars(["100", "101", "102", "103"]), [future], symbol="AAPL", lookback=3
+    )
+    assert result.direction is Direction.FLAT
+
+
+def test_invalid_signal_thresholds_are_rejected() -> None:
+    import pytest
+
+    history = bars(["100", "101", "102", "103"])
+    with pytest.raises(ValueError, match="z_threshold"):
+        mean_reversion_signal(history, lookback=3, z_threshold=Decimal("0"))
+    with pytest.raises(ValueError, match="min_volume_ratio"):
+        breakout_volume_signal(history, lookback=3, min_volume_ratio=Decimal("0"))
+    with pytest.raises(ValueError, match="threshold_pct"):
+        momentum_signal(history, lookback=3, threshold_pct=Decimal("-1"))

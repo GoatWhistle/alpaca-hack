@@ -68,3 +68,11 @@ def test_rejects_unknown_fields() -> None:
     data["allow_live_trading"] = True
     with pytest.raises(ValidationError):
         Mandate.model_validate(data)
+
+
+@pytest.mark.parametrize("unsupported", ["stop", "stop_limit", "trailing_stop"])
+def test_rejects_order_types_without_complete_submission_contract(unsupported: str) -> None:
+    data = valid_data()
+    data["order_types"] = [unsupported]
+    with pytest.raises(ValidationError):
+        Mandate.model_validate(data)

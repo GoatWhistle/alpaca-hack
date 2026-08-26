@@ -91,16 +91,7 @@ def create_server(service: GuardService) -> FastMCP:
 
     @mcp.tool(annotations=DESTRUCTIVE)
     async def close_position(symbol: str, qty: str, rationale: str) -> dict[str, Any]:
-        if not rationale.strip():
-            raise ValueError("rationale is required")
-        quantity = Decimal(qty)
-        if quantity <= 0:
-            raise ValueError("qty must be positive")
-        response = await service.broker.close_position(symbol, quantity)
-        service.journal.append(
-            "close_position", "submitted", rationale, {"symbol": symbol.upper(), "qty": str(quantity)}
-        )
-        return {"submitted": True, "broker": response}
+        return await service.close_position(symbol, Decimal(qty), rationale=rationale)
 
     @mcp.tool(annotations=READ_ONLY)
     def get_session_state() -> dict[str, Any]:

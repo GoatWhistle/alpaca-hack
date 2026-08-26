@@ -7,6 +7,7 @@ import pytest
 
 from mandate_guard.checks import (
     OrderIntent,
+    PendingOrder,
     Portfolio,
     Position,
     Side,
@@ -84,13 +85,19 @@ def test_order_count_allows_last_slot_and_rejects_next(mandate: Mandate) -> None
 def test_session_allows_regular_hours_and_rejects_before_open(mandate: Mandate) -> None:
     during = datetime(2026, 8, 26, 14, 0, tzinfo=timezone.utc)
     before = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
-    assert check_session_window(mandate, during) is None
-    assert check_session_window(mandate, before).rule == "session"  # type: ignore[union-attr]
+    assert check_session_window(mandate, during, market_is_open=True) is None
+    assert check_session_window(mandate, before, market_is_open=True).rule == "session"  # type: ignore[union-attr]
 
 
 def test_session_rejects_weekend(mandate: Mandate) -> None:
     saturday = datetime(2026, 8, 29, 14, 0, tzinfo=timezone.utc)
-    assert check_session_window(mandate, saturday).rule == "session"  # type: ignore[union-attr]
+    assert check_session_window(mandate, saturday, market_is_open=True).rule == "session"  # type: ignore[union-attr]
+
+
+def test_session_fails_closed_without_exchange_clock(mandate: Mandate) -> None:
+    during = datetime(2026, 8, 26, 14, 0, tzinfo=timezone.utc)
+    assert check_session_window(mandate, during).headroom == "unverified"  # type: ignore[union-attr]
+    assert check_session_window(mandate, during, market_is_open=False).headroom == "closed"  # type: ignore[union-attr]
 
 
 def test_expiry_allows_before_and_rejects_at_expiry(mandate: Mandate) -> None:
@@ -121,6 +128,7 @@ def test_composite_check_reports_all_independent_breaches(
         order,
         Decimal("100"),
         now=datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc),
+        market_is_open=False,
     )
     assert result.allowed is False
     assert {breach.rule for breach in result.breaches} >= {
@@ -137,3 +145,28 @@ def test_rejects_non_positive_reference_price(
 ) -> None:
     with pytest.raises(ValueError, match="reference_price"):
         project_order(portfolio, limit_buy, value)
+
+
+def test_pending_orders_reserve_worst_case_position_and_gross(mandate: Mandate) -> None:
+    portfolio = Portfolio(
+        equity=Decimal("10000"),
+        positions={},
+        pending_orders=(PendingOrder("AAPL", Side.BUY, Decimal("5"), Decimal("100")),),
+    )
+    candidate = OrderIntent("AAPL", Side.BUY, Decimal("6"), "limit", limit_price=Decimal("100"))
+    projection = project_order(portfolio, candidate, Decimal("100"))
+    assert projection.position_pct == Decimal("11")
+    assert check_position_limit(mandate, projection).rule == "max_position_pct"  # type: ignore[union-attr]
+
+
+def test_opposing_pending_orders_do_not_cancel_risk() -> None:
+    portfolio = Portfolio(
+        equity=Decimal("10000"),
+        positions={"AAPL": Position(Decimal("5"), Decimal("100"))},
+        pending_orders=(
+            PendingOrder("AAPL", Side.BUY, Decimal("5"), Decimal("100")),
+            PendingOrder("AAPL", Side.SELL, Decimal("10"), Decimal("100")),
+        ),
+    )
+    candidate = OrderIntent("AAPL", Side.BUY, Decimal("1"), "limit", limit_price=Decimal("100"))
+    assert project_order(portfolio, candidate, Decimal("100")).position_pct == Decimal("11")

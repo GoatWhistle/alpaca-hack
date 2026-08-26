@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 import httpx
 
-from mandate_guard.checks import OrderIntent, Position
+from mandate_guard.checks import OrderIntent, PendingOrder, Position, Side
 from mandate_guard.config import validate_paper_base_url
 
 
@@ -30,6 +30,13 @@ class PortfolioSnapshot:
     account: AccountSnapshot
     positions: dict[str, Position]
     orders_today: int
+    pending_orders: tuple[PendingOrder, ...] = ()
+
+
+@dataclass(frozen=True)
+class MarketClock:
+    timestamp: datetime
+    is_open: bool
 
 
 class AlpacaPaperClient:
@@ -89,13 +96,61 @@ class AlpacaPaperClient:
             for item in data
         }
 
+    async def _all_orders(self, *, status: str, after: datetime | None = None) -> list[Mapping[str, Any]]:
+        params: dict[str, Any] = {"status": status, "direction": "desc", "limit": 500}
+        if after is not None:
+            params["after"] = after.isoformat()
+        orders: list[Mapping[str, Any]] = []
+        seen_cursors: set[str] = set()
+        while True:
+            page = await self._request("GET", f"{self.base_url}/v2/orders", params=params)
+            if not isinstance(page, list):
+                raise AlpacaError("Alpaca orders response must be a list")
+            if after is not None and "before_order_id" in params:
+                page = [item for item in page if _order_timestamp(item) > after]
+            orders.extend(page)
+            if len(page) < 500:
+                return orders
+            cursor = str(page[-1].get("id", ""))
+            if not cursor or cursor in seen_cursors:
+                raise AlpacaError("Alpaca order pagination did not advance")
+            seen_cursors.add(cursor)
+            params = {
+                "status": status,
+                "direction": "desc",
+                "limit": 500,
+                "before_order_id": cursor,
+            }
+
     async def count_orders_since(self, since: datetime) -> int:
-        data = await self._request(
-            "GET",
-            f"{self.base_url}/v2/orders",
-            params={"status": "all", "after": since.isoformat(), "limit": 500},
-        )
-        return len(data)
+        return len(await self._all_orders(status="all", after=since))
+
+    async def get_open_orders(self) -> tuple[PendingOrder, ...]:
+        orders = await self._all_orders(status="open")
+        pending: list[PendingOrder] = []
+        for item in orders:
+            remaining = Decimal(str(item["qty"])) - Decimal(str(item.get("filled_qty", "0")))
+            if remaining <= 0:
+                continue
+            raw_price = item.get("limit_price")
+            if raw_price is None:
+                raise AlpacaError("open order has no bounded limit price; refusing risk projection")
+            pending.append(
+                PendingOrder(
+                    symbol=str(item["symbol"]),
+                    side=Side(str(item["side"])),
+                    remaining_qty=remaining,
+                    reference_price=Decimal(str(raw_price)),
+                )
+            )
+        return tuple(pending)
+
+    async def get_market_clock(self) -> MarketClock:
+        data = await self._request("GET", f"{self.base_url}/v2/clock")
+        timestamp = datetime.fromisoformat(str(data["timestamp"]).replace("Z", "+00:00"))
+        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+            raise AlpacaError("Alpaca market clock timestamp is timezone-naive")
+        return MarketClock(timestamp=timestamp, is_open=bool(data["is_open"]))
 
     async def get_latest_trade_price(self, symbol: str) -> Decimal:
         data = await self._request(
@@ -128,3 +183,10 @@ class AlpacaPaperClient:
             f"{self.base_url}/v2/positions/{symbol.upper()}",
             params={"qty": str(qty)},
         )
+
+
+def _order_timestamp(item: Mapping[str, Any]) -> datetime:
+    value = datetime.fromisoformat(str(item["submitted_at"]).replace("Z", "+00:00"))
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise AlpacaError("Alpaca order timestamp is timezone-naive")
+    return value

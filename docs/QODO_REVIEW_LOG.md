@@ -7,6 +7,19 @@ Qodo Code Review установлен на `GoatWhistle/harness-hack` до по�
 | PR | Milestone | Находки Qodo | Исправлено | Отклонено с обоснованием |
 |---|---|---|---|---|
 | [#1](https://github.com/GoatWhistle/harness-hack/pull/1) | M1 — mandate guard | Research и execution guard находились в одном привилегированном пакете | Принято: news, signals и backtest вынесены в отдельный пакет `mandate-research` | Нет |
+| [#1](https://github.com/GoatWhistle/harness-hack/pull/1) | M1 — deep review | 9 bugs, включая 3 High: pending exposure, конкурентные submit, обход мандата через close | Исправлены все 9; добавлены broker-clock, NY cutoff, пагинация, reservation model, lock и регрессионные тесты | Нет |
+
+Подробности исправлений deep review PR #1:
+
+1. Открытые лимитные ордера резервируют worst-case позицию и gross exposure; встречные заявки не взаимозачитываются.
+2. Проверка и submit сериализованы одним lock внутри единственного процесса guard.
+3. `close_position` строит полноценный `OrderIntent` и проходит universe, order type, loss, count, session и expiry.
+4. Торговая сессия подтверждается broker clock Alpaca; отсутствие clock закрывает путь fail-closed.
+5. История ордеров пагинируется за пределы лимита Alpaca в 500 элементов.
+6. News signal отбрасывает события, опубликованные позже текущего бара.
+7. Нулевые и отрицательные thresholds отвергаются до расчёта.
+8. Торговый день начинается в полночь `America/New_York`, а не UTC.
+9. Схема разрешает только реализованные контракты `limit` и `market`; неполные stop-типы отклоняются.
 
 Правила проекта для ревью:
 
