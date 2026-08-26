@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from mandate_guard.news import NewsEvent
-from mandate_guard.signals import (
+from mandate_research.news import NewsEvent
+from mandate_research.signals import (
     Direction,
     PriceBar,
     breakout_volume_signal,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# This module intentionally has no broker or MCP dependency.
+
 import hashlib
 import json
 import re

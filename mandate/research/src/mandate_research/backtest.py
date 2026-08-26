@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Callable, Mapping, Sequence
 
-from mandate_guard.signals import Direction, PriceBar, TradeSignal
+from mandate_research.signals import Direction, PriceBar, TradeSignal
 
 
 ONE = Decimal("1")

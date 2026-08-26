@@ -7,7 +7,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Sequence
 
-from mandate_guard.news import NewsEvent
+from mandate_research.news import NewsEvent
 
 
 ZERO = Decimal("0")

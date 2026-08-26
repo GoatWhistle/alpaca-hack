@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mandate-research"
+version = "0.1.0"
+description = "Unprivileged news and strategy research for MANDATE"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.2,<9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mandate_research"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src"]
+testpaths = ["tests"]

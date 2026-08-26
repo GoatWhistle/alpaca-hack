@@ -6,7 +6,7 @@ Qodo Code Review установлен на `GoatWhistle/harness-hack` до по�
 
 | PR | Milestone | Находки Qodo | Исправлено | Отклонено с обоснованием |
 |---|---|---|---|---|
-| _pending_ | M1 — mandate guard | _pending_ | _pending_ | _pending_ |
+| [#1](https://github.com/GoatWhistle/harness-hack/pull/1) | M1 — mandate guard | Research и execution guard находились в одном привилегированном пакете | Принято: news, signals и backtest вынесены в отдельный пакет `mandate-research` | Нет |
 
 Правила проекта для ревью:
 

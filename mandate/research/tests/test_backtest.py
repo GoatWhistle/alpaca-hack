@@ -5,8 +5,8 @@ from decimal import Decimal
 
 import pytest
 
-from mandate_guard.backtest import compare_strategies, evaluate_strategy
-from mandate_guard.signals import Direction, PriceBar, TradeSignal, momentum_signal
+from mandate_research.backtest import compare_strategies, evaluate_strategy
+from mandate_research.signals import Direction, PriceBar, TradeSignal, momentum_signal
 
 
 def make_bars(closes: list[str]) -> list[PriceBar]:

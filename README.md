@@ -33,7 +33,8 @@ The parsers cap input size, require timezone-aware timestamps, remove markup, no
 deduplicate revisions. Text such as “ignore previous instructions” remains inert data; it is never used as
 an agent instruction.
 
-The common evaluation harness currently compares four explainable approaches:
+The unprivileged `mandate-research` package contains the common evaluation harness and compares four
+explainable approaches:
 
 - price momentum;
 - mean reversion by rolling z-score;
@@ -79,6 +80,7 @@ paper-endpoint and secret checks.
 
 ## Current status
 
-M1 is in progress: the mandate schema, deterministic risk predicates, normalized news input, explainable
-signals, evaluation harness, paper Alpaca client and MCP tool annotations are implemented and covered by
-tests. TrueForge agent configuration and the end-to-end approval flow are the next milestone.
+M1 is in progress: the privileged `mandate-guard` package contains only mandate enforcement, the paper
+broker client and MCP boundary. Normalized news input, explainable signals and evaluation live in the
+separate unprivileged `mandate-research` package. Both are covered by tests. TrueForge agent configuration
+and the end-to-end approval flow are the next milestone.

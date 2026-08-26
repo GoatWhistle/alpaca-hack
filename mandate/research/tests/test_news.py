@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from mandate_guard.news import (
+from mandate_research.news import (
     MAX_FEED_BYTES,
     NewsEvent,
     NewsParseError,
