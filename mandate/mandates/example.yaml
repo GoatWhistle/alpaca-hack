@@ -1,0 +1,15 @@
+name: intraday-momentum-2026-08-28
+universe: [AAPL, MSFT, NVDA, SPY]
+instruments: [equity]
+order_types: [limit]
+session: regular_hours_only
+limits:
+  max_position_pct: 10
+  max_gross_exposure_pct: 60
+  max_daily_loss_pct: 2
+  max_orders_per_day: 20
+wake_me_if:
+  - daily_loss_pct > 1.2
+  - single_symbol_move_pct > 5
+  - any_breach_requiring_override > 0
+expires: 2026-08-28T20:00:00Z
