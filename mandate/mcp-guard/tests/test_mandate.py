@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from mandate_guard.mandate import Mandate
+from mandate_guard.mandate import Mandate, load_mandate
 
 
 def valid_data() -> dict:
@@ -76,3 +77,31 @@ def test_rejects_order_types_without_complete_submission_contract(unsupported: s
     data["order_types"] = [unsupported]
     with pytest.raises(ValidationError):
         Mandate.model_validate(data)
+
+
+@pytest.mark.parametrize(
+    "directive",
+    [
+        {
+            "when": "any_breach_requiring_override > 0",
+            "then": "park_new_orders",
+            "reason": "not observable before evaluation",
+        },
+        {
+            "when": "daily_loss_pct >= 1",
+            "then": "halve_order",
+            "reason": "unsupported action",
+        },
+    ],
+)
+def test_rejects_unenforceable_predecisions(directive: dict[str, str]) -> None:
+    data = valid_data()
+    data["predecided"] = [directive]
+    with pytest.raises(ValidationError):
+        Mandate.model_validate(data)
+
+
+def test_repository_example_mandate_loads() -> None:
+    path = Path(__file__).parents[2] / "mandates" / "example.yaml"
+    mandate = load_mandate(path)
+    assert len(mandate.predecided) == 2

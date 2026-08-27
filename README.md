@@ -23,6 +23,11 @@ Approval does not bypass the mandate. Direct Alpaca execution tools are excluded
 research-tool allowlist. Stable intent IDs make submission retries idempotent, and cancellation is allowed
 only when the order's client ID is backed by a submitted event in the persistent guard journal.
 
+Human predecisions are executable YAML, not model guidance. A directive such as
+`daily_loss_pct >= 1 → park_new_orders` is evaluated from the fresh broker snapshot before every order.
+The initial grammar deliberately supports only metrics the guard can observe itself and one fail-closed
+action; unknown metrics or actions prevent the mandate from loading.
+
 The server refuses live, HTTP, look-alike, credential-bearing, port-bearing, and path-bearing base URLs.
 Secrets are read from environment variables and must never be committed.
 
@@ -110,6 +115,6 @@ market clocks, obtained an AAPL IEX quote, and asked the guard to evaluate TSLA.
 independent reasons: TSLA was outside the mandate universe and the exchange was closed. No write tool was
 called, and the agent's Alpaca tool discovery contained no order-placement tool.
 
-The current local suite has 68 guard tests and 19 research/Skill tests. It covers concurrent submissions,
+The current local suite has 72 guard tests and 19 research/Skill tests. It covers concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.

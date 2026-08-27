@@ -179,7 +179,12 @@ limits:
 wake_me_if:
   - daily_loss_pct > 1.2
   - single_symbol_move_pct > 5
-expires: 2026-08-28T20:00:00Z
+predecided:
+  - when: daily_loss_pct >= 1
+    then: park_new_orders
+    reason: Protect the remaining daily loss budget before the hard stop.
+allow_risk_reducing_market_close: true
+expires: 2099-08-28T20:00:00Z
 ```
 
 Правила валидации: `universe` непустой, все проценты в диапазоне 0–100,
@@ -187,6 +192,10 @@ expires: 2026-08-28T20:00:00Z
 
 `wake_me_if` в первой версии — строки, разбираемые простым парсером из трёх токенов
 `метрика оператор число`. Полноценный язык выражений не писать.
+
+`predecided` использует тот же парсер, но принимает только метрики, доступные guard до исполнения
+ордера (`daily_loss_pct`, `single_symbol_move_pct`). В M2 единственное действие — `park_new_orders`.
+Сработавшая развилка добавляет breach и детерминированно запрещает новый ордер.
 
 ---
 

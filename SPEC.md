@@ -92,8 +92,16 @@ limits:
 wake_me_if:
   - daily_loss_pct > 1.2
   - single_symbol_move_pct > 5
-  - any_breach_requiring_override
-expires: 2026-08-28T20:00:00Z
+  - any_breach_requiring_override > 0
+predecided:
+  - when: daily_loss_pct >= 1
+    then: park_new_orders
+    reason: Protect the remaining daily loss budget before the hard stop.
+  - when: single_symbol_move_pct >= 5
+    then: park_new_orders
+    reason: Reassess event risk after an exceptional single-name move.
+allow_risk_reducing_market_close: true
+expires: 2099-08-28T20:00:00Z
 ```
 
 Изменение мандата — это коммит. Ослабление лимита кто-то должен одобрить в PR. Это правильный ритуал и
@@ -103,7 +111,9 @@ expires: 2026-08-28T20:00:00Z
 
 Перед сессией агент делает сухой проход по вселенной и премаркет-данным и выдаёт **конкретные развилки,
 которые сегодня встретятся**, а не абстрактные настройки. «Если NVDA откроется гэпом больше 3% — входим или
-пропускаем?» Человек предрешает их за полминуты, пока сидит за столом и имеет контекст.
+пропускаем?» Человек предрешает их за полминуты, пока сидит за столом и имеет контекст. Решения
+записываются в `predecided` того же YAML. Guard принимает только наблюдаемые им метрики и сам превращает
+сработавшую развилку в отказ `predecided`; модель не может объявить условие несработавшим.
 
 Это ключевой ход продукта. Все остальные обнаруживают решение в тот момент, когда оно блокирует работу.
 Здесь они перечислены заранее.

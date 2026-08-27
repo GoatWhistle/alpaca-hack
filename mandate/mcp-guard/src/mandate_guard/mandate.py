@@ -32,6 +32,22 @@ class Limits(BaseModel):
         return self
 
 
+class Predecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    when: Annotated[str, Field(min_length=1)]
+    then: Literal["park_new_orders"]
+    reason: Annotated[str, Field(min_length=1)]
+
+    @field_validator("when")
+    @classmethod
+    def condition_must_use_guard_metric(cls, expression: str) -> str:
+        condition = parse_wake_condition(expression)
+        if condition.metric not in {"daily_loss_pct", "single_symbol_move_pct"}:
+            raise ValueError("predecision metric must be observable before an order")
+        return expression
+
+
 class Mandate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -42,6 +58,7 @@ class Mandate(BaseModel):
     session: SessionPolicy
     limits: Limits
     wake_me_if: list[str] = Field(default_factory=list)
+    predecided: list[Predecision] = Field(default_factory=list)
     allow_risk_reducing_market_close: bool = True
     expires: datetime
 

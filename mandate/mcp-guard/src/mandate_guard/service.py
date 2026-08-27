@@ -12,6 +12,7 @@ from mandate_guard.alpaca import AccountSnapshot, MarketClock, PortfolioSnapshot
 from mandate_guard.checks import (
     NEW_YORK,
     CheckResult,
+    Breach,
     OrderIntent,
     PendingOrder,
     Portfolio,
@@ -21,9 +22,10 @@ from mandate_guard.checks import (
     check_order,
     check_session_window,
 )
-from mandate_guard.mandate import Mandate
+from mandate_guard.mandate import Mandate, Predecision
 from mandate_guard.state import SessionJournal
 from mandate_guard.wake import evaluate_wake_conditions
+from mandate_guard.wake import parse_wake_condition
 
 
 class PaperBroker(Protocol):
@@ -78,17 +80,52 @@ class GuardService:
             realized_pnl_today=daily_pnl,
             orders_today=snapshot.orders_today,
         )
-        return (
-            check_order(
-                self.mandate,
-                portfolio,
-                order,
-                reference_price,
-                now=checked_at,
-                market_is_open=market_clock.is_open,
-            ),
-            snapshot,
+        result = check_order(
+            self.mandate,
+            portfolio,
+            order,
+            reference_price,
+            now=checked_at,
+            market_is_open=market_clock.is_open,
         )
+        metrics = self._observable_metrics(snapshot)
+        predecided_breaches = tuple(
+            Breach(
+                rule="predecided",
+                limit=directive.when,
+                projected=directive.then,
+                headroom=directive.reason,
+            )
+            for directive in self._active_predecisions(metrics)
+        )
+        if predecided_breaches:
+            result = CheckResult(
+                allowed=False,
+                breaches=(*result.breaches, *predecided_breaches),
+                projection=result.projection,
+            )
+        return result, snapshot
+
+    @staticmethod
+    def _observable_metrics(snapshot: PortfolioSnapshot) -> dict[str, Decimal]:
+        daily_pnl = snapshot.account.equity - snapshot.account.last_equity
+        return {
+            "daily_loss_pct": max(-daily_pnl, Decimal("0"))
+            / snapshot.account.equity
+            * Decimal("100"),
+            "single_symbol_move_pct": max(
+                (abs(position.change_today_pct) for position in snapshot.positions.values()),
+                default=Decimal("0"),
+            ),
+        }
+
+    def _active_predecisions(self, metrics: dict[str, Decimal]) -> list[Predecision]:
+        active: list[Predecision] = []
+        for directive in self.mandate.predecided:
+            condition = parse_wake_condition(directive.when)
+            if condition.evaluate(metrics[condition.metric]):
+                active.append(directive)
+        return active
 
     async def check(self, order: OrderIntent, *, now: datetime | None = None) -> dict[str, Any]:
         result, snapshot = await self.evaluate(order, now=now)
@@ -144,23 +181,19 @@ class GuardService:
         snapshot, market_clock = await asyncio.gather(
             self._snapshot(checked_at), self.broker.get_market_clock()
         )
-        daily_pnl = snapshot.account.equity - snapshot.account.last_equity
-        daily_loss_pct = max(-daily_pnl, Decimal("0")) / snapshot.account.equity * Decimal("100")
+        metrics = self._observable_metrics(snapshot)
+        daily_loss_pct = metrics["daily_loss_pct"]
         portfolio = Portfolio(
             equity=snapshot.account.equity,
             positions=snapshot.positions,
             pending_orders=snapshot.pending_orders,
-            realized_pnl_today=daily_pnl,
+            realized_pnl_today=snapshot.account.equity - snapshot.account.last_equity,
             orders_today=snapshot.orders_today,
         )
         usage = calculate_risk_usage(portfolio)
         limits = self.mandate.limits
-        metrics = {
-            "daily_loss_pct": daily_loss_pct,
-            "single_symbol_move_pct": max(
-                (abs(position.change_today_pct) for position in snapshot.positions.values()),
-                default=Decimal("0"),
-            ),
+        wake_metrics = {
+            **metrics,
             "any_breach_requiring_override": Decimal(
                 any(entry["outcome"] == "denied" for entry in self.journal.snapshot())
             ),
@@ -183,7 +216,11 @@ class GuardService:
                 "max_daily_loss_pct": str(limits.max_daily_loss_pct - daily_loss_pct),
                 "max_orders_per_day": limits.max_orders_per_day - snapshot.orders_today,
             },
-            "wake_triggers": evaluate_wake_conditions(self.mandate.wake_me_if, metrics),
+            "wake_triggers": evaluate_wake_conditions(self.mandate.wake_me_if, wake_metrics),
+            "active_predecisions": [
+                directive.model_dump(mode="json")
+                for directive in self._active_predecisions(metrics)
+            ],
         }
 
     async def submit(

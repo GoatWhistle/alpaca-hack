@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from mandate_guard.alpaca import AccountSnapshot, MarketClock
 from mandate_guard.checks import OrderIntent, PendingOrder, Position, Side
-from mandate_guard.mandate import Mandate
+from mandate_guard.mandate import Mandate, Predecision
 from mandate_guard.service import GuardService
 
 
@@ -251,6 +251,30 @@ def test_mandate_state_reports_headroom_and_live_wake_triggers(
         "single_symbol_move_pct",
         "any_breach_requiring_override",
     }
+
+
+def test_predecided_branch_is_enforced_by_guard_before_hard_limit(
+    mandate: Mandate, market_open: datetime
+) -> None:
+    directive = {
+        "when": "daily_loss_pct >= 1",
+        "then": "park_new_orders",
+        "reason": "pause before hard daily stop",
+    }
+    mandate = mandate.model_copy(
+        update={"predecided": [Predecision.model_validate(directive)]}
+    )
+    broker = FakeBroker()
+    broker.equity = Decimal("9900")
+    service = GuardService(mandate, broker)
+    order = OrderIntent("AAPL", Side.BUY, Decimal("1"), "limit", limit_price=Decimal("100"))
+
+    result = asyncio.run(service.check(order, now=market_open))
+
+    assert result["allowed"] is False
+    assert any(breach["rule"] == "predecided" for breach in result["breaches"])
+    state = asyncio.run(service.mandate_state(now=market_open))
+    assert state["active_predecisions"] == [directive]
 
 
 def test_retry_with_same_intent_id_is_deduplicated(
