@@ -105,3 +105,8 @@ def test_repository_example_mandate_loads() -> None:
     path = Path(__file__).parents[2] / "mandates" / "example.yaml"
     mandate = load_mandate(path)
     assert len(mandate.predecided) == 2
+
+
+def test_risk_reducing_market_close_requires_explicit_opt_in() -> None:
+    mandate = Mandate.model_validate(valid_data())
+    assert mandate.allow_risk_reducing_market_close is False

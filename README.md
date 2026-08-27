@@ -87,6 +87,10 @@ npm run typecheck
 npm run apply
 ```
 
+`MANDATE_GUARD_HOST` and `MANDATE_GUARD_PORT` control the server bind address. Set the separate
+`MANDATE_GUARD_URL` to the HTTP(S) address reachable from TrueForge; it is validated and may not contain
+embedded credentials.
+
 The registered `mandate-paper-agent` uses `zai/glm-5-3-flash`, sandbox execution, dynamic subagents,
 generative UI, context compaction and two MCP servers. Alpaca exposes only
 calendar, clock and stock-data research tools to the model; all execution flows through `mandate-guard`.
@@ -115,6 +119,6 @@ market clocks, obtained an AAPL IEX quote, and asked the guard to evaluate TSLA.
 independent reasons: TSLA was outside the mandate universe and the exchange was closed. No write tool was
 called, and the agent's Alpaca tool discovery contained no order-placement tool.
 
-The current local suite has 72 guard tests and 19 research/Skill tests. It covers concurrent submissions,
+The current local suite has 76 guard tests and 20 research/Skill tests. It covers concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.

@@ -42,24 +42,36 @@ def _bar(item: dict[str, Any]) -> PriceBar:
 
 
 def _news(item: dict[str, Any]) -> NewsEvent:
+    symbols = tuple(
+        normalized
+        for symbol in item.get("symbols", [])
+        if (normalized := str(symbol).strip().upper())
+    )
     return NewsEvent(
         source=str(item["source"]),
         external_id=str(item["external_id"]),
         published_at=_datetime(item["published_at"]),
         headline=str(item["headline"]),
         summary=str(item.get("summary", "")),
-        symbols=tuple(str(symbol).upper() for symbol in item.get("symbols", [])),
+        symbols=symbols,
         url=str(item["url"]) if item.get("url") else None,
     )
 
 
 def analyze(payload: dict[str, Any]) -> dict[str, Any]:
-    symbol = str(payload["symbol"]).upper()
+    symbol = str(payload["symbol"]).strip().upper()
+    if not symbol:
+        raise ValueError("symbol cannot be blank")
     bars = sorted((_bar(item) for item in payload["bars"]), key=lambda bar: bar.timestamp)
     if len(bars) < 22:
         raise ValueError("at least 22 chronological bars are required")
     cutoff = bars[-1].timestamp
-    events = [event for event in deduplicate(_news(item) for item in payload.get("news", [])) if event.published_at <= cutoff]
+    events = [
+        event
+        for event in (_news(item) for item in payload.get("news", []))
+        if event.published_at <= cutoff
+    ]
+    current_events = deduplicate(events)
 
     strategies = {
         "momentum": (lambda window: momentum_signal(window, lookback=5), 6),
@@ -81,7 +93,7 @@ def analyze(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "symbol": symbol,
         "as_of": cutoff.isoformat(),
-        "news_events_used": len(events),
+        "news_events_used": len(current_events),
         "signals": {
             name: {
                 "direction": signal.direction.value,

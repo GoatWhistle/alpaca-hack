@@ -7,8 +7,17 @@ import { buildAgentSpec } from "./agentSpec.js";
 
 const AGENT_NAME = "mandate-paper-agent";
 const baseUrl = process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790";
+const guardUrl = process.env.MANDATE_GUARD_URL ?? "http://127.0.0.1:8010/mcp";
 const skillRef = process.env.MANDATE_GIT_REF ?? "feat/mandate-integration";
 const enableResearchSkill = process.env.MANDATE_ENABLE_RESEARCH_SKILL === "true";
+const parsedGuardUrl = new URL(guardUrl);
+if (
+  !["http:", "https:"].includes(parsedGuardUrl.protocol) ||
+  parsedGuardUrl.username ||
+  parsedGuardUrl.password
+) {
+  throw new Error("MANDATE_GUARD_URL must be an HTTP(S) URL without embedded credentials");
+}
 const promptPath = fileURLToPath(new URL("../prompt.md", import.meta.url));
 const instructions = await readFile(promptPath, "utf8");
 const client = new TrueForge({
@@ -20,7 +29,7 @@ await client.settings.mcpServers.createOrUpdate({
   manifest: {
     type: "remote",
     name: "mandate-guard",
-    url: "http://127.0.0.1:8010/mcp",
+    url: parsedGuardUrl.toString(),
     description: "Deterministic paper-only mandate enforcement and auditable execution boundary.",
   },
 });

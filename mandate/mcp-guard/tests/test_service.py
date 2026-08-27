@@ -8,6 +8,7 @@ from mandate_guard.alpaca import AccountSnapshot, MarketClock
 from mandate_guard.checks import OrderIntent, PendingOrder, Position, Side
 from mandate_guard.mandate import Mandate, Predecision
 from mandate_guard.service import GuardService
+from mandate_guard.state import SessionJournal
 
 
 class FakeBroker:
@@ -292,6 +293,98 @@ def test_retry_with_same_intent_id_is_deduplicated(
     assert first["submitted"] is True
     assert second["deduplicated"] is True
     assert len(broker.submitted) == 1
+
+
+def test_denied_intent_cannot_execute_later_when_state_changes(
+    mandate: Mandate, market_open: datetime
+) -> None:
+    broker = FakeBroker()
+    broker.market_open = False
+    service = GuardService(mandate, broker)
+    order = OrderIntent("AAPL", Side.BUY, Decimal("1"), "limit", limit_price=Decimal("100"))
+
+    first = asyncio.run(
+        service.submit(order, rationale="market closed", intent_id="final-denial", now=market_open)
+    )
+    broker.market_open = True
+    second = asyncio.run(
+        service.submit(order, rationale="market reopened", intent_id="final-denial", now=market_open)
+    )
+
+    assert first["submitted"] is False
+    assert second["submitted"] is False
+    assert second["denied_final"] is True
+    assert second["reason"] == "this intent_id was previously denied"
+    assert broker.submitted == []
+
+
+def test_reusing_intent_id_with_changed_terms_fails_closed(
+    mandate: Mandate, market_open: datetime
+) -> None:
+    broker = FakeBroker()
+    service = GuardService(mandate, broker)
+    first_order = OrderIntent(
+        "AAPL", Side.BUY, Decimal("1"), "limit", limit_price=Decimal("100")
+    )
+    changed_order = OrderIntent(
+        "AAPL", Side.BUY, Decimal("2"), "limit", limit_price=Decimal("100")
+    )
+
+    first = asyncio.run(
+        service.submit(first_order, rationale="original", intent_id="immutable", now=market_open)
+    )
+    second = asyncio.run(
+        service.submit(changed_order, rationale="changed", intent_id="immutable", now=market_open)
+    )
+
+    assert first["submitted"] is True
+    assert second["submitted"] is False
+    assert second["intent_conflict"] is True
+    assert len(broker.submitted) == 1
+
+
+def test_prepared_intent_recovers_provenance_after_post_submit_journal_failure(
+    mandate: Mandate, market_open: datetime
+) -> None:
+    class FailOnceAfterBrokerJournal(SessionJournal):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fail_terminal_write = True
+
+        def append(self, action, outcome, rationale, details=None):
+            if outcome == "submitted" and self.fail_terminal_write:
+                self.fail_terminal_write = False
+                raise OSError("simulated crash before terminal journal write")
+            return super().append(action, outcome, rationale, details)
+
+    broker = FakeBroker()
+    journal = FailOnceAfterBrokerJournal()
+    service = GuardService(mandate, broker, journal)
+    order = OrderIntent("AAPL", Side.BUY, Decimal("1"), "limit", limit_price=Decimal("100"))
+
+    try:
+        asyncio.run(
+            service.submit(order, rationale="crash test", intent_id="recoverable", now=market_open)
+        )
+    except OSError:
+        pass
+    else:
+        raise AssertionError("terminal journal failure must propagate")
+
+    assert len(broker.submitted) == 1
+    assert [entry["outcome"] for entry in journal.snapshot()] == ["prepared"]
+
+    recovered = GuardService(mandate, broker, journal)
+    result = asyncio.run(
+        recovered.submit(order, rationale="recover", intent_id="recoverable", now=market_open)
+    )
+    cancelled = asyncio.run(
+        recovered.cancel_order("paper-order-1", rationale="cancel recovered order")
+    )
+
+    assert result["deduplicated"] is True
+    assert "submitted_reconciled" in [entry["outcome"] for entry in journal.snapshot()]
+    assert cancelled["cancelled"] is True
 
 
 def test_cancel_only_allows_orders_recorded_as_submitted_by_guard(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -52,12 +53,13 @@ class SessionJournal:
             rationale=rationale,
             details=details or {},
         )
-        self._entries.append(entry)
         if self.path is not None:
             with self.path.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(asdict(entry), default=_json_default, sort_keys=True))
                 stream.write("\n")
                 stream.flush()
+                os.fsync(stream.fileno())
+        self._entries.append(entry)
         return entry
 
     def snapshot(self) -> list[dict[str, Any]]:

@@ -7,7 +7,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Sequence
 
-from mandate_research.news import NewsEvent
+from mandate_research.news import NewsEvent, deduplicate
 
 
 ZERO = Decimal("0")
@@ -181,7 +181,9 @@ def news_price_confirmation_signal(
         raise ValueError("at least one bar is required")
     if not ZERO <= news_threshold <= ONE:
         raise ValueError("news_threshold must be between 0 and 1")
-    eligible_events = [event for event in events if event.published_at <= bars[-1].timestamp]
+    eligible_events = deduplicate(
+        event for event in events if event.published_at <= bars[-1].timestamp
+    )
     if not eligible_events:
         return _flat(bars, "no recent news")
     scores = [score_news(event, symbol=symbol) for event in eligible_events]

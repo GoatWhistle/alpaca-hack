@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
 from dataclasses import asdict
 from datetime import datetime, time, timezone
@@ -11,8 +12,8 @@ from typing import Any, Protocol
 from mandate_guard.alpaca import AccountSnapshot, MarketClock, PortfolioSnapshot
 from mandate_guard.checks import (
     NEW_YORK,
-    CheckResult,
     Breach,
+    CheckResult,
     OrderIntent,
     PendingOrder,
     Portfolio,
@@ -24,8 +25,7 @@ from mandate_guard.checks import (
 )
 from mandate_guard.mandate import Mandate, Predecision
 from mandate_guard.state import SessionJournal
-from mandate_guard.wake import evaluate_wake_conditions
-from mandate_guard.wake import parse_wake_condition
+from mandate_guard.wake import evaluate_wake_conditions, parse_wake_condition
 
 
 class PaperBroker(Protocol):
@@ -126,6 +126,34 @@ class GuardService:
             if condition.evaluate(metrics[condition.metric]):
                 active.append(directive)
         return active
+
+    @staticmethod
+    def _canonical_order(order: OrderIntent) -> dict[str, str | None]:
+        return {
+            "symbol": order.symbol,
+            "side": order.side.value,
+            "qty": format(order.qty.normalize(), "f"),
+            "order_type": order.order_type,
+            "instrument": order.instrument,
+            "limit_price": (
+                format(order.limit_price.normalize(), "f")
+                if order.limit_price is not None
+                else None
+            ),
+        }
+
+    @classmethod
+    def _order_fingerprint(cls, order: OrderIntent) -> str:
+        encoded = json.dumps(cls._canonical_order(order), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+    def _intent_records(self, intent_id: str) -> list[dict[str, Any]]:
+        return [
+            entry
+            for entry in self.journal.snapshot()
+            if entry["action"] == "submit_order"
+            and entry["details"].get("intent_id") == intent_id
+        ]
 
     async def check(self, order: OrderIntent, *, now: datetime | None = None) -> dict[str, Any]:
         result, snapshot = await self.evaluate(order, now=now)
@@ -240,13 +268,86 @@ class GuardService:
         async with self._submit_lock:
             digest = hashlib.sha256(f"{self.mandate.name}:{intent_id}".encode()).hexdigest()[:24]
             client_order_id = f"mandate-{digest}"
+            canonical_order = self._canonical_order(order)
+            order_fingerprint = self._order_fingerprint(order)
+            records = self._intent_records(intent_id)
+            binding_records = [
+                entry
+                for entry in records
+                if entry["outcome"]
+                in {"prepared", "submitted", "submitted_reconciled", "denied"}
+            ]
+            if any(entry["outcome"] == "denied" for entry in binding_records):
+                return {
+                    "submitted": False,
+                    "denied_final": True,
+                    "client_order_id": client_order_id,
+                    "reason": "this intent_id was previously denied",
+                }
+            if any(
+                entry["details"].get("order_fingerprint") != order_fingerprint
+                for entry in binding_records
+            ):
+                self.journal.append(
+                    "submit_order",
+                    "conflict",
+                    rationale,
+                    {
+                        "client_order_id": client_order_id,
+                        "intent_id": intent_id,
+                        "order": canonical_order,
+                        "order_fingerprint": order_fingerprint,
+                    },
+                )
+                return {
+                    "submitted": False,
+                    "intent_conflict": True,
+                    "client_order_id": client_order_id,
+                    "reason": "intent_id is already bound to different order terms",
+                }
             existing = await self.broker.find_order_by_client_id(client_order_id)
             if existing is not None:
+                if not binding_records:
+                    self.journal.append(
+                        "submit_order",
+                        "parked",
+                        rationale,
+                        {
+                            "client_order_id": client_order_id,
+                            "intent_id": intent_id,
+                            "reason": "broker order has no durable guard provenance",
+                        },
+                    )
+                    return {
+                        "submitted": False,
+                        "parked": True,
+                        "client_order_id": client_order_id,
+                        "reason": "existing broker order is not proven by the guard journal",
+                    }
+                if not any(
+                    entry["outcome"] in {"submitted", "submitted_reconciled"}
+                    for entry in binding_records
+                ):
+                    self.journal.append(
+                        "submit_order",
+                        "submitted_reconciled",
+                        rationale,
+                        {
+                            "client_order_id": client_order_id,
+                            "intent_id": intent_id,
+                            "order": canonical_order,
+                            "order_fingerprint": order_fingerprint,
+                        },
+                    )
                 self.journal.append(
                     "submit_order",
                     "deduplicated",
                     rationale,
-                    {"client_order_id": client_order_id, "intent_id": intent_id},
+                    {
+                        "client_order_id": client_order_id,
+                        "intent_id": intent_id,
+                        "order_fingerprint": order_fingerprint,
+                    },
                 )
                 return {
                     "submitted": True,
@@ -256,10 +357,28 @@ class GuardService:
                 }
             result, _snapshot = await self.evaluate(order, now=now)
             if not result.allowed:
-                details = {"order": asdict(order), "breaches": [asdict(item) for item in result.breaches]}
+                details = {
+                    "client_order_id": client_order_id,
+                    "intent_id": intent_id,
+                    "order": canonical_order,
+                    "order_fingerprint": order_fingerprint,
+                    "breaches": [asdict(item) for item in result.breaches],
+                }
                 self.journal.append("submit_order", "denied", rationale, details)
                 return {"submitted": False, **asdict(result)}
 
+            if not any(entry["outcome"] == "prepared" for entry in binding_records):
+                self.journal.append(
+                    "submit_order",
+                    "prepared",
+                    rationale,
+                    {
+                        "client_order_id": client_order_id,
+                        "intent_id": intent_id,
+                        "order": canonical_order,
+                        "order_fingerprint": order_fingerprint,
+                    },
+                )
             response = await self.broker.submit_order(order, client_order_id=client_order_id)
             self.journal.append(
                 "submit_order",
@@ -268,7 +387,8 @@ class GuardService:
                 {
                     "client_order_id": client_order_id,
                     "intent_id": intent_id,
-                    "order": asdict(order),
+                    "order": canonical_order,
+                    "order_fingerprint": order_fingerprint,
                 },
             )
             return {"submitted": True, "client_order_id": client_order_id, "broker": response}
@@ -330,10 +450,31 @@ class GuardService:
             client_order_id = str(order.get("client_order_id", ""))
             created_by_guard = any(
                 entry["action"] == "submit_order"
-                and entry["outcome"] == "submitted"
+                and entry["outcome"] in {"submitted", "submitted_reconciled"}
                 and entry["details"].get("client_order_id") == client_order_id
                 for entry in self.journal.snapshot()
             )
+            prepared_record = next(
+                (
+                    entry
+                    for entry in self.journal.snapshot()
+                    if entry["action"] == "submit_order"
+                    and entry["outcome"] == "prepared"
+                    and entry["details"].get("client_order_id") == client_order_id
+                ),
+                None,
+            )
+            if not created_by_guard and prepared_record is not None:
+                self.journal.append(
+                    "submit_order",
+                    "submitted_reconciled",
+                    rationale,
+                    {
+                        **prepared_record["details"],
+                        "broker_order_id": order_id,
+                    },
+                )
+                created_by_guard = True
             if not client_order_id.startswith("mandate-") or not created_by_guard:
                 details = {
                     "order_id": order_id,

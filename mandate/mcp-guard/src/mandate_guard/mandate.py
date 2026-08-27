@@ -59,7 +59,7 @@ class Mandate(BaseModel):
     limits: Limits
     wake_me_if: list[str] = Field(default_factory=list)
     predecided: list[Predecision] = Field(default_factory=list)
-    allow_risk_reducing_market_close: bool = True
+    allow_risk_reducing_market_close: bool = False
     expires: datetime
 
     @field_validator("universe")

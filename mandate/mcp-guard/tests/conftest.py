@@ -25,6 +25,7 @@ def mandate() -> Mandate:
                 "max_orders_per_day": 20,
             },
             "wake_me_if": ["daily_loss_pct > 1.2"],
+            "allow_risk_reducing_market_close": True,
             "expires": "2099-08-28T20:00:00Z",
         }
     )

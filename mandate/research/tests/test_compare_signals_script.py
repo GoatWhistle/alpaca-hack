@@ -32,7 +32,7 @@ def test_analyze_compares_all_strategies_and_filters_future_news() -> None:
     bars = _bars()
     result = MODULE.analyze(
         {
-            "symbol": "aapl",
+            "symbol": " aapl ",
             "bars": bars,
             "news": [
                 {
@@ -40,7 +40,7 @@ def test_analyze_compares_all_strategies_and_filters_future_news() -> None:
                     "external_id": "past",
                     "published_at": bars[-2]["timestamp"],
                     "headline": "Profit growth beat",
-                    "symbols": ["AAPL"],
+                    "symbols": [" AAPL ", ""],
                 },
                 {
                     "source": "rss",
@@ -62,3 +62,32 @@ def test_analyze_compares_all_strategies_and_filters_future_news() -> None:
         "news_price_confirmation",
     }
     assert set(result["backtest"]) == set(result["signals"])
+
+
+def test_analyze_keeps_last_eligible_revision_at_cutoff() -> None:
+    bars = _bars()
+    result = MODULE.analyze(
+        {
+            "symbol": "AAPL",
+            "bars": bars,
+            "news": [
+                {
+                    "source": "wire",
+                    "external_id": "same-story",
+                    "published_at": bars[-2]["timestamp"],
+                    "headline": "Profit growth",
+                    "symbols": ["AAPL"],
+                },
+                {
+                    "source": "wire",
+                    "external_id": "same-story",
+                    "published_at": "2027-01-01T00:00:00Z",
+                    "headline": "Future revision",
+                    "symbols": ["AAPL"],
+                },
+            ],
+        }
+    )
+
+    assert result["news_events_used"] == 1
+    assert result["signals"]["news_price_confirmation"]["direction"] == "buy"
