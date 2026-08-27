@@ -145,22 +145,27 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <div className="mandate-chrome">
+      <div className="mandate-chrome topbar-shell">
         <header className="topbar">
           <div className="brand">
             <span className="brand-mark"><Icon name="shield" /></span>
-            <div><strong>MANDATE</strong><small>OPERATOR CONSOLE</small></div>
+            <strong>MANDATE</strong>
           </div>
           <nav className="view-tabs" aria-label="Workspace views">
             <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>Overview</button>
             <button className={view === "agent" ? "active" : ""} onClick={() => setView("agent")}>Agent workspace</button>
           </nav>
           <div className="top-actions">
-            <span className="paper-badge">PAPER ONLY</span>
+            <span className="paper-badge">PAPER</span>
             {view === "overview" && (
               <>
-                <button className="ghost" onClick={() => setPaused((value) => !value)}>
-                  <i className={paused ? "offline" : "online"} /> {paused ? "Paused" : "Auto-refresh"}
+                <button
+                  className={`icon-button refresh-state refresh-state--${paused ? "paused" : "live"}`}
+                  aria-label={paused ? "Resume auto-refresh" : "Pause auto-refresh"}
+                  title={paused ? "Resume auto-refresh" : "Pause auto-refresh"}
+                  onClick={() => setPaused((value) => !value)}
+                >
+                  <Icon name="pulse" />
                 </button>
                 <button className="icon-button" aria-label="Refresh" onClick={() => void refresh()} disabled={refreshing}>
                   <span className={refreshing ? "spin" : ""}><Icon name="refresh" /></span>
@@ -168,7 +173,7 @@ export function App() {
               </>
             )}
             <button className="primary-button" onClick={() => setView(view === "agent" ? "overview" : "agent")}>
-              {view === "agent" ? "View overview" : "Open agent"} <Icon name={view === "agent" ? "pulse" : "external"} />
+              {view === "agent" ? "Overview" : "Agent"} <Icon name={view === "agent" ? "pulse" : "external"} />
             </button>
           </div>
         </header>
@@ -177,9 +182,7 @@ export function App() {
       {view === "overview" ? <div className="mandate-chrome operator-view"><main>
         <section className="hero-row">
           <div>
-            <div className="eyebrow"><Icon name="pulse" /> LIVE SUPERVISION</div>
             <h1>{String(rawMandate.name ?? "Waiting for mandate")}</h1>
-            <p>One screen for authority, risk, broker state, and every durable agent decision.</p>
           </div>
           <div className="market-state">
             <span className={isOpen ? "market-open" : "market-closed"}>{isOpen ? "MARKET OPEN" : "MARKET CLOSED"}</span>
