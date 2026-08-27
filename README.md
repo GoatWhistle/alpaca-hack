@@ -84,6 +84,9 @@ credentials, transport or the structured response are invalid. It has
 no trading client or write tool. This gives the
 TrueForge agent a server-side path to fixed-host news/data fetches without placing paper credentials in
 the turn sandbox; execution authority remains exclusively in `mandate-guard`.
+The default Coding Plan base and JSON response mode follow the official
+[Z.AI Quick Start](https://docs.z.ai/guides/overview/quick-start) and
+[Structured Output](https://docs.z.ai/guides/capabilities/struct-output) contracts.
 
 Two read-only live probes are available when Alpaca data credentials are exported:
 
@@ -312,3 +315,7 @@ The decision-math E2E session `01m1269wsz849mfa0hac88yqbg` subsequently called o
 sizing, chose `PARK`, made no sandbox-code call and attempted no broker write. The dashboard now exposes a
 60-minute per-strategy/news-vs-price outcome scorecard; historical records without captured directions are
 excluded rather than guessed.
+
+The adaptive-news E2E session `01m128da83tm700q7kxa15s6pw` repeated that bounded read-only path with
+structured GLM scoring, SPY risk-off context, 2 bps slippage and train-only parameter selection. It returned
+`ACTION: PARK` for AAPL/MSFT/NVDA/SPY, made no sandbox-code call and attempted no broker write.
