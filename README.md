@@ -100,12 +100,20 @@ npm install
 npm run typecheck
 npm run apply
 npm run eval:approval
+MANDATE_E2E_ALLOW=true npm run eval:paper-e2e
 ```
 
 `eval:approval` is a fail-safe live conformance probe. It creates a dedicated TrueForge session, asks
 the configured model to request `cancel_order` for a nonexistent probe ID, verifies the exact tool pauses
 at `tool.approval_required`, sends a denial, and asserts the guard journal remains byte-for-byte unchanged.
 It never sends an allow decision. Run it from `mandate/agent` while TrueForge and the guard are available.
+
+`eval:paper-e2e` is the supervised paper execution acceptance runner. Its opt-in environment flag permits
+only the exact `AAPL buy 1, limit $1` intent after it validates the persisted TrueForge tool call and every
+execution argument. During regular hours it requires and allows the first approval, verifies durable
+`prepared`/`submitted` evidence, repeats the same intent through a second approval, and requires
+`deduplicated=true` without another submission. Outside regular hours it proves the guard's session breach,
+checks that no broker write was attempted, reports `deferred: market_closed`, and exits successfully.
 
 `MANDATE_GUARD_HOST` and `MANDATE_GUARD_PORT` control the server bind address. Set the separate
 `MANDATE_GUARD_URL` to the HTTP(S) address reachable from TrueForge; it is validated and may not contain
@@ -147,6 +155,11 @@ A live approval conformance probe then requested a fake cancellation through Z.A
 harness emitted `tool.approval_required`, accepted an automated denial, completed the resumed turn and left
 the guard journal byte-for-byte unchanged. This proves the irreversible tool was stopped before reaching
 the execution boundary even while the market was closed.
+
+The supervised paper E2E runner was also executed while the exchange was closed. Z.AI called the real
+guard, the deterministic session rule stopped the order before an approval event, the runner observed no
+new submission provenance and reported `brokerWriteAttempted: false`. The same runner contains the exact
+allow, broker-evidence and retry-dedup assertions for the next regular session.
 
 The current local suite has 84 guard tests and 20 research/Skill tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
