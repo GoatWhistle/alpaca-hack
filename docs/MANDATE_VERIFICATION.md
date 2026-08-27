@@ -17,7 +17,7 @@ of a broker-side effect, and a model statement is not used as proof of a tool ca
 | Live risk metrics | Verified | `get_mandate` returns fresh usage, headroom, wake triggers and predecisions; `get_session_state` returns paper equity, P&L, exposure, positions, pending orders and journal. Live TrueForge research E2E consumed current headroom. |
 | Approved paper submission and idempotent retry during regular hours | Verified | At broker open on 27 August, session `01m11pkjzj18q6zyqd4yb39pms` proved `prepared → submitted`, a second explicit approval, `deduplicated`, one client order ID and one mandate fingerprint. Official Alpaca MCP readback matched AAPL buy 1 limit $1 and showed one order. |
 | Provenance-safe paper cleanup | Verified | Session `01m11ptfz4zemy4h63s5ge800z` paused on exact `cancel_order`, received approval, wrote `cancel_order/submitted`, and official Alpaca MCP readback changed the same broker order from `new` to `canceled`. |
-| Qodo review of implementation head | Verified | The PR #2 Qodo comment points to commit `26b5da8` and reports Bugs 0, Rule violations 0 and Skill insights 0. This matrix was added afterward and contains documentation only. |
+| Qodo review of implementation head | Verified | The PR #2 Qodo comment points to commit `49378d4` and reports Bugs 0, Rule violations 0 and Skill insights 0. |
 
 ## Repeatable commands
 
