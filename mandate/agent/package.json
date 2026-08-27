@@ -5,6 +5,7 @@
   "scripts": {
     "apply": "tsx src/createAgent.ts",
     "eval:approval": "tsx src/approvalProbe.ts",
+    "eval:research-e2e": "tsx src/researchE2E.ts",
     "eval:paper-e2e": "tsx src/paperE2E.ts",
     "typecheck": "tsc --noEmit"
   },

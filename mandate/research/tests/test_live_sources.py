@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from mandate_research.live_sources import probe_live_sources
+from mandate_research.live_sources import collect_official_news, probe_live_sources
 
 
 ALPACA = json.dumps(
@@ -51,8 +51,7 @@ def test_probe_parses_and_scopes_all_three_sources(monkeypatch: pytest.MonkeyPat
     assert set(result["sources"]) == {
         "alpaca",
         "sec_edgar_atom",
-        "company_newsroom_atom",
-        "company_ir_rss",
+        "apple_newsroom_atom",
     }
     assert all(item["status"] == "ok" for item in result["sources"].values())
     assert all(item["events"] == 1 for item in result["sources"].values())
@@ -81,7 +80,21 @@ def test_probe_isolates_one_upstream_failure(monkeypatch: pytest.MonkeyPatch) ->
     result = probe_live_sources(fetcher=partial_fetch)
     assert result["sources"]["alpaca"]["status"] == "ok"
     assert result["sources"]["sec_edgar_atom"]["status"] == "error"
-    assert result["sources"]["company_newsroom_atom"]["status"] == "ok"
-    assert result["sources"]["company_ir_rss"]["status"] == "ok"
+    assert result["sources"]["apple_newsroom_atom"]["status"] == "ok"
     with pytest.raises(RuntimeError, match="strict"):
         probe_live_sources(fetcher=partial_fetch, strict=True)
+
+
+def test_official_company_feed_is_never_rebound_to_another_issuer() -> None:
+    requested_urls: list[str] = []
+
+    def tracking_fetch(url: str, headers: dict[str, str]) -> bytes:
+        requested_urls.append(url)
+        return fake_fetch(url, headers)
+
+    events, sources = collect_official_news(symbol="NVDA", fetcher=tracking_fetch)
+
+    assert set(sources) == {"sec_edgar_atom", "nvidia_ir_rss"}
+    assert all(event.symbols == ("NVDA",) for event in events)
+    assert any("nvidia.com" in url for url in requested_urls)
+    assert not any("apple.com" in url for url in requested_urls)

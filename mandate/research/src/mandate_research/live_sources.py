@@ -30,6 +30,10 @@ ALLOWED_HOSTS = {
     "nvidianews.nvidia.com",
 }
 Fetcher = Callable[[str, dict[str, str]], bytes]
+CIK_BY_SYMBOL = {
+    "AAPL": "0000320193",
+    "NVDA": "0001045810",
+}
 
 
 def _fetch(url: str, headers: dict[str, str]) -> bytes:
@@ -65,25 +69,109 @@ def _probe_source(load: Callable[[], list[NewsEvent]]) -> dict[str, Any]:
         return {"status": "error", "error_type": type(exc).__name__}
 
 
+def _load_source(
+    load: Callable[[], list[NewsEvent]],
+) -> tuple[list[NewsEvent], dict[str, Any]]:
+    try:
+        events = load()
+        summary = _source_summary(events)
+        if summary["events"] == 0:
+            raise RuntimeError("source returned no parseable events")
+        return events, {"status": "ok", **summary}
+    except httpx.HTTPStatusError as exc:
+        return [], {"status": "upstream_http_error", "http_status": exc.response.status_code}
+    except (httpx.HTTPError, ValueError, RuntimeError) as exc:
+        return [], {"status": "error", "error_type": type(exc).__name__}
+
+
+def collect_official_news(
+    *,
+    symbol: str,
+    cik: str | None = None,
+    fetcher: Fetcher = _fetch,
+    strict: bool = False,
+) -> tuple[list[NewsEvent], dict[str, dict[str, Any]]]:
+    """Load only issuer-attributable official feeds for one symbol.
+
+    A company feed is never rebound to a different issuer. SEC is included only
+    when a ten-digit CIK is explicitly supplied or known in the fixed mapping.
+    Individual upstream failures remain isolated and visible in provenance.
+    """
+    normalized_symbol = symbol.strip().upper()
+    if not normalized_symbol:
+        raise ValueError("symbol cannot be blank")
+    resolved_cik = cik or CIK_BY_SYMBOL.get(normalized_symbol)
+    if resolved_cik is not None and (not resolved_cik.isdigit() or len(resolved_cik) != 10):
+        raise ValueError("CIK must contain exactly 10 digits")
+
+    loaders: dict[str, Callable[[], list[NewsEvent]]] = {}
+    if resolved_cik is not None:
+        sec_url = f"{SEC_ATOM_ENDPOINT}?{urlencode({'action': 'getcompany', 'CIK': resolved_cik, 'type': '8-K', 'owner': 'exclude', 'count': 40, 'output': 'atom'})}"
+        loaders["sec_edgar_atom"] = lambda: bind_symbol(
+            parse_sec_atom(
+                fetcher(
+                    sec_url,
+                    {
+                        "User-Agent": os.environ.get(
+                            "MANDATE_SEC_USER_AGENT",
+                            "MANDATE research probe github.com/GoatWhistle/harness-hack",
+                        ),
+                        "Accept": "application/atom+xml",
+                    },
+                )
+            ),
+            normalized_symbol,
+        )
+    if normalized_symbol == "AAPL":
+        loaders["apple_newsroom_atom"] = lambda: bind_symbol(
+            parse_atom(
+                fetcher(APPLE_RSS_ENDPOINT, {"User-Agent": "MANDATE research probe"}),
+                source="apple-newsroom",
+            ),
+            "AAPL",
+        )
+    elif normalized_symbol == "NVDA":
+        loaders["nvidia_ir_rss"] = lambda: bind_symbol(
+            parse_rss(
+                fetcher(NVIDIA_RSS_ENDPOINT, {"User-Agent": "MANDATE research probe"}),
+                source="nvidia-ir",
+            ),
+            "NVDA",
+        )
+
+    events: list[NewsEvent] = []
+    sources: dict[str, dict[str, Any]] = {}
+    for name, loader in loaders.items():
+        loaded, status = _load_source(loader)
+        events.extend(loaded)
+        sources[name] = status
+    if strict and any(status["status"] != "ok" for status in sources.values()):
+        raise RuntimeError("one or more live sources failed strict probing")
+    return deduplicate(events), sources
+
+
 def probe_live_sources(
     *,
     symbol: str = "AAPL",
-    cik: str = "0000320193",
+    cik: str | None = None,
     fetcher: Fetcher = _fetch,
     strict: bool = False,
 ) -> dict[str, Any]:
     normalized_symbol = symbol.strip().upper()
     if not normalized_symbol:
         raise ValueError("symbol cannot be blank")
-    if not cik.isdigit() or len(cik) != 10:
-        raise ValueError("CIK must contain exactly 10 digits")
     alpaca_key = os.environ.get("ALPACA_API_KEY", "")
     alpaca_secret = os.environ.get("ALPACA_SECRET_KEY", "")
     if not alpaca_key or not alpaca_secret:
         raise ValueError("Alpaca paper/data credentials are required")
 
     alpaca_url = f"{ALPACA_NEWS_ENDPOINT}?{urlencode({'symbols': normalized_symbol, 'limit': 20, 'sort': 'desc'})}"
-    sec_url = f"{SEC_ATOM_ENDPOINT}?{urlencode({'action': 'getcompany', 'CIK': cik, 'type': '8-K', 'owner': 'exclude', 'count': 40, 'output': 'atom'})}"
+    _official_events, official_sources = collect_official_news(
+        symbol=normalized_symbol,
+        cik=cik,
+        fetcher=fetcher,
+        strict=False,
+    )
     sources = {
         "alpaca": _probe_source(
             lambda: parse_alpaca_news(
@@ -97,41 +185,7 @@ def probe_live_sources(
                 )
             )
         ),
-        "sec_edgar_atom": _probe_source(
-            lambda: bind_symbol(
-                parse_sec_atom(
-                    fetcher(
-                        sec_url,
-                        {
-                            "User-Agent": os.environ.get(
-                                "MANDATE_SEC_USER_AGENT",
-                                "MANDATE research probe github.com/GoatWhistle/harness-hack",
-                            ),
-                            "Accept": "application/atom+xml",
-                        },
-                    )
-                ),
-                normalized_symbol,
-            )
-        ),
-        "company_newsroom_atom": _probe_source(
-            lambda: bind_symbol(
-                parse_atom(
-                    fetcher(APPLE_RSS_ENDPOINT, {"User-Agent": "MANDATE research probe"}),
-                    source="apple-newsroom",
-                ),
-                normalized_symbol,
-            )
-        ),
-        "company_ir_rss": _probe_source(
-            lambda: bind_symbol(
-                parse_rss(
-                    fetcher(NVIDIA_RSS_ENDPOINT, {"User-Agent": "MANDATE research probe"}),
-                    source="nvidia-ir",
-                ),
-                "NVDA",
-            )
-        ),
+        **official_sources,
     }
     if strict and any(summary["status"] != "ok" for summary in sources.values()):
         raise RuntimeError("one or more live sources failed strict probing")

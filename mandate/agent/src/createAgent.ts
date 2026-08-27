@@ -8,15 +8,18 @@ import { buildAgentSpec } from "./agentSpec.js";
 const AGENT_NAME = "mandate-paper-agent";
 const baseUrl = process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790";
 const guardUrl = process.env.MANDATE_GUARD_URL ?? "http://127.0.0.1:8010/mcp";
+const researchUrl = process.env.MANDATE_RESEARCH_URL ?? "http://127.0.0.1:8020/mcp";
 const skillRef = process.env.MANDATE_GIT_REF ?? "feat/mandate-integration";
 const enableResearchSkill = process.env.MANDATE_ENABLE_RESEARCH_SKILL === "true";
 const parsedGuardUrl = new URL(guardUrl);
-if (
-  !["http:", "https:"].includes(parsedGuardUrl.protocol) ||
-  parsedGuardUrl.username ||
-  parsedGuardUrl.password
-) {
-  throw new Error("MANDATE_GUARD_URL must be an HTTP(S) URL without embedded credentials");
+const parsedResearchUrl = new URL(researchUrl);
+for (const [name, url] of [
+  ["MANDATE_GUARD_URL", parsedGuardUrl],
+  ["MANDATE_RESEARCH_URL", parsedResearchUrl],
+] as const) {
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+    throw new Error(`${name} must be an HTTP(S) URL without embedded credentials`);
+  }
 }
 const promptPath = fileURLToPath(new URL("../prompt.md", import.meta.url));
 const instructions = await readFile(promptPath, "utf8");
@@ -35,6 +38,15 @@ await client.settings.mcpServers.createOrUpdate({
 });
 
 if (enableResearchSkill) {
+  await client.settings.mcpServers.createOrUpdate({
+    manifest: {
+      type: "remote",
+      name: "mandate-research",
+      url: parsedResearchUrl.toString(),
+      description:
+        "Read-only multi-source news parsing and explainable live signal comparison.",
+    },
+  });
   await client.settings.skills.createOrUpdate({
     manifest: {
       type: "git",

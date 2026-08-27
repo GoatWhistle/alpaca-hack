@@ -51,12 +51,14 @@ News is normalized as untrusted data before it reaches any strategy:
 
 - Alpaca News JSON;
 - SEC EDGAR Atom feeds;
-- generic company investor-relations RSS feeds.
+- Apple Newsroom Atom and NVIDIA investor-relations RSS feeds with fixed issuer mappings.
 
 The parsers cap input size, require timezone-aware timestamps, remove markup, normalize symbols and
 deduplicate revisions. Text such as “ignore previous instructions” remains inert data; it is never used as
 an agent instruction. Company-specific feeds receive an explicit symbol binding before scoring, and the
-news strategy uses only revisions available at each historical cutoff within a bounded 24-hour window.
+news strategy uses only revisions available at each historical cutoff within a bounded 24-hour window. An
+issuer feed is never rebound to another ticker: AAPL can use Apple Newsroom and NVDA can use NVIDIA IR,
+while other symbols receive neither feed unless an attributable source is added explicitly.
 
 The unprivileged `mandate-research` package is also a loadable TrueForge Skill. It contains the common
 evaluation harness and compares four
@@ -70,6 +72,11 @@ explainable approaches:
 Signals receive only the history available at their decision timestamp. The harness reports return,
 maximum drawdown, turnover and position changes, with configurable transaction costs. This is an
 engineering comparison, not a profitability claim.
+
+The same package exposes a separate read-only MCP boundary with exactly two tools:
+`probe_news_sources` and `compare_live_signals`. It has no trading client or write tool. This gives the
+TrueForge agent a server-side path to fixed-host news/data fetches without placing paper credentials in
+the turn sandbox; execution authority remains exclusively in `mandate-guard`.
 
 Two read-only live probes are available when Alpaca data credentials are exported:
 
@@ -106,14 +113,20 @@ mandate-guard
 ```
 
 For TrueForge, run the official Alpaca MCP in paper mode on port 8000 and the guard in
-`streamable-http` mode on port 8010. Then register or update the agent:
+`streamable-http` mode on port 8010. Install the research package and run its read-only MCP on port 8020,
+then register or update the agent:
 
 ```bash
+cd mandate/research
+python -m pip install -e .
+MANDATE_RESEARCH_TRANSPORT=streamable-http mandate-research-mcp
+
 cd mandate/agent
 npm install
 npm run typecheck
-npm run apply
+MANDATE_ENABLE_RESEARCH_SKILL=true npm run apply
 npm run eval:approval
+npm run eval:research-e2e
 MANDATE_E2E_ALLOW=true npm run eval:paper-e2e
 ```
 
@@ -129,12 +142,17 @@ execution argument. During regular hours it requires and allows the first approv
 `deduplicated=true` without another submission. Outside regular hours it proves the guard's session breach,
 checks that no broker write was attempted, reports `deferred: market_closed`, and exits successfully.
 
+`eval:research-e2e` is intentionally read-only. It requires TrueForge/Z.AI to obtain multi-source news
+health, all four point-in-time strategy comparisons and current mandate headroom. The verifier reconciles
+streaming events with persisted session events, unwraps Code Mode `call_tool` bridge calls, rejects any
+nested or direct execution tool, and requires a bounded `ACTION: PARK` or `ACTION: PROPOSE` conclusion.
+
 `MANDATE_GUARD_HOST` and `MANDATE_GUARD_PORT` control the server bind address. Set the separate
 `MANDATE_GUARD_URL` to the HTTP(S) address reachable from TrueForge; it is validated and may not contain
-embedded credentials.
+embedded credentials. `MANDATE_RESEARCH_URL` independently configures the read-only research endpoint.
 
 The registered `mandate-paper-agent` uses `zai/glm-5-3-flash`, sandbox execution, dynamic subagents,
-generative UI, context compaction and two MCP servers. Alpaca exposes only
+generative UI, context compaction and three MCP servers. Alpaca exposes only
 calendar, clock and stock-data research tools to the model; all execution flows through `mandate-guard`.
 The `mandate-research` Git Skill is enabled with `MANDATE_ENABLE_RESEARCH_SKILL=true`; TrueForge's secure
 downloader intentionally supports public Git repositories without ambient credentials, so keep it disabled
@@ -175,7 +193,7 @@ guard, the deterministic session rule stopped the order before an approval event
 new submission provenance and reported `brokerWriteAttempted: false`. The same runner contains the exact
 allow, broker-evidence and retry-dedup assertions for the next regular session.
 
-The current local suite has 84 guard tests and 29 research/Skill tests. It covers hot-reloaded human
+The current local suite has 84 guard tests and 32 research/Skill/MCP tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.
@@ -187,3 +205,8 @@ successful parse. A live AAPL comparison then consumed 269 paginated IEX hourly 
 items. With a 24-hour news window and 1 bp transaction cost, momentum returned 6.62% with 5.06% maximum
 drawdown while news-plus-price confirmation returned 1.37% with 0.95% maximum drawdown; mean reversion and
 breakout-with-volume were negative. These are engineering observations over this sample, not forecasts.
+
+A subsequent live read-only decision E2E ran through TrueForge, Z.AI, `mandate-research` and
+`mandate-guard`. Persisted events proved two healthy attributable news sources, all four strategy outputs,
+current paper-account mandate headroom and no write call. With a flat news-confirmed signal and the market
+closed, the agent returned `ACTION: PARK`; the verifier reported `brokerWriteAttempted: false`.

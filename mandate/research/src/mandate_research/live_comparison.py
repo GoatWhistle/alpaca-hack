@@ -8,8 +8,13 @@ from urllib.parse import urlencode
 import httpx
 
 from mandate_research.comparison import analyze
-from mandate_research.live_sources import ALPACA_NEWS_ENDPOINT
-from mandate_research.news import MAX_FEED_BYTES, parse_alpaca_news
+from mandate_research.live_sources import (
+    ALPACA_NEWS_ENDPOINT,
+    Fetcher,
+    _fetch,
+    collect_official_news,
+)
+from mandate_research.news import MAX_FEED_BYTES, deduplicate, parse_alpaca_news
 
 
 ALPACA_BARS_ENDPOINT = "https://data.alpaca.markets/v2/stocks/{symbol}/bars"
@@ -55,6 +60,7 @@ def compare_live_signals(
     symbol: str = "AAPL",
     now: datetime | None = None,
     fetcher: JsonFetcher = _fetch_json,
+    source_fetcher: Fetcher = _fetch,
     fee_bps: str = "1",
 ) -> dict[str, Any]:
     normalized = symbol.strip().upper()
@@ -86,7 +92,13 @@ def compare_live_signals(
     )
     news_url = f"{ALPACA_NEWS_ENDPOINT}?{urlencode({'symbols': normalized, 'limit': 50, 'sort': 'desc'})}"
     raw_bars = _paginated_bars(bars_url, headers, fetcher)
-    events = parse_alpaca_news(fetcher(news_url, headers))
+    alpaca_events = parse_alpaca_news(fetcher(news_url, headers))
+    official_events, official_sources = collect_official_news(
+        symbol=normalized,
+        fetcher=source_fetcher,
+        strict=False,
+    )
+    events = deduplicate([*alpaca_events, *official_events])
     payload = {
         "symbol": normalized,
         "fee_bps": fee_bps,
@@ -121,6 +133,10 @@ def compare_live_signals(
             "source": "alpaca-iex",
             "bars": len(raw_bars),
             "news": len(events),
+            "news_sources": {
+                "alpaca": {"status": "ok", "events": len(alpaca_events)},
+                **official_sources,
+            },
             "requested_at": checked_at.isoformat(),
         },
         **result,
