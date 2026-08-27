@@ -5,6 +5,7 @@
   "scripts": {
     "apply": "tsx src/createAgent.ts",
     "eval:approval": "tsx src/approvalProbe.ts",
+    "eval:cancel-e2e": "tsx src/cancelE2E.ts",
     "eval:research-e2e": "tsx src/researchE2E.ts",
     "eval:sandbox": "tsx src/sandboxProbe.ts",
     "eval:subagents": "tsx src/subagentE2E.ts",

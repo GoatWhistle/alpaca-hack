@@ -15,7 +15,8 @@ of a broker-side effect, and a model statement is not used as proof of a tool ca
 | Human approval denial boundary | Verified | `npm run eval:approval` observed `tool.approval_required`, sent deny and proved the guard journal was unchanged. |
 | Durable audit journal and restart recovery | Verified | JSONL writes are flushed and fsynced; restoration and malformed-journal failure are tested. A live restart recovered a parked action. |
 | Live risk metrics | Verified | `get_mandate` returns fresh usage, headroom, wake triggers and predecisions; `get_session_state` returns paper equity, P&L, exposure, positions, pending orders and journal. Live TrueForge research E2E consumed current headroom. |
-| Approved paper submission and idempotent retry during regular hours | **Pending** | Closed-market E2E proved fail-closed with no broker write. The supervised runner is waiting for the Alpaca regular session and must still prove `prepared → submitted`, a second explicit approval, `deduplicated`, one client order ID and one mandate fingerprint. |
+| Approved paper submission and idempotent retry during regular hours | Verified | At broker open on 27 August, session `01m11pkjzj18q6zyqd4yb39pms` proved `prepared → submitted`, a second explicit approval, `deduplicated`, one client order ID and one mandate fingerprint. Official Alpaca MCP readback matched AAPL buy 1 limit $1 and showed one order. |
+| Provenance-safe paper cleanup | Verified | Session `01m11ptfz4zemy4h63s5ge800z` paused on exact `cancel_order`, received approval, wrote `cancel_order/submitted`, and official Alpaca MCP readback changed the same broker order from `new` to `canceled`. |
 | Qodo review of implementation head | Verified | The PR #2 Qodo comment points to commit `26b5da8` and reports Bugs 0, Rule violations 0 and Skill insights 0. This matrix was added afterward and contains documentation only. |
 
 ## Repeatable commands
@@ -31,5 +32,6 @@ cd mandate/agent && npm run eval:research-e2e
 cd mandate/agent && MANDATE_E2E_ALLOW=true npm run eval:paper-e2e
 ```
 
-The final command is intentionally not considered successful open-market evidence when it reports
-`deferred: market_closed`.
+The paper command is intentionally not considered successful open-market evidence when it reports
+`deferred: market_closed`. The captured open-market evidence is stored in
+`docs/evidence/paper-e2e-2026-08-27.json`; it contains no credentials.

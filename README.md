@@ -197,7 +197,19 @@ the execution boundary even while the market was closed.
 The supervised paper E2E runner was also executed while the exchange was closed. Z.AI called the real
 guard, the deterministic session rule stopped the order before an approval event, the runner observed no
 new submission provenance and reported `brokerWriteAttempted: false`. The same runner contains the exact
-allow, broker-evidence and retry-dedup assertions for the next regular session.
+allow, broker-evidence and retry-dedup assertions used by the subsequent regular-session run.
+
+At the 27 August regular-session open, that supervised runner completed through the real paper endpoint.
+The first persisted approval produced one AAPL buy-1 limit-$1 order and durable `prepared → submitted`
+events. An unchanged retry paused for a second approval and produced only `deduplicated`, with the same
+client-order ID and mandate fingerprint. Official Alpaca MCP readback independently matched every order
+term and showed status `new`. A separate exact-ID cleanup then paused at `cancel_order`, was approved,
+wrote `cancel_order/submitted`, and official readback showed the same order as `canceled`. The sanitized
+artifact is [`docs/evidence/paper-e2e-2026-08-27.json`](docs/evidence/paper-e2e-2026-08-27.json).
+
+`eval:cancel-e2e` is a cleanup verifier for an exact broker order ID and mandate client-order ID. It
+requires durable submitted provenance before requesting cancellation, validates the persisted TrueForge
+call before approval, and can re-audit an existing session without replaying the cancel action.
 
 The current local suite has 84 guard tests and 32 research/Skill/MCP tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
