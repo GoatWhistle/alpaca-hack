@@ -92,7 +92,13 @@ cd mandate/agent
 npm install
 npm run typecheck
 npm run apply
+npm run eval:approval
 ```
+
+`eval:approval` is a fail-safe live conformance probe. It creates a dedicated TrueForge session, asks
+the configured model to request `cancel_order` for a nonexistent probe ID, verifies the exact tool pauses
+at `tool.approval_required`, sends a denial, and asserts the guard journal remains byte-for-byte unchanged.
+It never sends an allow decision. Run it from `mandate/agent` while TrueForge and the guard are available.
 
 `MANDATE_GUARD_HOST` and `MANDATE_GUARD_PORT` control the server bind address. Set the separate
 `MANDATE_GUARD_URL` to the HTTP(S) address reachable from TrueForge; it is validated and may not contain
@@ -129,6 +135,11 @@ called, and the agent's Alpaca tool discovery contained no order-placement tool.
 A separate restart test parked a hypothetical out-of-mandate action, stopped the guard process, created a
 fresh guard process and a new TrueForge session, then recovered the exact rationale and intended action from
 the fsynced JSONL journal. No broker write tool was involved.
+
+A live approval conformance probe then requested a fake cancellation through Z.AI and TrueForge. The
+harness emitted `tool.approval_required`, accepted an automated denial, completed the resumed turn and left
+the guard journal byte-for-byte unchanged. This proves the irreversible tool was stopped before reaching
+the execution boundary even while the market was closed.
 
 The current local suite has 79 guard tests and 20 research/Skill tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,

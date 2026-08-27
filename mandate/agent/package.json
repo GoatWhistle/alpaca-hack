@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "apply": "tsx src/createAgent.ts",
+    "eval:approval": "tsx src/approvalProbe.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
