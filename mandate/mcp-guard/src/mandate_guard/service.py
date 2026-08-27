@@ -7,6 +7,7 @@ import re
 from dataclasses import asdict
 from datetime import datetime, time, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Protocol
 
 from mandate_guard.alpaca import AccountSnapshot, MarketClock, PortfolioSnapshot
@@ -23,7 +24,7 @@ from mandate_guard.checks import (
     check_order,
     check_session_window,
 )
-from mandate_guard.mandate import Mandate, Predecision
+from mandate_guard.mandate import Mandate, Predecision, load_mandate
 from mandate_guard.state import SessionJournal
 from mandate_guard.wake import evaluate_wake_conditions, parse_wake_condition
 
@@ -43,11 +44,24 @@ class PaperBroker(Protocol):
 
 
 class GuardService:
-    def __init__(self, mandate: Mandate, broker: PaperBroker, journal: SessionJournal | None = None) -> None:
+    def __init__(
+        self,
+        mandate: Mandate,
+        broker: PaperBroker,
+        journal: SessionJournal | None = None,
+        mandate_path: str | Path | None = None,
+    ) -> None:
         self.mandate = mandate
         self.broker = broker
         self.journal = journal or SessionJournal()
+        self.mandate_path = Path(mandate_path) if mandate_path is not None else None
         self._submit_lock = asyncio.Lock()
+
+    def _current_mandate(self) -> Mandate:
+        # The human edits this server-side file; the agent has no reload or write tool.
+        # Reloading on every policy operation avoids stale authority. Invalid or partial
+        # content raises before any irreversible action and therefore fails closed.
+        return load_mandate(self.mandate_path) if self.mandate_path is not None else self.mandate
 
     async def _snapshot(self, now: datetime) -> PortfolioSnapshot:
         market_date = now.astimezone(NEW_YORK).date()
@@ -62,7 +76,21 @@ class GuardService:
             raise RuntimeError("Alpaca paper account is not active")
         return PortfolioSnapshot(account, positions, orders_today, pending_orders)
 
-    async def evaluate(self, order: OrderIntent, *, now: datetime | None = None) -> tuple[CheckResult, PortfolioSnapshot]:
+    async def evaluate(
+        self,
+        order: OrderIntent,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[CheckResult, PortfolioSnapshot]:
+        return await self._evaluate_with_mandate(order, self._current_mandate(), now=now)
+
+    async def _evaluate_with_mandate(
+        self,
+        order: OrderIntent,
+        mandate: Mandate,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[CheckResult, PortfolioSnapshot]:
         checked_at = now or datetime.now(timezone.utc)
         snapshot, latest_price, market_clock = await asyncio.gather(
             self._snapshot(checked_at),
@@ -81,7 +109,7 @@ class GuardService:
             orders_today=snapshot.orders_today,
         )
         result = check_order(
-            self.mandate,
+            mandate,
             portfolio,
             order,
             reference_price,
@@ -96,7 +124,7 @@ class GuardService:
                 projected=directive.then,
                 headroom=directive.reason,
             )
-            for directive in self._active_predecisions(metrics)
+            for directive in self._active_predecisions(mandate, metrics)
         )
         if predecided_breaches:
             result = CheckResult(
@@ -119,9 +147,12 @@ class GuardService:
             ),
         }
 
-    def _active_predecisions(self, metrics: dict[str, Decimal]) -> list[Predecision]:
+    @staticmethod
+    def _active_predecisions(
+        mandate: Mandate, metrics: dict[str, Decimal]
+    ) -> list[Predecision]:
         active: list[Predecision] = []
-        for directive in self.mandate.predecided:
+        for directive in mandate.predecided:
             condition = parse_wake_condition(directive.when)
             if condition.evaluate(metrics[condition.metric]):
                 active.append(directive)
@@ -206,6 +237,7 @@ class GuardService:
 
     async def mandate_state(self, *, now: datetime | None = None) -> dict[str, Any]:
         checked_at = now or datetime.now(timezone.utc)
+        active_mandate = self._current_mandate()
         snapshot, market_clock = await asyncio.gather(
             self._snapshot(checked_at), self.broker.get_market_clock()
         )
@@ -219,7 +251,7 @@ class GuardService:
             orders_today=snapshot.orders_today,
         )
         usage = calculate_risk_usage(portfolio)
-        limits = self.mandate.limits
+        limits = active_mandate.limits
         wake_metrics = {
             **metrics,
             "any_breach_requiring_override": Decimal(
@@ -227,7 +259,7 @@ class GuardService:
             ),
         }
         return {
-            "mandate": self.mandate.model_dump(mode="json"),
+            "mandate": active_mandate.model_dump(mode="json"),
             "as_of": checked_at.isoformat(),
             "market_is_open": market_clock.is_open,
             "usage": {
@@ -244,10 +276,10 @@ class GuardService:
                 "max_daily_loss_pct": str(limits.max_daily_loss_pct - daily_loss_pct),
                 "max_orders_per_day": limits.max_orders_per_day - snapshot.orders_today,
             },
-            "wake_triggers": evaluate_wake_conditions(self.mandate.wake_me_if, wake_metrics),
+            "wake_triggers": evaluate_wake_conditions(active_mandate.wake_me_if, wake_metrics),
             "active_predecisions": [
                 directive.model_dump(mode="json")
-                for directive in self._active_predecisions(metrics)
+                for directive in self._active_predecisions(active_mandate, metrics)
             ],
         }
 
@@ -266,7 +298,8 @@ class GuardService:
         # This intentionally does not accept a prior CheckResult. The broker state is
         # fetched again immediately before every irreversible action.
         async with self._submit_lock:
-            digest = hashlib.sha256(f"{self.mandate.name}:{intent_id}".encode()).hexdigest()[:24]
+            active_mandate = self._current_mandate()
+            digest = hashlib.sha256(f"{active_mandate.name}:{intent_id}".encode()).hexdigest()[:24]
             client_order_id = f"mandate-{digest}"
             canonical_order = self._canonical_order(order)
             order_fingerprint = self._order_fingerprint(order)
@@ -355,7 +388,9 @@ class GuardService:
                     "client_order_id": client_order_id,
                     "broker": existing,
                 }
-            result, _snapshot = await self.evaluate(order, now=now)
+            result, _snapshot = await self._evaluate_with_mandate(
+                order, active_mandate, now=now
+            )
             if not result.allowed:
                 details = {
                     "client_order_id": client_order_id,
@@ -399,11 +434,12 @@ class GuardService:
         if not rationale.strip() or qty <= 0:
             raise ValueError("positive qty and rationale are required")
         async with self._submit_lock:
+            active_mandate = self._current_mandate()
             positions = await self.broker.get_positions()
             position = positions.get(symbol.upper())
             if position is None or qty > abs(position.qty):
                 raise ValueError("close quantity exceeds the current position")
-            if not self.mandate.allow_risk_reducing_market_close:
+            if not active_mandate.allow_risk_reducing_market_close:
                 self.journal.append("close_position", "denied", rationale, {"rule": "risk_close"})
                 return {
                     "submitted": False,
@@ -422,9 +458,9 @@ class GuardService:
                 breach
                 for breach in (
                     check_session_window(
-                        self.mandate, checked_at, market_is_open=market_clock.is_open
+                        active_mandate, checked_at, market_is_open=market_clock.is_open
                     ),
-                    check_expiry(self.mandate, checked_at),
+                    check_expiry(active_mandate, checked_at),
                 )
                 if breach is not None
             )

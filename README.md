@@ -28,6 +28,11 @@ Human predecisions are executable YAML, not model guidance. A directive such as
 The initial grammar deliberately supports only metrics the guard can observe itself and one fail-closed
 action; unknown metrics or actions prevent the mandate from loading.
 
+The human-owned YAML is reloaded and strictly validated at the start of every policy operation. This lets
+an operator tighten or revoke authority without restarting the guard. A missing, malformed or partially
+written file fails closed before broker state is fetched or an order can be submitted; use an atomic file
+replacement when editing it in production. The agent has no tool for writing or reloading this file.
+
 The server refuses live, HTTP, look-alike, credential-bearing, port-bearing, and path-bearing base URLs.
 Secrets are read from environment variables and must never be committed.
 
@@ -99,7 +104,7 @@ downloader intentionally supports public Git repositories without ambient creden
 while this repository is private.
 
 The example mandate is [`mandate/mandates/example.yaml`](mandate/mandates/example.yaml). An expired or
-invalid mandate prevents startup.
+invalid mandate prevents startup and blocks subsequent policy operations if introduced while running.
 
 ## Qodo Code Review Evidence
 
@@ -123,6 +128,7 @@ A separate restart test parked a hypothetical out-of-mandate action, stopped the
 fresh guard process and a new TrueForge session, then recovered the exact rationale and intended action from
 the fsynced JSONL journal. No broker write tool was involved.
 
-The current local suite has 76 guard tests and 20 research/Skill tests. It covers concurrent submissions,
+The current local suite has 78 guard tests and 20 research/Skill tests. It covers hot-reloaded human
+authority, fail-closed malformed edits, concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.

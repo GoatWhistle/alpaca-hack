@@ -3,6 +3,10 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
+
+import pytest
+import yaml
 
 from mandate_guard.alpaca import AccountSnapshot, MarketClock
 from mandate_guard.checks import OrderIntent, PendingOrder, Position, Side
@@ -70,6 +74,47 @@ class FakeBroker:
     async def close_position(self, symbol: str, qty: Decimal):
         self.closed.append((symbol, qty))
         return {"id": "close-1"}
+
+
+def _write_mandate(path: Path, mandate: Mandate) -> None:
+    path.write_text(
+        yaml.safe_dump(mandate.model_dump(mode="json"), sort_keys=False),
+        encoding="utf-8",
+    )
+
+
+def test_check_hot_reloads_human_mandate_without_restart(
+    mandate: Mandate, market_open: datetime, tmp_path: Path
+) -> None:
+    mandate_path = tmp_path / "mandate.yaml"
+    _write_mandate(mandate_path, mandate)
+    service = GuardService(mandate, FakeBroker(), mandate_path=mandate_path)
+    aapl = OrderIntent("AAPL", Side.BUY, Decimal("1"), "limit", limit_price=Decimal("100"))
+
+    assert asyncio.run(service.check(aapl, now=market_open))["allowed"] is True
+
+    _write_mandate(mandate_path, mandate.model_copy(update={"universe": ["MSFT"]}))
+    reloaded = asyncio.run(service.check(aapl, now=market_open))
+
+    assert reloaded["allowed"] is False
+    assert any(breach["rule"] == "universe" for breach in reloaded["breaches"])
+
+
+def test_invalid_hot_reloaded_mandate_fails_closed_before_broker_access(
+    mandate: Mandate, market_open: datetime, tmp_path: Path
+) -> None:
+    mandate_path = tmp_path / "mandate.yaml"
+    _write_mandate(mandate_path, mandate)
+    broker = FakeBroker()
+    service = GuardService(mandate, broker, mandate_path=mandate_path)
+    order = OrderIntent("AAPL", Side.BUY, Decimal("1"), "limit", limit_price=Decimal("100"))
+    mandate_path.write_text("limits: [partially-written", encoding="utf-8")
+
+    with pytest.raises((ValueError, yaml.YAMLError)):
+        asyncio.run(service.check(order, now=market_open))
+
+    assert broker.last_since is None
+    assert broker.submitted == []
 
 
 def test_submit_rechecks_fresh_state_after_dry_run(mandate: Mandate, market_open: datetime) -> None:

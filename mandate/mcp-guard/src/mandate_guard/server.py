@@ -37,7 +37,12 @@ def _build_service() -> GuardService:
         base_url=os.environ.get("ALPACA_BASE_URL", ""),
     )
     journal_path = os.environ.get("MANDATE_JOURNAL_PATH", "./logs/session.jsonl")
-    return GuardService(mandate, broker, SessionJournal(journal_path))
+    return GuardService(
+        mandate,
+        broker,
+        SessionJournal(journal_path),
+        mandate_path=mandate_path,
+    )
 
 
 def create_server(
