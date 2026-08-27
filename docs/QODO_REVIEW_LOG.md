@@ -8,7 +8,7 @@ Qodo Code Review установлен на `GoatWhistle/harness-hack` до по�
 |---|---|---|---|---|
 | [#1](https://github.com/GoatWhistle/harness-hack/pull/1) | M1 — mandate guard | Research и execution guard находились в одном привилегированном пакете | Принято: news, signals и backtest вынесены в отдельный пакет `mandate-research` | Нет |
 | [#1](https://github.com/GoatWhistle/harness-hack/pull/1) | M1 — deep review | 9 bugs, включая 3 High: pending exposure, конкурентные submit, обход мандата через close | Исправлены все 9; добавлены broker-clock, NY cutoff, пагинация, reservation model, lock и регрессионные тесты | Нет |
-| [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M2 — TrueForge integration, deep review | 7 bugs: финальность отказа, crash provenance, конфликт intent ID, opt-in close, point-in-time revisions, нормализация символов, configurable guard URL | Все 7 исправлены с регрессионными тестами; повторный review запрошен | Нет |
+| [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M2 — TrueForge integration, deep review | 7 bugs: финальность отказа, crash provenance, конфликт intent ID, opt-in close, point-in-time revisions, нормализация символов, configurable guard URL | Все 7 исправлены с регрессионными тестами; повторный Qodo review: **Bugs 0, Rule violations 0** | Нет |
 
 Подробности исправлений deep review PR #1:
 
