@@ -12,4 +12,5 @@ wake_me_if:
   - daily_loss_pct > 1.2
   - single_symbol_move_pct > 5
   - any_breach_requiring_override > 0
-expires: 2026-08-28T20:00:00Z
+allow_risk_reducing_market_close: true
+expires: 2099-08-28T20:00:00Z

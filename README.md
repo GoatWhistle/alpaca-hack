@@ -14,9 +14,14 @@ The agent never receives a raw order-placement tool. Its only execution path is 
 1. Load and strictly validate the current mandate.
 2. Fetch a fresh paper-account snapshot and latest IEX trade.
 3. Calculate projected position and gross exposure with `Decimal` arithmetic.
-4. Reject every violated rule, or surface an explicitly annotated destructive tool for human approval.
+4. Reject every violated rule; violations cannot be overridden by the model or an approval click.
 5. Fetch state and run the checks again immediately before submission.
 6. Submit only to the exact host `https://paper-api.alpaca.markets` and append an audit event.
+
+TrueForge requires human approval only for the three irreversible guard tools: submit, cancel and close.
+Approval does not bypass the mandate. Direct Alpaca execution tools are excluded with an explicit
+research-tool allowlist. Stable intent IDs make submission retries idempotent, and cancellation is allowed
+only when the order's client ID is backed by a submitted event in the persistent guard journal.
 
 The server refuses live, HTTP, look-alike, credential-bearing, port-bearing, and path-bearing base URLs.
 Secrets are read from environment variables and must never be committed.
@@ -33,7 +38,8 @@ The parsers cap input size, require timezone-aware timestamps, remove markup, no
 deduplicate revisions. Text such as “ignore previous instructions” remains inert data; it is never used as
 an agent instruction.
 
-The unprivileged `mandate-research` package contains the common evaluation harness and compares four
+The unprivileged `mandate-research` package is also a loadable TrueForge Skill. It contains the common
+evaluation harness and compares four
 explainable approaches:
 
 - price momentum;
@@ -57,13 +63,28 @@ python -m pip install -e '.[test]'
 python -m pytest
 ```
 
-To run the MCP server, copy `mandate/.env.example` to an ignored `.env`, add **paper-account** credentials,
-export the values in your shell, then run:
+To run the guard, copy `mandate/.env.example` to an ignored `.env`, add **paper-account** credentials,
+export the values in your shell, install the package, then run:
 
 ```bash
 cd mandate
+python -m pip install -e mcp-guard
 mandate-guard
 ```
+
+For TrueForge, run the official Alpaca MCP in paper mode on port 8000 and the guard in
+`streamable-http` mode on port 8010. Then register or update the agent:
+
+```bash
+cd mandate/agent
+npm install
+npm run typecheck
+npm run apply
+```
+
+The registered `mandate-paper-agent` uses `zai/glm-5-3-flash`, sandbox execution, dynamic subagents,
+generative UI, context compaction, the `mandate-research` Skill and two MCP servers. Alpaca exposes only
+calendar, clock and stock-data research tools to the model; all execution flows through `mandate-guard`.
 
 The example mandate is [`mandate/mandates/example.yaml`](mandate/mandates/example.yaml). An expired or
 invalid mandate prevents startup.
@@ -78,9 +99,14 @@ The running evidence table and project-specific review rules live in
 [`docs/QODO_REVIEW_LOG.md`](docs/QODO_REVIEW_LOG.md). PRs use the repository template to require test,
 paper-endpoint and secret checks.
 
-## Current status
+## Verified integration
 
-M1 is in progress: the privileged `mandate-guard` package contains only mandate enforcement, the paper
-broker client and MCP boundary. Normalized news input, explainable signals and evaluation live in the
-separate unprivileged `mandate-research` package. Both are covered by tests. TrueForge agent configuration
-and the end-to-end approval flow are the next milestone.
+On 27 August 2026 an end-to-end read-only run completed through TrueForge, Z.AI, both MCP servers and the
+real Alpaca paper API. The agent read a live `$100,000` paper account, cross-checked the Alpaca and guard
+market clocks, obtained an AAPL IEX quote, and asked the guard to evaluate TSLA. The guard denied it for two
+independent reasons: TSLA was outside the mandate universe and the exchange was closed. No write tool was
+called, and the agent's Alpaca tool discovery contained no order-placement tool.
+
+The current local suite has 68 guard tests and 19 research/Skill tests. It covers concurrent submissions,
+pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
+live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.

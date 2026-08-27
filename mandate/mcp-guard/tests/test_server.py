@@ -21,7 +21,7 @@ def test_server_exposes_expected_tools_with_explicit_annotations(mandate) -> Non
     }
     assert tools["check_order"].annotations.readOnlyHint is True
     assert tools["submit_order_under_mandate"].annotations.destructiveHint is True
-    assert tools["submit_order_under_mandate"].annotations.idempotentHint is False
+    assert tools["submit_order_under_mandate"].annotations.idempotentHint is True
     assert tools["cancel_order"].annotations.destructiveHint is True
     assert tools["close_position"].annotations.destructiveHint is True
     assert tools["park"].annotations.destructiveHint is False

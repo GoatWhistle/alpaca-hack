@@ -20,9 +20,13 @@ class FakeBroker:
         self.market_open = True
         self.last_since: datetime | None = None
         self.closed = []
+        self.cancelled: list[str] = []
+        self.external_orders: dict[str, dict[str, str]] = {}
+        self.equity = Decimal("10000")
+        self.last_equity = Decimal("10000")
 
     async def get_account(self) -> AccountSnapshot:
-        return AccountSnapshot(Decimal("10000"), Decimal("10000"), "ACTIVE")
+        return AccountSnapshot(self.equity, self.last_equity, "ACTIVE")
 
     async def get_positions(self) -> dict[str, Position]:
         return dict(self.positions)
@@ -45,8 +49,22 @@ class FakeBroker:
         self.orders_today += 1
         return {"id": "paper-order-1", "status": "accepted"}
 
-    async def cancel_order(self, order_id: str) -> None:
+    async def find_order_by_client_id(self, client_order_id: str):
+        for _order, submitted_id in self.submitted:
+            if submitted_id == client_order_id:
+                return {"id": "paper-order-1", "client_order_id": submitted_id}
         return None
+
+    async def get_order_by_id(self, order_id: str):
+        if order_id in self.external_orders:
+            return self.external_orders[order_id]
+        for _order, client_order_id in self.submitted:
+            if order_id == "paper-order-1":
+                return {"id": order_id, "client_order_id": client_order_id}
+        raise ValueError("unknown order")
+
+    async def cancel_order(self, order_id: str) -> None:
+        self.cancelled.append(order_id)
 
     async def close_position(self, symbol: str, qty: Decimal):
         self.closed.append((symbol, qty))
@@ -62,10 +80,31 @@ def test_submit_rechecks_fresh_state_after_dry_run(mandate: Mandate, market_open
     assert dry_run["allowed"] is True
 
     broker.positions["AAPL"] = Position(Decimal("1"), Decimal("100"))
-    submitted = asyncio.run(service.submit(order, rationale="breakout", now=market_open))
+    submitted = asyncio.run(
+        service.submit(order, rationale="breakout", intent_id="dry-run-race", now=market_open)
+    )
     assert submitted["submitted"] is False
     assert broker.submitted == []
     assert service.journal.snapshot()[0]["outcome"] == "denied"
+
+
+def test_check_returns_guard_computed_portfolio_after(
+    mandate: Mandate, market_open: datetime
+) -> None:
+    broker = FakeBroker()
+    broker.positions["AAPL"] = Position(Decimal("2"), Decimal("100"))
+    service = GuardService(mandate, broker)
+    order = OrderIntent("AAPL", Side.BUY, Decimal("3"), "limit", limit_price=Decimal("100"))
+
+    result = asyncio.run(service.check(order, now=market_open))
+
+    assert result["portfolio_after"] == {
+        "symbol": "AAPL",
+        "projected_qty": "5",
+        "position_pct": "5.00",
+        "gross_exposure_pct": "5.00",
+        "reference_price": "100",
+    }
 
 
 def test_submit_allowed_order_uses_auditable_client_id(
@@ -74,7 +113,9 @@ def test_submit_allowed_order_uses_auditable_client_id(
     broker = FakeBroker()
     service = GuardService(mandate, broker)
     order = OrderIntent("AAPL", Side.BUY, Decimal("5"), "limit", limit_price=Decimal("100"))
-    result = asyncio.run(service.submit(order, rationale="confirmed momentum", now=market_open))
+    result = asyncio.run(
+        service.submit(order, rationale="confirmed momentum", intent_id="aapl-entry-1", now=market_open)
+    )
     assert result["submitted"] is True
     assert result["client_order_id"].startswith("mandate-")
     assert len(broker.submitted) == 1
@@ -95,7 +136,9 @@ def test_pending_orders_are_included_in_fresh_submit_check(
     broker.pending_orders = (PendingOrder("AAPL", Side.BUY, Decimal("5"), Decimal("100")),)
     service = GuardService(mandate, broker)
     order = OrderIntent("AAPL", Side.BUY, Decimal("6"), "limit", limit_price=Decimal("100"))
-    result = asyncio.run(service.submit(order, rationale="second entry", now=market_open))
+    result = asyncio.run(
+        service.submit(order, rationale="second entry", intent_id="pending-risk", now=market_open)
+    )
     assert result["submitted"] is False
     assert broker.submitted == []
 
@@ -108,8 +151,8 @@ def test_concurrent_submissions_are_serialized(mandate: Mandate, market_open: da
 
     async def submit_twice():
         return await asyncio.gather(
-            service.submit(order, rationale="first", now=market_open),
-            service.submit(order, rationale="second", now=market_open),
+            service.submit(order, rationale="first", intent_id="concurrent-1", now=market_open),
+            service.submit(order, rationale="second", intent_id="concurrent-2", now=market_open),
         )
 
     results = asyncio.run(submit_twice())
@@ -122,7 +165,9 @@ def test_exchange_clock_closure_denies_weekday_order(mandate: Mandate, market_op
     broker.market_open = False
     service = GuardService(mandate, broker)
     order = OrderIntent("AAPL", Side.BUY, Decimal("1"), "limit", limit_price=Decimal("100"))
-    result = asyncio.run(service.submit(order, rationale="holiday", now=market_open))
+    result = asyncio.run(
+        service.submit(order, rationale="holiday", intent_id="holiday", now=market_open)
+    )
     assert result["submitted"] is False
     assert any(breach["rule"] == "session" for breach in result["breaches"])
 
@@ -135,7 +180,10 @@ def test_order_day_starts_at_new_york_midnight(mandate: Mandate, market_open: da
     assert broker.last_since == datetime(2026, 8, 26, 4, 0, tzinfo=timezone.utc)
 
 
-def test_close_position_is_checked_against_mandate(mandate: Mandate, market_open: datetime) -> None:
+def test_close_position_respects_explicit_risk_reduction_policy(
+    mandate: Mandate, market_open: datetime
+) -> None:
+    mandate = mandate.model_copy(update={"allow_risk_reducing_market_close": False})
     broker = FakeBroker()
     broker.positions["AAPL"] = Position(Decimal("5"), Decimal("100"))
     service = GuardService(mandate, broker)
@@ -143,19 +191,126 @@ def test_close_position_is_checked_against_mandate(mandate: Mandate, market_open
         service.close_position("AAPL", Decimal("1"), rationale="reduce risk", now=market_open)
     )
     assert denied["submitted"] is False
-    assert any(breach["rule"] == "order_type" for breach in denied["breaches"])
+    assert any(breach["rule"] == "allow_risk_reducing_market_close" for breach in denied["breaches"])
     assert broker.closed == []
 
 
 def test_close_position_submits_only_when_market_close_is_authorized(
     mandate: Mandate, market_open: datetime
 ) -> None:
-    authorized = mandate.model_copy(update={"order_types": ["limit", "market"]})
     broker = FakeBroker()
     broker.positions["AAPL"] = Position(Decimal("5"), Decimal("100"))
-    service = GuardService(authorized, broker)
+    service = GuardService(mandate, broker)
     result = asyncio.run(
         service.close_position("AAPL", Decimal("2"), rationale="reduce risk", now=market_open)
     )
     assert result["submitted"] is True
     assert broker.closed == [("AAPL", Decimal("2"))]
+
+
+def test_session_state_contains_live_risk_snapshot(mandate: Mandate, market_open: datetime) -> None:
+    broker = FakeBroker()
+    broker.positions["AAPL"] = Position(Decimal("5"), Decimal("100"))
+    broker.pending_orders = (PendingOrder("MSFT", Side.BUY, Decimal("1"), Decimal("200")),)
+    service = GuardService(mandate, broker)
+    state = asyncio.run(service.session_state(now=market_open))
+    assert state["account"]["equity"] == "10000"
+    assert state["account"]["gross_exposure_pct"] == "5.00"
+    assert state["market"]["is_open"] is True
+    assert state["positions"]["AAPL"]["market_value"] == "500"
+    assert state["pending_orders"][0]["symbol"] == "MSFT"
+
+
+def test_mandate_state_reports_headroom_and_live_wake_triggers(
+    mandate: Mandate, market_open: datetime
+) -> None:
+    mandate = mandate.model_copy(
+        update={
+            "wake_me_if": [
+                "daily_loss_pct > 1.2",
+                "single_symbol_move_pct > 5",
+                "any_breach_requiring_override > 0",
+            ]
+        }
+    )
+    broker = FakeBroker()
+    broker.equity = Decimal("9800")
+    broker.positions["AAPL"] = Position(
+        Decimal("5"), Decimal("100"), change_today_pct=Decimal("6")
+    )
+    broker.pending_orders = (PendingOrder("MSFT", Side.BUY, Decimal("2"), Decimal("200")),)
+    service = GuardService(mandate, broker)
+    service.journal.append("submit_order", "denied", "limit breach")
+
+    state = asyncio.run(service.mandate_state(now=market_open))
+
+    assert state["usage"]["max_position_pct"] == str(Decimal("500") / Decimal("9800") * 100)
+    assert Decimal(state["headroom"]["max_position_pct"]) < Decimal("10")
+    assert {trigger["metric"] for trigger in state["wake_triggers"]} == {
+        "daily_loss_pct",
+        "single_symbol_move_pct",
+        "any_breach_requiring_override",
+    }
+
+
+def test_retry_with_same_intent_id_is_deduplicated(
+    mandate: Mandate, market_open: datetime
+) -> None:
+    broker = FakeBroker()
+    service = GuardService(mandate, broker)
+    order = OrderIntent("AAPL", Side.BUY, Decimal("1"), "limit", limit_price=Decimal("100"))
+    first = asyncio.run(
+        service.submit(order, rationale="retry-safe", intent_id="stable-intent", now=market_open)
+    )
+    second = asyncio.run(
+        service.submit(order, rationale="retry-safe", intent_id="stable-intent", now=market_open)
+    )
+    assert first["submitted"] is True
+    assert second["deduplicated"] is True
+    assert len(broker.submitted) == 1
+
+
+def test_cancel_only_allows_orders_recorded_as_submitted_by_guard(
+    mandate: Mandate, market_open: datetime
+) -> None:
+    broker = FakeBroker()
+    service = GuardService(mandate, broker)
+    order = OrderIntent("AAPL", Side.BUY, Decimal("1"), "limit", limit_price=Decimal("100"))
+    asyncio.run(
+        service.submit(order, rationale="owned order", intent_id="cancel-owned", now=market_open)
+    )
+
+    result = asyncio.run(service.cancel_order("paper-order-1", rationale="signal invalidated"))
+
+    assert result["cancelled"] is True
+    assert broker.cancelled == ["paper-order-1"]
+
+
+def test_cancel_parks_foreign_order_instead_of_touching_it(mandate: Mandate) -> None:
+    broker = FakeBroker()
+    broker.external_orders["manual-order"] = {
+        "id": "manual-order",
+        "client_order_id": "human-protective-stop",
+    }
+    service = GuardService(mandate, broker)
+
+    result = asyncio.run(service.cancel_order("manual-order", rationale="agent changed its mind"))
+
+    assert result["cancelled"] is False
+    assert result["parked"] is True
+    assert broker.cancelled == []
+    assert service.journal.snapshot()[-1]["outcome"] == "parked"
+
+
+def test_cancel_rejects_spoofed_mandate_prefix_without_journal_proof(mandate: Mandate) -> None:
+    broker = FakeBroker()
+    broker.external_orders["spoofed-order"] = {
+        "id": "spoofed-order",
+        "client_order_id": "mandate-spoofed",
+    }
+    service = GuardService(mandate, broker)
+
+    result = asyncio.run(service.cancel_order("spoofed-order", rationale="looks internal"))
+
+    assert result["cancelled"] is False
+    assert broker.cancelled == []

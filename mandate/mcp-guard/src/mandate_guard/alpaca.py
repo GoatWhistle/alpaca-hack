@@ -92,6 +92,7 @@ class AlpacaPaperClient:
             str(item["symbol"]).upper(): Position(
                 qty=Decimal(str(item["qty"])),
                 market_price=Decimal(str(item["current_price"])),
+                change_today_pct=Decimal(str(item.get("change_today", "0"))) * Decimal("100"),
             )
             for item in data
         }
@@ -132,9 +133,9 @@ class AlpacaPaperClient:
             remaining = Decimal(str(item["qty"])) - Decimal(str(item.get("filled_qty", "0")))
             if remaining <= 0:
                 continue
-            raw_price = item.get("limit_price")
+            raw_price = item.get("limit_price") or item.get("stop_price") or item.get("hwm")
             if raw_price is None:
-                raise AlpacaError("open order has no bounded limit price; refusing risk projection")
+                raise AlpacaError("open order has no bounded reference price; refusing risk projection")
             pending.append(
                 PendingOrder(
                     symbol=str(item["symbol"]),
@@ -173,6 +174,22 @@ class AlpacaPaperClient:
         if order.limit_price is not None:
             payload["limit_price"] = str(order.limit_price)
         return await self._request("POST", f"{self.base_url}/v2/orders", json=payload)
+
+    async def find_order_by_client_id(self, client_order_id: str) -> Mapping[str, Any] | None:
+        try:
+            return await self._request(
+                "GET",
+                f"{self.base_url}/v2/orders:by_client_order_id",
+                params={"client_order_id": client_order_id},
+            )
+        except AlpacaError as exc:
+            cause = exc.__cause__
+            if isinstance(cause, httpx.HTTPStatusError) and cause.response.status_code == 404:
+                return None
+            raise
+
+    async def get_order_by_id(self, order_id: str) -> Mapping[str, Any]:
+        return await self._request("GET", f"{self.base_url}/v2/orders/{order_id}")
 
     async def cancel_order(self, order_id: str) -> None:
         await self._request("DELETE", f"{self.base_url}/v2/orders/{order_id}")

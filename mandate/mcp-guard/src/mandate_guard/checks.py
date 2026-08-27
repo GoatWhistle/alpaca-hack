@@ -23,6 +23,7 @@ class Side(StrEnum):
 class Position:
     qty: Decimal
     market_price: Decimal
+    change_today_pct: Decimal = ZERO
 
     @property
     def market_value(self) -> Decimal:
@@ -94,6 +95,12 @@ class Projection:
 
 
 @dataclass(frozen=True)
+class RiskUsage:
+    max_position_pct: Decimal
+    gross_exposure_pct: Decimal
+
+
+@dataclass(frozen=True)
 class CheckResult:
     allowed: bool
     breaches: tuple[Breach, ...]
@@ -102,6 +109,32 @@ class CheckResult:
 
 def _percent(value: Decimal, equity: Decimal) -> Decimal:
     return value / equity * HUNDRED
+
+
+def calculate_risk_usage(portfolio: Portfolio) -> RiskUsage:
+    symbols = set(portfolio.positions) | {pending.symbol for pending in portfolio.pending_orders}
+    exposures: list[Decimal] = []
+    for symbol in symbols:
+        position = portfolio.positions.get(symbol)
+        current_qty = position.qty if position else ZERO
+        prices = [position.market_price] if position else []
+        pending_buys = ZERO
+        pending_sells = ZERO
+        for pending in portfolio.pending_orders:
+            if pending.symbol != symbol:
+                continue
+            prices.append(pending.reference_price)
+            if pending.side is Side.BUY:
+                pending_buys += pending.remaining_qty
+            else:
+                pending_sells += pending.remaining_qty
+        worst_case_qty = max(abs(current_qty + pending_buys), abs(current_qty - pending_sells))
+        exposures.append(worst_case_qty * max(prices))
+    max_position = max(exposures, default=ZERO)
+    return RiskUsage(
+        max_position_pct=_percent(max_position, portfolio.equity),
+        gross_exposure_pct=_percent(sum(exposures, ZERO), portfolio.equity),
+    )
 
 
 def project_order(portfolio: Portfolio, order: OrderIntent, reference_price: Decimal) -> Projection:

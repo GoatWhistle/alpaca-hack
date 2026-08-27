@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -73,6 +74,65 @@ def test_open_market_order_without_bounded_price_fails_closed() -> None:
         )
 
     client = _client(handler)
-    with pytest.raises(AlpacaError, match="no bounded limit price"):
+    with pytest.raises(AlpacaError, match="no bounded reference price"):
         asyncio.run(client.get_open_orders())
+    asyncio.run(client._http.aclose())
+
+
+def test_open_stop_order_uses_stop_price_for_reservation() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "stop-1",
+                    "symbol": "AAPL",
+                    "side": "sell",
+                    "qty": "5",
+                    "filled_qty": "0",
+                    "limit_price": None,
+                    "stop_price": "95",
+                    "submitted_at": "2026-08-26T14:00:00Z",
+                }
+            ],
+        )
+
+    client = _client(handler)
+    orders = asyncio.run(client.get_open_orders())
+    assert orders[0].reference_price == Decimal("95")
+    asyncio.run(client._http.aclose())
+
+
+def test_get_order_by_id_uses_paper_endpoint() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/v2/orders/paper-order-1"
+        return httpx.Response(
+            200,
+            json={"id": "paper-order-1", "client_order_id": "mandate-owned"},
+        )
+
+    client = _client(handler)
+    result = asyncio.run(client.get_order_by_id("paper-order-1"))
+    assert result["client_order_id"] == "mandate-owned"
+    asyncio.run(client._http.aclose())
+
+
+def test_positions_expose_intraday_change_as_percentage_points() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "symbol": "AAPL",
+                    "qty": "2",
+                    "current_price": "100",
+                    "change_today": "-0.061",
+                }
+            ],
+        )
+
+    client = _client(handler)
+    positions = asyncio.run(client.get_positions())
+    assert positions["AAPL"].change_today_pct == Decimal("-6.100")
     asyncio.run(client._http.aclose())

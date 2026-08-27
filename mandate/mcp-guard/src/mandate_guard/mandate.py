@@ -8,6 +8,8 @@ from typing import Annotated, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from mandate_guard.wake import parse_wake_condition
+
 
 Percentage = Annotated[Decimal, Field(ge=Decimal("0"), le=Decimal("100"))]
 Instrument = Literal["equity"]
@@ -40,6 +42,7 @@ class Mandate(BaseModel):
     session: SessionPolicy
     limits: Limits
     wake_me_if: list[str] = Field(default_factory=list)
+    allow_risk_reducing_market_close: bool = True
     expires: datetime
 
     @field_validator("universe")
@@ -58,6 +61,13 @@ class Mandate(BaseModel):
         if len(set(values)) != len(values):
             raise ValueError("values must be unique")
         return values
+
+    @field_validator("wake_me_if")
+    @classmethod
+    def validate_wake_conditions(cls, expressions: list[str]) -> list[str]:
+        for expression in expressions:
+            parse_wake_condition(expression)
+        return expressions
 
     @field_validator("expires")
     @classmethod
