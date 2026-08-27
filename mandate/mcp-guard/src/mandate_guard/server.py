@@ -146,6 +146,15 @@ def create_server(
         analysis_interval_minutes: int | None = None,
         risk_posture: str | None = None,
         thesis: str | None = None,
+        monitoring_mode: str | None = None,
+        market_data_feed: str | None = None,
+        discovery_enabled: bool | None = None,
+        discovery_top: int | None = None,
+        regular_hours_only: bool | None = None,
+        max_spread_bps: int | None = None,
+        min_relative_volume: Decimal | None = None,
+        monitor_corporate_actions: bool | None = None,
+        options_confirmation: bool | None = None,
     ) -> dict[str, Any]:
         """Persist operator-requested research preferences without changing mandate authority."""
         if not rationale.strip():
@@ -159,6 +168,15 @@ def create_server(
             analysis_interval_minutes=analysis_interval_minutes,
             risk_posture=risk_posture,
             thesis=thesis,
+            monitoring_mode=monitoring_mode,
+            market_data_feed=market_data_feed,
+            discovery_enabled=discovery_enabled,
+            discovery_top=discovery_top,
+            regular_hours_only=regular_hours_only,
+            max_spread_bps=max_spread_bps,
+            min_relative_volume=min_relative_volume,
+            monitor_corporate_actions=monitor_corporate_actions,
+            options_confirmation=options_confirmation,
         )
         return {
             "trajectory": trajectory.model_dump(mode="json"),

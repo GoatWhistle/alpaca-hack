@@ -41,15 +41,16 @@ const SnapshotSchema = z.object({
     trajectory: UnknownRecord.optional().default({}),
     runtime: UnknownRecord.optional().default({}),
     alerts: z.array(UnknownRecord).optional().default([]),
-  }).optional().default({ trajectory: {}, runtime: {}, alerts: [] }),
+    market: UnknownRecord.optional().default({}),
+    outcomes: UnknownRecord.optional().default({}),
+  }).optional().default({ trajectory: {}, runtime: {}, alerts: [], market: {}, outcomes: {} }),
 });
 
 export type Snapshot = z.infer<typeof SnapshotSchema>;
 export type Journal = z.infer<typeof JournalEntry>;
 
 export async function getSnapshot(signal?: AbortSignal): Promise<Snapshot> {
-  const apiBase = import.meta.env.VITE_MANDATE_API_URL
-    ?? `${window.location.protocol}//${window.location.hostname}:8030`;
+  const apiBase = getApiBase();
   const response = await fetch(`${apiBase}/api/snapshot`, {
     headers: { Accept: "application/json" },
     cache: "no-store",
@@ -59,4 +60,20 @@ export async function getSnapshot(signal?: AbortSignal): Promise<Snapshot> {
     throw new Error(`Dashboard API returned ${response.status}`);
   }
   return SnapshotSchema.parse(await response.json());
+}
+
+function getApiBase(): string {
+  return import.meta.env.VITE_MANDATE_API_URL
+    ?? `${window.location.protocol}//${window.location.hostname}:8030`;
+}
+
+export async function updateTrajectory(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const response = await fetch(`${getApiBase()}/api/trajectory`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, confirmed: true }),
+  });
+  const body = await response.json() as Record<string, unknown>;
+  if (!response.ok) throw new Error(String(body.error ?? `Dashboard API returned ${response.status}`));
+  return body;
 }

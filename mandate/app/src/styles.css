@@ -131,6 +131,32 @@ pre { overflow: auto; color: var(--muted); background: #101013; padding: 12px; f
 .trajectory-summary p { color: var(--muted); margin: 8px 0 11px; font-size: 10px; line-height: 1.5; }
 .trajectory-summary div { display: flex; flex-wrap: wrap; gap: 6px; }
 .trajectory-summary b { border: 1px solid var(--line); padding: 4px 6px; font: 500 8px "DM Mono", monospace; }
+.trajectory-settings { border-bottom: 1px solid var(--line); padding: 12px 20px; }
+.settings-toggle, .settings-save, .confirm-box button { border: 1px solid var(--line); background: var(--panel-2); padding: 8px 10px; cursor: pointer; font-size: 9px; }
+.settings-toggle { width: 100%; color: var(--text); }
+.settings-form { padding-top: 12px; }
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.settings-form label { color: var(--muted); display: flex; flex-direction: column; gap: 5px; font-size: 8px; text-transform: uppercase; }
+.settings-form input, .settings-form select, .settings-form textarea { width: 100%; border: 1px solid var(--line); background: #101013; color: var(--text); padding: 8px; font: 500 9px "DM Mono", monospace; }
+.symbol-picker { margin: 12px 0; }
+.symbol-picker small { color: var(--muted); font-size: 8px; text-transform: uppercase; }
+.symbol-picker div { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.symbol-picker button { border: 1px solid var(--line); background: transparent; color: var(--muted); padding: 5px 7px; cursor: pointer; font: 500 8px "DM Mono", monospace; }
+.symbol-picker button.selected { color: #fff; border-color: var(--accent); background: var(--accent); }
+.check-grid { display: grid; gap: 7px; margin: 12px 0; }
+.check-grid label { flex-direction: row; align-items: center; text-transform: none; font-size: 9px; }
+.check-grid input { width: auto; accent-color: var(--accent); }
+.thesis-field textarea { min-height: 72px; resize: vertical; line-height: 1.5; }
+.settings-save { width: 100%; margin-top: 10px; border-color: var(--accent); background: var(--accent); color: #fff; }
+.confirm-box { margin-top: 10px; border: 1px solid #604b27; background: #211b11; padding: 10px; }
+.confirm-box p, .settings-message { color: var(--muted); font-size: 9px; line-height: 1.5; margin: 0 0 8px; }
+.confirm-box button { margin-right: 6px; }
+.confirm-box button:first-of-type { color: #fff; border-color: var(--accent); background: var(--accent); }
+.monitor-health { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); }
+.monitor-health span { padding: 10px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.monitor-health span:nth-child(even) { border-right: 0; }
+.monitor-health small { color: var(--muted); font-size: 8px; text-transform: uppercase; }
+.monitor-health b { font: 500 9px "DM Mono", monospace; text-transform: uppercase; }
 .alert-list .subsection-title { padding-left: 20px; padding-right: 20px; }
 .alert-item { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; padding: 11px 20px; border-bottom: 1px solid var(--line); }
 .alert-item > span { color: var(--accent); font: 500 8px "DM Mono", monospace; text-transform: uppercase; }

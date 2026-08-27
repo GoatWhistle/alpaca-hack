@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TrueForgeUI } from "@truefoundry/trueforge-ui";
-import { getSnapshot, type Journal, type Snapshot } from "./api";
+import { getSnapshot, updateTrajectory, type Journal, type Snapshot } from "./api";
 import { decimal, money, number, percent, shortId, timestamp } from "./format";
 
 const REFRESH_MS = 5_000;
@@ -100,6 +100,78 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div className="empty"><span>○</span><p>{children}</p></div>;
 }
 
+function TrajectorySettings({ trajectory, universe, onSaved }: {
+  trajectory: Record<string, unknown>;
+  universe: string[];
+  onSaved: () => Promise<unknown>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [form, setForm] = useState({
+    enabled: Boolean(trajectory.enabled ?? true),
+    symbols: Array.isArray(trajectory.symbols) ? trajectory.symbols.map(String) : universe,
+    news_poll_seconds: Number(trajectory.news_poll_seconds ?? 60),
+    analysis_interval_minutes: Number(trajectory.analysis_interval_minutes ?? 15),
+    monitoring_mode: String(trajectory.monitoring_mode ?? "realtime"),
+    market_data_feed: String(trajectory.market_data_feed ?? "auto"),
+    discovery_enabled: Boolean(trajectory.discovery_enabled ?? true),
+    discovery_top: Number(trajectory.discovery_top ?? 10),
+    regular_hours_only: Boolean(trajectory.regular_hours_only ?? true),
+    max_spread_bps: Number(trajectory.max_spread_bps ?? 35),
+    min_relative_volume: Number(trajectory.min_relative_volume ?? 0.25),
+    monitor_corporate_actions: Boolean(trajectory.monitor_corporate_actions ?? true),
+    options_confirmation: Boolean(trajectory.options_confirmation ?? false),
+    risk_posture: String(trajectory.risk_posture ?? "balanced"),
+    thesis: String(trajectory.thesis ?? ""),
+  });
+  const toggleSymbol = (symbol: string) => setForm((value) => ({
+    ...value,
+    symbols: value.symbols.includes(symbol)
+      ? value.symbols.filter((item) => item !== symbol)
+      : [...value.symbols, symbol],
+  }));
+  const save = async () => {
+    setSaving(true);
+    setMessage("");
+    try {
+      await updateTrajectory(form);
+      setMessage("Applied. The runner will reload this trajectory on its next wake.");
+      setReviewing(false);
+      await onSaved();
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "Could not apply trajectory");
+    } finally { setSaving(false); }
+  };
+  return <div className="trajectory-settings">
+    <button className="settings-toggle" onClick={() => setOpen((value) => !value)}>{open ? "Close settings" : "Monitoring settings"}</button>
+    {open && <div className="settings-form">
+      <div className="settings-grid">
+        <label>Mode<select value={form.monitoring_mode} onChange={(event) => setForm({ ...form, monitoring_mode: event.target.value })}><option value="realtime">Realtime + REST fallback</option><option value="polling">REST polling</option></select></label>
+        <label>Market feed<select value={form.market_data_feed} onChange={(event) => setForm({ ...form, market_data_feed: event.target.value })}><option value="auto">Auto / IEX</option><option value="iex">IEX</option><option value="sip">SIP (entitlement required)</option></select></label>
+        <label>News fallback, sec<input type="number" min="30" max="3600" value={form.news_poll_seconds} onChange={(event) => setForm({ ...form, news_poll_seconds: Number(event.target.value) })} /></label>
+        <label>Full analysis, min<input type="number" min="5" max="1440" value={form.analysis_interval_minutes} onChange={(event) => setForm({ ...form, analysis_interval_minutes: Number(event.target.value) })} /></label>
+        <label>Max spread, bps<input type="number" min="1" max="1000" value={form.max_spread_bps} onChange={(event) => setForm({ ...form, max_spread_bps: Number(event.target.value) })} /></label>
+        <label>Min volume ratio<input type="number" min="0" max="100" step="0.05" value={form.min_relative_volume} onChange={(event) => setForm({ ...form, min_relative_volume: Number(event.target.value) })} /></label>
+        <label>Discovery top<input type="number" min="1" max="50" value={form.discovery_top} onChange={(event) => setForm({ ...form, discovery_top: Number(event.target.value) })} /></label>
+        <label>Risk posture<select value={form.risk_posture} onChange={(event) => setForm({ ...form, risk_posture: event.target.value })}><option value="defensive">Defensive</option><option value="balanced">Balanced</option><option value="opportunistic">Opportunistic</option></select></label>
+      </div>
+      <div className="symbol-picker"><small>Monitored mandate universe</small><div>{universe.map((symbol) => <button className={form.symbols.includes(symbol) ? "selected" : ""} key={symbol} onClick={() => toggleSymbol(symbol)}>{symbol}</button>)}</div></div>
+      <div className="check-grid">
+        {([
+          ["enabled", "Runner enabled"], ["regular_hours_only", "Proposals in regular hours only"],
+          ["discovery_enabled", "Movers / most active discovery"], ["monitor_corporate_actions", "Corporate-action alerts"],
+          ["options_confirmation", "Options confirmation (extra data calls)"],
+        ] as const).map(([key, label]) => <label key={key}><input type="checkbox" checked={form[key]} onChange={(event) => setForm({ ...form, [key]: event.target.checked })} />{label}</label>)}
+      </div>
+      <label className="thesis-field">Research trajectory<textarea maxLength={2000} value={form.thesis} onChange={(event) => setForm({ ...form, thesis: event.target.value })} /></label>
+      {!reviewing ? <button className="settings-save" disabled={!form.symbols.length} onClick={() => setReviewing(true)}>Review changes</button> : <div className="confirm-box"><p>This changes monitoring and proposal logic only. It cannot place an order or expand the mandate universe.</p><button disabled={saving} onClick={() => void save()}>{saving ? "Applying…" : "Confirm & apply"}</button><button onClick={() => setReviewing(false)}>Back</button></div>}
+      {message && <p className="settings-message">{message}</p>}
+    </div>}
+  </div>;
+}
+
 export function App() {
   const [view, setView] = useState<View>("overview");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -142,6 +214,7 @@ export function App() {
   const autonomyStatus = String(autonomyRuntime.status ?? "not_started");
   const dailyPnl = number(account.daily_pnl);
   const isOpen = data?.mandate.market_is_open ?? false;
+  const universe = Array.isArray(rawMandate.universe) ? rawMandate.universe.map(String) : [];
 
   return (
     <div className="app-shell">
@@ -238,6 +311,15 @@ export function App() {
                   <span>Trajectory v{String(trajectory.version ?? "—")} · {String(trajectory.risk_posture ?? "unconfigured")}</span>
                   <p>{String(trajectory.thesis ?? "Start the runner to initialize the shared trajectory.")}</p>
                   <div>{Array.isArray(trajectory.symbols) && trajectory.symbols.map((symbol) => <b key={String(symbol)}>{String(symbol)}</b>)}</div>
+                </div>
+                <TrajectorySettings key={String(trajectory.version ?? "new")} trajectory={trajectory} universe={universe} onSaved={refresh} />
+                <div className="monitor-health">
+                  <span><small>News stream</small><b>{String((autonomyRuntime.stream as Record<string, unknown> | undefined)?.news ?? "—")}</b></span>
+                  <span><small>Market stream</small><b>{String((autonomyRuntime.stream as Record<string, unknown> | undefined)?.market ?? "—")}</b></span>
+                  <span><small>Quality</small><b>{String(autonomyRuntime.quality_pass ?? 0)} / {String(autonomyRuntime.quality_total ?? 0)}</b></span>
+                  <span><small>Discovery</small><b>{String(autonomyRuntime.discovery_candidates ?? 0)} observed</b></span>
+                  <span><small>Data feed</small><b>{String(autonomyRuntime.market_feed ?? "—")}</b></span>
+                  <span><small>Forward outcomes</small><b>{String(autonomyRuntime.outcomes_observed ?? 0)} measured</b></span>
                 </div>
                 <div className="alert-list">
                   <div className="subsection-title"><span>Latest news deliveries</span><b>{data?.autonomy.alerts.length ?? 0}</b></div>

@@ -9,6 +9,7 @@ from mcp.types import ToolAnnotations
 
 from mandate_research.live_comparison import compare_live_signals as compare_live
 from mandate_research.live_sources import probe_live_sources as probe_live
+from mandate_research.monitoring import collect_market_monitoring as collect_monitoring
 
 
 READ_ONLY = ToolAnnotations(
@@ -23,6 +24,7 @@ def create_server(
     *,
     compare: Callable[..., dict[str, Any]] = compare_live,
     probe: Callable[..., dict[str, Any]] = probe_live,
+    monitor: Callable[..., dict[str, Any]] = collect_monitoring,
     host: str = "127.0.0.1",
     port: int = 8020,
 ) -> FastMCP:
@@ -47,6 +49,15 @@ def create_server(
     def compare_live_signals(symbol: str = "AAPL", fee_bps: str = "1") -> dict[str, Any]:
         """Compare news-confirmed and three price baselines on bounded live data."""
         return compare(symbol=symbol, fee_bps=fee_bps)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def get_market_monitoring(
+        symbols: str = "AAPL,MSFT,NVDA,SPY",
+        feed: str = "auto",
+    ) -> dict[str, Any]:
+        """Read Alpaca snapshots, quality gates, SPY context, discovery, and action risks."""
+        normalized = [value.strip().upper() for value in symbols.split(",") if value.strip()]
+        return monitor(symbols=normalized, feed=feed)
 
     return mcp
 

@@ -5,11 +5,11 @@ import asyncio
 from mandate_research.server import create_server
 
 
-def test_research_mcp_has_only_two_read_only_tools() -> None:
-    server = create_server(compare=lambda **_: {}, probe=lambda **_: {})
+def test_research_mcp_has_only_bounded_read_only_tools() -> None:
+    server = create_server(compare=lambda **_: {}, probe=lambda **_: {}, monitor=lambda **_: {})
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
 
-    assert set(tools) == {"probe_news_sources", "compare_live_signals"}
+    assert set(tools) == {"probe_news_sources", "compare_live_signals", "get_market_monitoring"}
     assert all(tool.annotations is not None for tool in tools.values())
     assert all(tool.annotations.readOnlyHint is True for tool in tools.values())
     assert all(tool.annotations.destructiveHint is False for tool in tools.values())

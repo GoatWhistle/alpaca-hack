@@ -163,9 +163,10 @@ the local, read-only companion API consumed by Overview; it is not a second UI.
 
 ### 24/7 autonomy and chat control plane
 
-The autonomy runner stays alive outside chat, polls bounded news feeds, deduplicates events through a
-durable cursor and starts a read-only TrueForge analysis immediately for new headlines or on the configured
-cadence. Each cycle is visible in Chat History and must finish with `ACTION: PARK` or `ACTION: PROPOSE`.
+The autonomy runner stays alive outside chat, subscribes to Alpaca news and IEX/SIP market WebSockets,
+keeps REST polling as a configurable fallback, and deduplicates events through a durable cursor. It starts
+a read-only TrueForge analysis immediately for new headlines or on the configured cadence. Each cycle is
+visible in Chat History and must finish with `ACTION: PARK` or `ACTION: PROPOSE`.
 Background turns are mechanically audited after completion and fail if they request an execution,
 trajectory-write or approval tool. `PROPOSE` is a notification for the human, never permission to trade.
 
@@ -176,12 +177,18 @@ cd mandate/agent
 npm run autonomy
 ```
 
-The shared trajectory defaults to AAPL/MSFT/NVDA/SPY, a 60-second news poll and a 15-minute full analysis.
+The shared trajectory defaults to AAPL/MSFT/NVDA/SPY, realtime streams, a 60-second REST fallback and a
+15-minute full analysis. Every market poll adds Alpaca snapshots, spread/staleness/volume gates, SPY
+confirmation, observation-only movers/most-actives discovery and corporate-action risks. Optional option
+chain confirmation is disabled by default. Discovery never expands the mandate universe. A deterministic
+post-model gate converts `PROPOSE` to `PARK` when regular-hours, liquidity or SPY checks fail.
 In normal chat, ask the agent to explain `get_autonomy_state`, pause/resume monitoring, narrow the symbols,
 change cadence, risk posture or thesis. Persistent changes go through `update_trajectory`, require approval,
 and cannot add a symbol outside the hard mandate. Runtime heartbeat, next analysis and news deliveries are
-shown on Overview. State lives in ignored `mandate/logs/trajectory.json`, `autonomy-runtime.json`,
-`news-cursor.json` and `news-alerts.jsonl` files so restarts do not replay old headlines.
+shown on Overview, where Monitoring settings require a separate review and confirmation click. State lives
+in ignored `mandate/logs/trajectory.json`, `autonomy-runtime.json`, `market-monitoring.json`,
+`forward-outcomes.json`, `news-cursor.json` and `news-alerts.jsonl` files. Forward returns are measured at
+5, 15 and 60 minutes as evaluation evidence, never as a claim of profitability.
 
 For unattended operation across terminal disconnects or machine restarts, run `npm run autonomy` under the
 host process manager. The runner is restart-safe and immediately reports `degraded` plus the last error when
@@ -201,7 +208,7 @@ execution argument. During regular hours it requires and allows the first approv
 checks that no broker write was attempted, reports `deferred: market_closed`, and exits successfully.
 
 `eval:research-e2e` is intentionally read-only. It requires TrueForge/Z.AI to obtain multi-source news
-health, all four point-in-time strategy comparisons and current mandate headroom. The verifier reconciles
+health, Alpaca market monitoring, all four point-in-time strategy comparisons and current mandate headroom. The verifier reconciles
 streaming events with persisted session events, unwraps Code Mode `call_tool` bridge calls, rejects any
 nested or direct execution tool, and requires a bounded `ACTION: PARK` or `ACTION: PROPOSE` conclusion.
 
@@ -267,7 +274,7 @@ artifact is [`docs/evidence/paper-e2e-2026-08-27.json`](docs/evidence/paper-e2e-
 requires durable submitted provenance before requesting cancellation, validates the persisted TrueForge
 call before approval, and can re-audit an existing session without replaying the cancel action.
 
-The current local suite has 90 guard tests, 33 research/Skill/MCP tests and 4 autonomy-runner tests. It covers hot-reloaded human
+The current local suite has 91 guard tests, 36 research/Skill/MCP tests and 7 autonomy-runner tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.
@@ -282,5 +289,6 @@ breakout-with-volume were negative. These are engineering observations over this
 
 A subsequent live read-only decision E2E ran through TrueForge, Z.AI, `mandate-research` and
 `mandate-guard`. Persisted events proved two healthy attributable news sources, all four strategy outputs,
-current paper-account mandate headroom and no write call. With a flat news-confirmed signal and the market
-closed, the agent returned `ACTION: PARK`; the verifier reported `brokerWriteAttempted: false`.
+IEX market monitoring, current paper-account mandate headroom and no write call. The live autonomy cycle
+observed four passing quality gates, one MSFT corporate action and returned `ACTION: PARK`; its first durable
+5-minute forward outcome was then measured without any broker write.

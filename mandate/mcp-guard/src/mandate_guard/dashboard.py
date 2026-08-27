@@ -19,6 +19,8 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
+from mandate_guard.autonomy import AutonomyStore
+
 
 DEFAULT_GUARD_URL = "http://127.0.0.1:8010/mcp"
 DEFAULT_TRUEFORGE_URL = "http://localhost:8790"
@@ -149,6 +151,8 @@ async def build_snapshot(
     trajectory_path: Path | None = None,
     runtime_path: Path | None = None,
     alerts_path: Path | None = None,
+    market_path: Path | None = None,
+    outcomes_path: Path | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     local_mandate: dict[str, Any] = {}
@@ -165,11 +169,15 @@ async def build_snapshot(
         "trajectory": {},
         "runtime": {"status": "not_started"},
         "alerts": [],
+        "market": {},
+        "outcomes": {},
     }
     for key, path, reader in (
         ("trajectory", trajectory_path, _read_json),
         ("runtime", runtime_path, _read_json),
         ("alerts", alerts_path, lambda value: _read_journal(value, limit=50)),
+        ("market", market_path, _read_json),
+        ("outcomes", outcomes_path, _read_json),
     ):
         if path is None:
             continue
@@ -222,7 +230,7 @@ async def build_snapshot(
     }
 
 
-def _default_paths() -> tuple[Path, Path, Path, Path, Path, Path]:
+def _default_paths() -> tuple[Path, ...]:
     mandate_root = Path(__file__).resolve().parents[3]
     dist = Path(os.environ.get("MANDATE_DASHBOARD_DIST", mandate_root / "app" / "dist"))
     mandate_path = Path(os.environ.get("MANDATE_PATH", mandate_root / "mandates" / "example.yaml"))
@@ -238,7 +246,13 @@ def _default_paths() -> tuple[Path, Path, Path, Path, Path, Path]:
     alerts_path = Path(
         os.environ.get("MANDATE_ALERTS_PATH", mandate_root / "logs" / "news-alerts.jsonl")
     )
-    return dist, mandate_path, journal_path, trajectory_path, runtime_path, alerts_path
+    market_path = Path(
+        os.environ.get("MANDATE_MARKET_MONITORING_PATH", mandate_root / "logs" / "market-monitoring.json")
+    )
+    outcomes_path = Path(
+        os.environ.get("MANDATE_FORWARD_OUTCOMES_PATH", mandate_root / "logs" / "forward-outcomes.json")
+    )
+    return dist, mandate_path, journal_path, trajectory_path, runtime_path, alerts_path, market_path, outcomes_path
 
 
 def create_dashboard(
@@ -250,6 +264,8 @@ def create_dashboard(
     trajectory_path: Path | None = None,
     runtime_path: Path | None = None,
     alerts_path: Path | None = None,
+    market_path: Path | None = None,
+    outcomes_path: Path | None = None,
     service_urls: dict[str, str] | None = None,
 ) -> Starlette:
     (
@@ -259,6 +275,8 @@ def create_dashboard(
         default_trajectory,
         default_runtime,
         default_alerts,
+        default_market,
+        default_outcomes,
     ) = _default_paths()
     urls = service_urls or {
         "trueforge": os.environ.get("TRUEFORGE_BASE_URL", DEFAULT_TRUEFORGE_URL),
@@ -272,6 +290,8 @@ def create_dashboard(
     active_trajectory = trajectory_path or default_trajectory
     active_runtime = runtime_path or default_runtime
     active_alerts = alerts_path or default_alerts
+    active_market = market_path or default_market
+    active_outcomes = outcomes_path or default_outcomes
 
     async def snapshot(_request: Request) -> Response:
         payload = await build_snapshot(
@@ -282,8 +302,39 @@ def create_dashboard(
             trajectory_path=active_trajectory,
             runtime_path=active_runtime,
             alerts_path=active_alerts,
+            market_path=active_market,
+            outcomes_path=active_outcomes,
         )
         return JSONResponse(_wire_payload(payload), headers={"Cache-Control": "no-store"})
+
+    async def update_trajectory(request: Request) -> Response:
+        if request.headers.get("content-type", "").split(";", 1)[0] != "application/json":
+            return JSONResponse({"error": "application/json required"}, status_code=415)
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError:
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
+        if not isinstance(payload, dict) or payload.pop("confirmed", False) is not True:
+            return JSONResponse({"error": "explicit confirmation required"}, status_code=409)
+        allowed_fields = {
+            "enabled", "symbols", "news_poll_seconds", "analysis_interval_minutes", "risk_posture",
+            "thesis", "monitoring_mode", "market_data_feed", "discovery_enabled", "discovery_top",
+            "regular_hours_only", "max_spread_bps", "min_relative_volume",
+            "monitor_corporate_actions", "options_confirmation",
+        }
+        if set(payload) - allowed_fields:
+            return JSONResponse({"error": "unsupported trajectory field"}, status_code=400)
+        mandate = _read_yaml(active_mandate)
+        universe = mandate.get("universe", [])
+        try:
+            updated = AutonomyStore(active_trajectory, active_alerts).update(
+                mandate_symbols=universe if isinstance(universe, list) else [],
+                updated_by="dashboard:operator-confirmed",
+                **payload,
+            )
+        except (TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(_wire_payload(updated.model_dump()), headers={"Cache-Control": "no-store"})
 
     async def index(request: Request) -> Response:
         requested = request.path_params.get("path", "")
@@ -301,14 +352,15 @@ def create_dashboard(
 
     routes = [
         Route("/api/snapshot", snapshot),
+        Route("/api/trajectory", update_trajectory, methods=["POST"]),
         Route("/{path:path}", index),
     ]
     app = Starlette(routes=routes)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:8790", "http://127.0.0.1:8790"],
-        allow_methods=["GET"],
-        allow_headers=["Accept"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Accept", "Content-Type"],
     )
     return app
 

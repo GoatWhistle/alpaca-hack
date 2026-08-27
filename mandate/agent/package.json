@@ -10,7 +10,7 @@
     "eval:sandbox": "tsx src/sandboxProbe.ts",
     "eval:subagents": "tsx src/subagentE2E.ts",
     "eval:paper-e2e": "tsx src/paperE2E.ts",
-    "eval:autonomy": "tsx --test src/autonomyRunner.test.ts",
+    "eval:autonomy": "tsx --test src/autonomyRunner.test.ts src/realtimeMonitor.test.ts",
     "autonomy": "tsx src/autonomyRunner.ts",
     "typecheck": "tsc --noEmit"
   },

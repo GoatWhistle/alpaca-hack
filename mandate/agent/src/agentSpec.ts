@@ -33,9 +33,9 @@ export function buildAgentSpec(
       },
       {
         name: "mandate-research",
-        enableTools: ["probe_news_sources", "compare_live_signals"],
+        enableTools: ["probe_news_sources", "compare_live_signals", "get_market_monitoring"],
         disableTools: [],
-        preloadTools: ["compare_live_signals"],
+        preloadTools: ["compare_live_signals", "get_market_monitoring"],
         preload: false,
         requireApprovalForTools: [],
       },

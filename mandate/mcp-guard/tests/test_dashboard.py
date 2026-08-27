@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-from mandate_guard.dashboard import _wire_payload, build_snapshot
+from starlette.testclient import TestClient
+
+from mandate_guard.dashboard import _wire_payload, build_snapshot, create_dashboard
 
 
 class FakeGuard:
@@ -116,3 +118,33 @@ def test_wire_payload_normalizes_typed_mcp_values() -> None:
         "equity": "100000.00",
         "items": ["2026-08-27T13:30:00+00:00"],
     }
+
+
+def test_trajectory_update_requires_confirmation_and_cannot_expand_universe(tmp_path: Path) -> None:
+    mandate = tmp_path / "mandate.yaml"
+    mandate.write_text("name: test\nuniverse: [AAPL, SPY]\nlimits: {}\n", encoding="utf-8")
+    journal = tmp_path / "session.jsonl"
+    trajectory = tmp_path / "trajectory.json"
+    alerts = tmp_path / "alerts.jsonl"
+    app = create_dashboard(
+        guard=FakeGuard(),
+        dist_path=tmp_path,
+        mandate_path=mandate,
+        journal_path=journal,
+        trajectory_path=trajectory,
+        alerts_path=alerts,
+        service_urls={"trueforge": "http://local:8790", "guard": "http://local:8010"},
+    )
+    with TestClient(app) as client:
+        assert client.post("/api/trajectory", json={"symbols": ["AAPL"]}).status_code == 409
+        response = client.post(
+            "/api/trajectory",
+            json={"confirmed": True, "symbols": ["AAPL"], "news_poll_seconds": 30},
+        )
+        assert response.status_code == 200
+        assert response.json()["news_poll_seconds"] == 30
+        denied = client.post(
+            "/api/trajectory", json={"confirmed": True, "symbols": ["TSLA"]}
+        )
+        assert denied.status_code == 400
+        assert "cannot expand mandate universe" in denied.json()["error"]

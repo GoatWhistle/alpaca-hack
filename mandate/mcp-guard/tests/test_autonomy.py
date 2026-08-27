@@ -18,12 +18,18 @@ def test_trajectory_persists_valid_bounded_changes(tmp_path: Path) -> None:
         analysis_interval_minutes=30,
         risk_posture="defensive",
         thesis="  Wait for two confirming signals.  ",
+        monitoring_mode="polling",
+        discovery_top=20,
+        max_spread_bps=25,
     )
 
     assert updated.version == initial.version + 1
     assert updated.symbols == ["MSFT"]
     assert updated.analysis_interval_minutes == 30
     assert updated.thesis == "Wait for two confirming signals."
+    assert updated.monitoring_mode == "polling"
+    assert updated.discovery_top == 20
+    assert updated.max_spread_bps == 25
     assert store.read() == updated
 
 
@@ -45,4 +51,3 @@ def test_recent_alerts_are_bounded_and_skip_malformed_lines(tmp_path: Path) -> N
     )
     store = AutonomyStore(tmp_path / "trajectory.json", alerts)
     assert store.recent_alerts(limit=3) == [{"id": 1}, {"id": 2}]
-

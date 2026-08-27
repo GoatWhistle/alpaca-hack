@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
@@ -23,6 +24,15 @@ class Trajectory(BaseModel):
     symbols: list[str] = Field(default_factory=lambda: ["AAPL", "MSFT", "NVDA", "SPY"])
     news_poll_seconds: int = Field(default=60, ge=30, le=3600)
     analysis_interval_minutes: int = Field(default=15, ge=5, le=1440)
+    monitoring_mode: Literal["realtime", "polling"] = "realtime"
+    market_data_feed: Literal["auto", "iex", "sip"] = "auto"
+    discovery_enabled: bool = True
+    discovery_top: int = Field(default=10, ge=1, le=50)
+    regular_hours_only: bool = True
+    max_spread_bps: int = Field(default=35, ge=1, le=1000)
+    min_relative_volume: Decimal = Field(default=Decimal("0.25"), ge=0, le=100)
+    monitor_corporate_actions: bool = True
+    options_confirmation: bool = False
     risk_posture: Literal["defensive", "balanced", "opportunistic"] = "balanced"
     thesis: str = Field(
         default="Prefer explainable, price-confirmed signals and park when evidence conflicts.",
@@ -66,7 +76,10 @@ class AutonomyStore:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError("autonomy trajectory is unreadable") from exc
-        return Trajectory.model_validate(payload)
+        trajectory = Trajectory.model_validate(payload)
+        if set(payload) != set(trajectory.model_dump(mode="json")):
+            self._write(trajectory)
+        return trajectory
 
     def update(
         self,
@@ -79,6 +92,15 @@ class AutonomyStore:
         analysis_interval_minutes: int | None = None,
         risk_posture: str | None = None,
         thesis: str | None = None,
+        monitoring_mode: str | None = None,
+        market_data_feed: str | None = None,
+        discovery_enabled: bool | None = None,
+        discovery_top: int | None = None,
+        regular_hours_only: bool | None = None,
+        max_spread_bps: int | None = None,
+        min_relative_volume: Decimal | None = None,
+        monitor_corporate_actions: bool | None = None,
+        options_confirmation: bool | None = None,
     ) -> Trajectory:
         current = self.read()
         changes: dict[str, Any] = {
@@ -93,6 +115,15 @@ class AutonomyStore:
             "analysis_interval_minutes": analysis_interval_minutes,
             "risk_posture": risk_posture,
             "thesis": thesis,
+            "monitoring_mode": monitoring_mode,
+            "market_data_feed": market_data_feed,
+            "discovery_enabled": discovery_enabled,
+            "discovery_top": discovery_top,
+            "regular_hours_only": regular_hours_only,
+            "max_spread_bps": max_spread_bps,
+            "min_relative_volume": min_relative_volume,
+            "monitor_corporate_actions": monitor_corporate_actions,
+            "options_confirmation": options_confirmation,
         }.items():
             if value is not None:
                 changes[key] = value
@@ -130,4 +161,3 @@ class AutonomyStore:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, self.path)
-
