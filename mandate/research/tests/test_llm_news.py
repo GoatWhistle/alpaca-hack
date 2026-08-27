@@ -73,3 +73,19 @@ def test_llm_scorer_rejects_non_official_endpoint(monkeypatch) -> None:
     result = score_news_batch_llm([event], symbol="AAPL", poster=lambda *_: {})[0]
     assert result["available"] is False
     assert "ValueError" in result["reason"]
+
+
+def test_llm_scorer_bounds_batch_size() -> None:
+    events = [
+        NewsEvent(
+            "alpaca", f"batch-{index}", datetime(2026, 8, 27, tzinfo=timezone.utc),
+            f"Batch fixture {index}", symbols=("AAPL",),
+        )
+        for index in range(21)
+    ]
+    try:
+        score_news_batch_llm(events, symbol="AAPL")
+    except ValueError as exc:
+        assert "at most 20" in str(exc)
+    else:
+        raise AssertionError("oversized LLM batch was accepted")

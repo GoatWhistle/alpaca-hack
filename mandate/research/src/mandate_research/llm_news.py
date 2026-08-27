@@ -20,7 +20,10 @@ EVENT_TYPES = {
     "capital_return", "macro", "legal", "operations", "other",
 }
 HORIZONS = {"intraday", "multiday", "long_term"}
-MAX_ITEMS = 50
+# Twenty bounded records keep GLM's reasons comfortably inside the JSON token budget.
+# A truncated batch is worse than a few extra requests because every omitted item
+# must fail closed.
+MAX_ITEMS = 20
 MAX_CACHE_ITEMS = 4_096
 _CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 

@@ -15,7 +15,7 @@ from mandate_research.live_sources import (
     _fetch,
     collect_official_news,
 )
-from mandate_research.llm_news import score_news_batch_llm
+from mandate_research.llm_news import MAX_ITEMS as MAX_LLM_BATCH_ITEMS, score_news_batch_llm
 from mandate_research.news import MAX_FEED_BYTES, deduplicate, parse_alpaca_news
 
 
@@ -105,8 +105,8 @@ def compare_live_signals(
     events = deduplicate([*alpaca_events, *official_events])
     scored_events = []
     scoring_available = 0
-    for start_index in range(0, len(events), 50):
-        chunk = events[start_index : start_index + 50]
+    for start_index in range(0, len(events), MAX_LLM_BATCH_ITEMS):
+        chunk = events[start_index : start_index + MAX_LLM_BATCH_ITEMS]
         scores = news_scorer(chunk, symbol=normalized)
         if len(scores) != len(chunk):
             raise ValueError("news scorer must return exactly one result per event")
