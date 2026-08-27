@@ -10,6 +10,7 @@ from mcp.types import ToolAnnotations
 from mandate_research.live_comparison import compare_live_signals as compare_live
 from mandate_research.live_sources import probe_live_sources as probe_live
 from mandate_research.monitoring import collect_market_monitoring as collect_monitoring
+from mandate_research.decision_math import evaluate_trajectory as evaluate_math
 
 
 READ_ONLY = ToolAnnotations(
@@ -25,6 +26,7 @@ def create_server(
     compare: Callable[..., dict[str, Any]] = compare_live,
     probe: Callable[..., dict[str, Any]] = probe_live,
     monitor: Callable[..., dict[str, Any]] = collect_monitoring,
+    evaluate: Callable[..., dict[str, Any]] = evaluate_math,
     host: str = "127.0.0.1",
     port: int = 8020,
 ) -> FastMCP:
@@ -58,6 +60,36 @@ def create_server(
         """Read Alpaca snapshots, quality gates, SPY context, discovery, and action risks."""
         normalized = [value.strip().upper() for value in symbols.split(",") if value.strip()]
         return monitor(symbols=normalized, feed=feed)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def evaluate_trajectory(
+        symbols: str = "AAPL,MSFT,NVDA,SPY",
+        fee_bps: str = "1",
+        max_spread_bps: str = "35",
+        min_relative_volume: str = "0.25",
+        single_symbol_move_pct: str = "5",
+        regular_hours_only: bool = True,
+        equity: str = "",
+        risk_budget_pct: str = "0.25",
+        atr_multiplier: str = "2",
+        position_headroom_pct: str = "",
+        gross_headroom_pct: str = "",
+    ) -> dict[str, Any]:
+        """Compute one deterministic multi-symbol quality, signal, and backtest decision matrix."""
+        normalized = [value.strip().upper() for value in symbols.split(",") if value.strip()]
+        return evaluate(
+            symbols=normalized,
+            fee_bps=fee_bps,
+            max_spread_bps=max_spread_bps,
+            min_relative_volume=min_relative_volume,
+            single_symbol_move_pct=single_symbol_move_pct,
+            regular_hours_only=regular_hours_only,
+            equity=equity,
+            risk_budget_pct=risk_budget_pct,
+            atr_multiplier=atr_multiplier,
+            position_headroom_pct=position_headroom_pct,
+            gross_headroom_pct=gross_headroom_pct,
+        )
 
     return mcp
 

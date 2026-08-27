@@ -234,6 +234,10 @@ export function App() {
   const pending = data?.session.pending_orders ?? [];
   const trajectory = data?.autonomy.trajectory ?? {};
   const autonomyRuntime = data?.autonomy.runtime ?? {};
+  const rawScorecard = data?.autonomy.outcomes.scorecard;
+  const outcomeScorecard = rawScorecard && typeof rawScorecard === "object" && !Array.isArray(rawScorecard)
+    ? Object.entries(rawScorecard as Record<string, unknown>)
+    : [];
   const newsAlerts = [...(data?.autonomy.alerts ?? [])].reverse().slice(0, 3);
   const autonomyStatus = String(autonomyRuntime.status ?? "not_started");
   const dailyPnl = number(account.daily_pnl);
@@ -346,6 +350,21 @@ export function App() {
                   <span><small>Discovery</small><b>{String(autonomyRuntime.discovery_candidates ?? 0)} observed</b></span>
                   <span><small>Data feed</small><b>{String(autonomyRuntime.market_feed ?? "—")}</b></span>
                   <span><small>Forward outcomes</small><b>{String(autonomyRuntime.outcomes_observed ?? 0)} measured</b></span>
+                </div>
+                <div className="outcome-scorecard">
+                  <div className="subsection-title"><span>60m strategy scorecard</span><b>{outcomeScorecard.length}</b></div>
+                  {outcomeScorecard.length ? <table>
+                    <thead><tr><th>Strategy</th><th>N</th><th>Mean</th><th>Hit</th></tr></thead>
+                    <tbody>{outcomeScorecard.map(([name, raw]) => {
+                      const item = raw as Record<string, unknown>;
+                      return <tr key={name}>
+                        <td>{name.replaceAll("_", " ")}</td>
+                        <td>{String(item.observations ?? 0)}</td>
+                        <td>{String(item.mean_signed_return_pct ?? "—")}%</td>
+                        <td>{String(item.directional_accuracy_pct ?? "—")}%</td>
+                      </tr>;
+                    })}</tbody>
+                  </table> : <p className="muted">Appears after proposed signals receive a 60-minute outcome.</p>}
                 </div>
                 <div className="alert-list">
                   <div className="subsection-title"><span>Latest news deliveries</span><b>{data?.autonomy.alerts.length ?? 0}</b></div>

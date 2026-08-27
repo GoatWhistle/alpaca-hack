@@ -79,9 +79,10 @@ def test_live_comparison_uses_real_shape_and_all_strategies(
     assert set(result["backtest"]) == {
         "momentum",
         "mean_reversion",
-        "breakout_volume",
-        "news_price_confirmation",
-    }
+            "breakout_volume",
+            "news_price_confirmation",
+            "regime_ensemble",
+        }
 
 
 def test_live_comparison_follows_bounded_bar_pagination(

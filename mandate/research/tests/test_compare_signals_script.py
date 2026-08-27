@@ -58,9 +58,10 @@ def test_analyze_compares_all_strategies_and_filters_future_news() -> None:
     assert set(result["signals"]) == {
         "momentum",
         "mean_reversion",
-        "breakout_volume",
-        "news_price_confirmation",
-    }
+            "breakout_volume",
+            "news_price_confirmation",
+            "regime_ensemble",
+        }
     assert set(result["backtest"]) == set(result["signals"])
 
 

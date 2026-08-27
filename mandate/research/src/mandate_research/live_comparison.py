@@ -102,6 +102,7 @@ def compare_live_signals(
     payload = {
         "symbol": normalized,
         "fee_bps": fee_bps,
+        "slippage_bps": "1",
         "news_max_age_hours": "24",
         "bars": [
             {

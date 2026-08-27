@@ -51,6 +51,21 @@ def test_fees_reduce_return_and_turnover_is_reported() -> None:
     assert paid.position_changes == 1
 
 
+def test_slippage_charges_entry_and_final_exit_on_holdout() -> None:
+    bars = make_bars(["100", "101", "102", "103", "104"])
+    free = evaluate_strategy(
+        bars, always_buy, warmup=1, evaluation_start=3, liquidate_at_end=True
+    )
+    crossed = evaluate_strategy(
+        bars, always_buy, warmup=1, evaluation_start=3,
+        slippage_bps=Decimal("10"), liquidate_at_end=True,
+    )
+    assert free.observations == 2
+    assert crossed.turnover == Decimal("2")
+    assert crossed.position_changes == 2
+    assert crossed.total_return_pct < free.total_return_pct
+
+
 def test_compare_runs_explainable_strategies_on_same_bars() -> None:
     bars = make_bars(["100", "101", "102", "103", "104"])
     results = compare_strategies(

@@ -46,7 +46,7 @@ def _quality(
     snapshot: dict[str, Any],
     *,
     now: datetime,
-    max_spread_bps: int,
+    max_spread_bps: Decimal,
     min_relative_volume: Decimal,
 ) -> dict[str, Any]:
     quote = snapshot.get("latestQuote") if isinstance(snapshot.get("latestQuote"), dict) else {}
@@ -63,6 +63,11 @@ def _quality(
     last = _decimal(trade.get("p")) or _decimal(minute.get("c")) or _decimal(daily.get("c"))
     gap_pct = _percent(open_price - previous_close, previous_close) if open_price is not None and previous_close is not None else None
     intraday_pct = _percent(last - open_price, open_price) if last is not None and open_price is not None else None
+    session_change_pct = (
+        _percent(last - previous_close, previous_close)
+        if last is not None and previous_close is not None
+        else None
+    )
     ages = [
         age for age in (
             _iso_age_seconds(quote.get("t"), now),
@@ -93,6 +98,11 @@ def _quality(
         "relative_volume": str(relative_volume.quantize(Decimal("0.001"))) if relative_volume is not None else None,
         "gap_pct": str(gap_pct.quantize(Decimal("0.01"))) if gap_pct is not None else None,
         "intraday_pct": str(intraday_pct.quantize(Decimal("0.01"))) if intraday_pct is not None else None,
+        "session_change_pct": (
+            str(session_change_pct.quantize(Decimal("0.01")))
+            if session_change_pct is not None
+            else None
+        ),
         "vwap": str(_decimal(daily.get("vw"))) if _decimal(daily.get("vw")) is not None else None,
         "stale_seconds": stale_seconds,
         "quality_pass": not failures,
@@ -115,7 +125,7 @@ def collect_market_monitoring(
     discovery_top: int = 10,
     monitor_corporate_actions: bool = True,
     options_confirmation: bool = False,
-    max_spread_bps: int = 35,
+    max_spread_bps: str = "35",
     min_relative_volume: str = "0.25",
     now: datetime | None = None,
     fetcher: JsonFetcher = _fetch_json,
@@ -142,13 +152,18 @@ def collect_market_monitoring(
     if not isinstance(snapshots, dict):
         snapshots = {}
         snapshot_status = {"status": "error", "error_type": "InvalidPayload"}
-    minimum_volume = Decimal(min_relative_volume)
+    spread_limit = _decimal(max_spread_bps)
+    minimum_volume = _decimal(min_relative_volume)
+    if spread_limit is None or not spread_limit.is_finite() or spread_limit <= 0:
+        raise ValueError("max_spread_bps must be a positive finite decimal")
+    if minimum_volume is None or not minimum_volume.is_finite() or minimum_volume < 0:
+        raise ValueError("min_relative_volume must be a non-negative finite decimal")
     quality = {
         symbol: _quality(
             symbol,
             item if isinstance(item, dict) else {},
             now=checked_at,
-            max_spread_bps=max_spread_bps,
+            max_spread_bps=spread_limit,
             min_relative_volume=minimum_volume,
         )
         for symbol, item in snapshots.items()

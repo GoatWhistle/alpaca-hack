@@ -7,6 +7,7 @@ from typing import Any
 
 from mandate_research.backtest import compare_strategies
 from mandate_research.news import NewsEvent, deduplicate
+from mandate_research.regime import classify_market_regime, weighted_ensemble
 from mandate_research.signals import (
     PriceBar,
     breakout_volume_signal,
@@ -14,6 +15,7 @@ from mandate_research.signals import (
     momentum_signal,
     news_price_confirmation_signal,
 )
+from mandate_research.sizing import average_true_range
 
 
 def _decimal(value: Any) -> Decimal:
@@ -78,7 +80,7 @@ def analyze(payload: dict[str, Any]) -> dict[str, Any]:
         event for event in all_eligible_events if event.published_at >= cutoff - max_news_age
     )
 
-    strategies = {
+    strategies: dict[str, tuple[Any, int]] = {
         "momentum": (lambda window: momentum_signal(window, lookback=5), 6),
         "mean_reversion": (lambda window: mean_reversion_signal(window, lookback=20), 20),
         "breakout_volume": (lambda window: breakout_volume_signal(window, lookback=20), 21),
@@ -93,15 +95,64 @@ def analyze(payload: dict[str, Any]) -> dict[str, Any]:
             4,
         ),
     }
+    def regime_ensemble(window: list[PriceBar]) -> Any:
+        component_signals = {
+            name: strategy(window)
+            for name, (strategy, _warmup) in strategies.items()
+            if name != "regime_ensemble"
+        }
+        regime = classify_market_regime(window)
+        return weighted_ensemble(component_signals, regime["strategy_weights"])
+
+    strategies["regime_ensemble"] = (regime_ensemble, 21)
     fee_bps = _decimal(payload.get("fee_bps", "1"))
-    metrics = compare_strategies(bars, strategies, fee_bps=fee_bps)
+    slippage_bps = _decimal(payload.get("slippage_bps", "1"))
+    metrics = compare_strategies(
+        bars, strategies, fee_bps=fee_bps, slippage_bps=slippage_bps,
+        liquidate_at_end=True,
+    )
+    split = max(22, int(len(bars) * 2 / 3))
+    holdout: dict[str, Any] = {"status": "insufficient_history"}
+    if split < len(bars):
+        train_metrics = compare_strategies(
+            bars[:split], strategies, fee_bps=fee_bps, slippage_bps=slippage_bps,
+            liquidate_at_end=True,
+        )
+        test_metrics = compare_strategies(
+            bars, strategies, fee_bps=fee_bps, slippage_bps=slippage_bps,
+            evaluation_start=split, liquidate_at_end=True,
+        )
+        holdout = {
+            "status": "ok",
+            "train_bars": split,
+            "test_bars": len(bars) - split,
+            "parameters_frozen": True,
+            "train": {
+                name: {key: str(value) for key, value in asdict(result).items()}
+                for name, result in train_metrics.items()
+            },
+            "test": {
+                name: {key: str(value) for key, value in asdict(result).items()}
+                for name, result in test_metrics.items()
+            },
+        }
     current = {name: strategy(bars) for name, (strategy, _warmup) in strategies.items()}
+    regime = classify_market_regime(bars)
+    atr14 = average_true_range(bars)
     return {
         "symbol": symbol,
         "as_of": cutoff.isoformat(),
         "news_events_used": len(current_events),
         "news_max_age_hours": str(news_max_age_hours),
         "fee_bps": str(fee_bps),
+        "slippage_bps": str(slippage_bps),
+        "cost_model": "fee plus explicit spread-crossing slippage on entries, changes, and final exit",
+        "chronological_holdout": holdout,
+        "risk": {
+            "atr14": str(atr14),
+            "atr_pct": str((atr14 / bars[-1].close * Decimal("100")).quantize(Decimal("0.0001"))),
+            "market_regime": regime,
+        },
         "signals": {
             name: {
                 "direction": signal.direction.value,

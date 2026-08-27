@@ -273,6 +273,7 @@ class GuardService:
             "mandate": active_mandate.model_dump(mode="json"),
             "as_of": checked_at.isoformat(),
             "market_is_open": market_clock.is_open,
+            "account": {"equity": str(snapshot.account.equity)},
             "usage": {
                 "max_position_pct": str(usage.max_position_pct),
                 "gross_exposure_pct": str(usage.gross_exposure_pct),
