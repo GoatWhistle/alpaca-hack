@@ -21,7 +21,9 @@ The agent never receives a raw order-placement tool. Its only execution path is 
 TrueForge requires human approval only for the three irreversible guard tools: submit, cancel and close.
 Approval does not bypass the mandate. Direct Alpaca execution tools are excluded with an explicit
 research-tool allowlist. Stable intent IDs make submission retries idempotent, and cancellation is allowed
-only when the order's client ID is backed by a submitted event in the persistent guard journal.
+only when the order's client ID is backed by a submitted event in the persistent guard journal. Every
+prepared, denied and submitted decision records a SHA-256 fingerprint of the exact validated mandate, so
+auditors can distinguish decisions made before and after a human hot-reload.
 
 Human predecisions are executable YAML, not model guidance. A directive such as
 `daily_loss_pct >= 1 → park_new_orders` is evaluated from the fresh broker snapshot before every order.
@@ -128,7 +130,7 @@ A separate restart test parked a hypothetical out-of-mandate action, stopped the
 fresh guard process and a new TrueForge session, then recovered the exact rationale and intended action from
 the fsynced JSONL journal. No broker write tool was involved.
 
-The current local suite has 78 guard tests and 20 research/Skill tests. It covers hot-reloaded human
+The current local suite has 79 guard tests and 20 research/Skill tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.

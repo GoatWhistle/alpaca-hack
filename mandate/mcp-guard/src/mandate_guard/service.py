@@ -178,6 +178,13 @@ class GuardService:
         encoded = json.dumps(cls._canonical_order(order), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode()).hexdigest()
 
+    @staticmethod
+    def _mandate_fingerprint(mandate: Mandate) -> str:
+        encoded = json.dumps(
+            mandate.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
     def _intent_records(self, intent_id: str) -> list[dict[str, Any]]:
         return [
             entry
@@ -303,6 +310,7 @@ class GuardService:
             client_order_id = f"mandate-{digest}"
             canonical_order = self._canonical_order(order)
             order_fingerprint = self._order_fingerprint(order)
+            mandate_fingerprint = self._mandate_fingerprint(active_mandate)
             records = self._intent_records(intent_id)
             binding_records = [
                 entry
@@ -310,6 +318,14 @@ class GuardService:
                 if entry["outcome"]
                 in {"prepared", "submitted", "submitted_reconciled", "denied"}
             ]
+            bound_mandate_fingerprint = next(
+                (
+                    entry["details"].get("mandate_fingerprint")
+                    for entry in binding_records
+                    if entry["details"].get("mandate_fingerprint")
+                ),
+                mandate_fingerprint,
+            )
             if any(entry["outcome"] == "denied" for entry in binding_records):
                 return {
                     "submitted": False,
@@ -330,6 +346,7 @@ class GuardService:
                         "intent_id": intent_id,
                         "order": canonical_order,
                         "order_fingerprint": order_fingerprint,
+                        "mandate_fingerprint": mandate_fingerprint,
                     },
                 )
                 return {
@@ -349,6 +366,7 @@ class GuardService:
                             "client_order_id": client_order_id,
                             "intent_id": intent_id,
                             "reason": "broker order has no durable guard provenance",
+                            "mandate_fingerprint": mandate_fingerprint,
                         },
                     )
                     return {
@@ -370,6 +388,7 @@ class GuardService:
                             "intent_id": intent_id,
                             "order": canonical_order,
                             "order_fingerprint": order_fingerprint,
+                            "mandate_fingerprint": bound_mandate_fingerprint,
                         },
                     )
                 self.journal.append(
@@ -380,12 +399,14 @@ class GuardService:
                         "client_order_id": client_order_id,
                         "intent_id": intent_id,
                         "order_fingerprint": order_fingerprint,
+                        "mandate_fingerprint": bound_mandate_fingerprint,
                     },
                 )
                 return {
                     "submitted": True,
                     "deduplicated": True,
                     "client_order_id": client_order_id,
+                    "mandate_fingerprint": bound_mandate_fingerprint,
                     "broker": existing,
                 }
             result, _snapshot = await self._evaluate_with_mandate(
@@ -397,10 +418,15 @@ class GuardService:
                     "intent_id": intent_id,
                     "order": canonical_order,
                     "order_fingerprint": order_fingerprint,
+                    "mandate_fingerprint": mandate_fingerprint,
                     "breaches": [asdict(item) for item in result.breaches],
                 }
                 self.journal.append("submit_order", "denied", rationale, details)
-                return {"submitted": False, **asdict(result)}
+                return {
+                    "submitted": False,
+                    "mandate_fingerprint": mandate_fingerprint,
+                    **asdict(result),
+                }
 
             if not any(entry["outcome"] == "prepared" for entry in binding_records):
                 self.journal.append(
@@ -412,6 +438,7 @@ class GuardService:
                         "intent_id": intent_id,
                         "order": canonical_order,
                         "order_fingerprint": order_fingerprint,
+                        "mandate_fingerprint": mandate_fingerprint,
                     },
                 )
             response = await self.broker.submit_order(order, client_order_id=client_order_id)
@@ -424,9 +451,15 @@ class GuardService:
                     "intent_id": intent_id,
                     "order": canonical_order,
                     "order_fingerprint": order_fingerprint,
+                    "mandate_fingerprint": mandate_fingerprint,
                 },
             )
-            return {"submitted": True, "client_order_id": client_order_id, "broker": response}
+            return {
+                "submitted": True,
+                "client_order_id": client_order_id,
+                "mandate_fingerprint": mandate_fingerprint,
+                "broker": response,
+            }
 
     async def close_position(
         self, symbol: str, qty: Decimal, *, rationale: str, now: datetime | None = None

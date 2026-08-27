@@ -164,8 +164,34 @@ def test_submit_allowed_order_uses_auditable_client_id(
     )
     assert result["submitted"] is True
     assert result["client_order_id"].startswith("mandate-")
+    assert len(result["mandate_fingerprint"]) == 64
     assert len(broker.submitted) == 1
     assert service.journal.snapshot()[0]["rationale"] == "confirmed momentum"
+    assert {
+        entry["details"]["mandate_fingerprint"] for entry in service.journal.snapshot()
+    } == {result["mandate_fingerprint"]}
+
+
+def test_hot_reloaded_mandate_versions_are_distinguishable_in_audit_log(
+    mandate: Mandate, market_open: datetime, tmp_path: Path
+) -> None:
+    mandate_path = tmp_path / "mandate.yaml"
+    _write_mandate(mandate_path, mandate)
+    service = GuardService(mandate, FakeBroker(), mandate_path=mandate_path)
+    order = OrderIntent("AAPL", Side.BUY, Decimal("1"), "limit", limit_price=Decimal("100"))
+
+    first = asyncio.run(
+        service.submit(order, rationale="first policy", intent_id="policy-v1", now=market_open)
+    )
+    tighter_limits = mandate.limits.model_copy(update={"max_orders_per_day": 10})
+    _write_mandate(mandate_path, mandate.model_copy(update={"limits": tighter_limits}))
+    second = asyncio.run(
+        service.submit(order, rationale="second policy", intent_id="policy-v2", now=market_open)
+    )
+
+    assert first["submitted"] is True
+    assert second["submitted"] is True
+    assert first["mandate_fingerprint"] != second["mandate_fingerprint"]
 
 
 def test_park_is_recorded(mandate: Mandate) -> None:
