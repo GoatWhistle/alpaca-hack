@@ -11,6 +11,7 @@ Qodo Code Review установлен на `GoatWhistle/harness-hack` до по�
 | [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M2 — TrueForge integration, deep review | 7 bugs: финальность отказа, crash provenance, конфликт intent ID, opt-in close, point-in-time revisions, нормализация символов, configurable guard URL | Все 7 исправлены с регрессионными тестами; повторный Qodo review: **Bugs 0, Rule violations 0** | Нет |
 | [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M3 — multi-source research MCP + live agent eval | Qodo на commit `26b5da8`: **Bugs 0, Rule violations 0, Skill insights 0** | Внутренний аудит до review исправил неверную привязку NVIDIA RSS к AAPL; добавлены fixed issuer mappings и регрессионный тест | Нет |
 | [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M4 — open-market paper E2E + cleanup | Qodo на commit `49378d4`: **Bugs 0, Rule violations 0, Skill insights 0** | Два approval, broker readback, idempotent retry и provenance-safe cancel зафиксированы в sanitized evidence artifact | Нет |
+| [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M4 — operator dashboard | Qodo на commit `bdb602a`: **Bugs 0, Rule violations 0, Skill insights 0** | Read-only live MCP surface, degraded journal fallback, secret-free browser payload и responsive UI проверены тестами и в браузере | Нет |
 
 Подробности исправлений deep review PR #1:
 
