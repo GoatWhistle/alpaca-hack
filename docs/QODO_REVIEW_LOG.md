@@ -13,6 +13,7 @@ Qodo Code Review установлен на `GoatWhistle/harness-hack` до по�
 | [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M4 — open-market paper E2E + cleanup | Qodo на commit `49378d4`: **Bugs 0, Rule violations 0, Skill insights 0** | Два approval, broker readback, idempotent retry и provenance-safe cancel зафиксированы в sanitized evidence artifact | Нет |
 | [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M4 — operator dashboard | Qodo на commit `bdb602a`: **Bugs 0, Rule violations 0, Skill insights 0** | Read-only live MCP surface, degraded journal fallback, secret-free browser payload и responsive UI проверены тестами и в браузере | Нет |
 | [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M5 — unified TrueForge operator UI | Qodo на commit `dcdbc31`: **Bugs 0, Rule violations 0, Skill insights 0** | Overview встроен рядом со stock Agent workspace; история, tool calls, composer, approval UI, mobile layout и оригинальная TrueForge palette проверены в живом браузере | Нет |
+| [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M6 — 24/7 autonomy + news control plane | Qodo на commit `215be7b`: **Bugs 0, Rule violations 0, Skill insights 0** | Durable news cursor с retry-очередью, read-only background cycles, chat trajectory approval, restart-safe runtime и автономный UI проверены unit-, live-agent- и browser-E2E тестами | Нет |
 
 Подробности исправлений deep review PR #1:
 
