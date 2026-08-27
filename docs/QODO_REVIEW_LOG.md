@@ -15,6 +15,7 @@ Qodo Code Review установлен на `GoatWhistle/harness-hack` до по�
 | [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M5 — unified TrueForge operator UI | Qodo на commit `dcdbc31`: **Bugs 0, Rule violations 0, Skill insights 0** | Overview встроен рядом со stock Agent workspace; история, tool calls, composer, approval UI, mobile layout и оригинальная TrueForge palette проверены в живом браузере | Нет |
 | [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M6 — 24/7 autonomy + news control plane | Qodo на commit `215be7b`: **Bugs 0, Rule violations 0, Skill insights 0** | Durable news cursor с retry-очередью, read-only background cycles, chat trajectory approval, restart-safe runtime и автономный UI проверены unit-, live-agent- и browser-E2E тестами | Нет |
 | [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M7 — clean-state reset + compact header | Qodo на commit `8b5ed84`: **Bugs 0, Rule violations 0, Skill insights 0** | Все 32 старые TrueForge-сессии и локальный runtime/audit state очищены; новый цикл стартовал с нуля, компактный header проверен в живом браузере | Нет |
+| [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M8 — realtime Alpaca monitoring control plane | Qodo на commit `30aff5d`: **Bugs 0, Rule violations 0, Skill insights 0** | WebSocket + REST fallback, market quality/SPY gates, observation-only discovery, corporate actions, forward outcomes и approval-gated UI проверены unit-, live-agent- и browser-E2E тестами | Нет |
 
 Подробности исправлений deep review PR #1:
 
