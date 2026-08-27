@@ -134,7 +134,7 @@ MANDATE_E2E_ALLOW=true npm run eval:paper-e2e
 
 ### Unified operator UI
 
-The TrueForge UI at `http://127.0.0.1:8790` is the single operator surface. **Overview** shows live
+The TrueForge UI at `http://localhost:8790` is the single operator surface. **Overview** shows live
 paper-account equity, positions and pending orders; mandate usage and headroom; service health; wake
 conditions; and the durable prepared, submitted, denied, deduplicated and parked decision timeline.
 **Agent workspace** keeps the stock TrueForge agent library, chat history, tool-call details, composer and
@@ -158,7 +158,7 @@ mandate-dashboard
 PORT=8790 FRONTEND_DIR=/absolute/path/to/harness/mandate/app/dist npx @truefoundry/trueforge@0.1.4
 ```
 
-Open only `http://127.0.0.1:8790` and switch between **Overview** and **Agent workspace**. Port `8030` is
+Open only `http://localhost:8790` and switch between **Overview** and **Agent workspace**. Port `8030` is
 the local, read-only companion API consumed by Overview; it is not a second UI.
 
 `eval:approval` is a fail-safe live conformance probe. It creates a dedicated TrueForge session, asks
