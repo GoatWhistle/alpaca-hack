@@ -106,6 +106,21 @@ def test_future_news_is_excluded_from_signal() -> None:
     assert result.direction is Direction.FLAT
 
 
+def test_stale_news_is_excluded_from_signal() -> None:
+    stale = NewsEvent(
+        "alpaca",
+        "stale",
+        datetime(2026, 8, 25, 12, tzinfo=timezone.utc),
+        "AAPL beats estimates and raises guidance",
+        symbols=("AAPL",),
+    )
+    result = news_price_confirmation_signal(
+        bars(["100", "101", "102", "103"]), [stale], symbol="AAPL", lookback=3
+    )
+    assert result.direction is Direction.FLAT
+    assert result.rationale == "no recent news"
+
+
 def test_invalid_signal_thresholds_are_rejected() -> None:
     import pytest
 

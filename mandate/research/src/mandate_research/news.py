@@ -168,12 +168,12 @@ def _entry_link(element: ET.Element) -> str | None:
     return None
 
 
-def parse_sec_atom(payload: str | bytes) -> list[NewsEvent]:
+def parse_atom(payload: str | bytes, *, source: str) -> list[NewsEvent]:
     text = _bounded_payload(payload)
     try:
         root = ET.fromstring(text)
     except ET.ParseError as exc:
-        raise NewsParseError("invalid SEC Atom XML") from exc
+        raise NewsParseError("invalid Atom XML") from exc
 
     events: list[NewsEvent] = []
     for entry in (element for element in root.iter() if _local_name(element.tag) == "entry"):
@@ -184,7 +184,7 @@ def parse_sec_atom(payload: str | bytes) -> list[NewsEvent]:
         ]
         events.append(
             _event(
-                source="sec-edgar",
+                source=source,
                 external_id=_child_text(entry, "id"),
                 published_at=_child_text(entry, "updated"),
                 headline=_child_text(entry, "title"),
@@ -194,6 +194,15 @@ def parse_sec_atom(payload: str | bytes) -> list[NewsEvent]:
             )
         )
     return events
+
+
+def parse_sec_atom(payload: str | bytes) -> list[NewsEvent]:
+    try:
+        return parse_atom(payload, source="sec-edgar")
+    except NewsParseError as exc:
+        if str(exc) == "invalid Atom XML":
+            raise NewsParseError("invalid SEC Atom XML") from exc
+        raise
 
 
 def parse_rss(payload: str | bytes, *, source: str) -> list[NewsEvent]:
@@ -236,3 +245,24 @@ def deduplicate(events: Iterable[NewsEvent]) -> list[NewsEvent]:
         if previous is None or event.published_at > previous.published_at:
             unique[key] = event
     return sorted(unique.values(), key=lambda event: event.published_at)
+
+
+def bind_symbol(events: Iterable[NewsEvent], symbol: str) -> list[NewsEvent]:
+    """Attach an explicit issuer mapping to a company-specific feed."""
+    normalized = symbol.strip().upper()
+    if not normalized:
+        raise ValueError("symbol cannot be blank")
+    return [
+        NewsEvent(
+            source=event.source,
+            external_id=event.external_id,
+            published_at=event.published_at,
+            headline=event.headline,
+            summary=event.summary,
+            symbols=tuple(sorted(set(event.symbols) | {normalized})),
+            url=event.url,
+            metadata=event.metadata,
+            content_hash=event.content_hash,
+        )
+        for event in events
+    ]

@@ -55,7 +55,8 @@ News is normalized as untrusted data before it reaches any strategy:
 
 The parsers cap input size, require timezone-aware timestamps, remove markup, normalize symbols and
 deduplicate revisions. Text such as “ignore previous instructions” remains inert data; it is never used as
-an agent instruction.
+an agent instruction. Company-specific feeds receive an explicit symbol binding before scoring, and the
+news strategy uses only revisions available at each historical cutoff within a bounded 24-hour window.
 
 The unprivileged `mandate-research` package is also a loadable TrueForge Skill. It contains the common
 evaluation harness and compares four
@@ -69,6 +70,19 @@ explainable approaches:
 Signals receive only the history available at their decision timestamp. The harness reports return,
 maximum drawdown, turnover and position changes, with configurable transaction costs. This is an
 engineering comparison, not a profitability claim.
+
+Two read-only live probes are available when Alpaca data credentials are exported:
+
+```bash
+cd mandate/research
+PYTHONPATH=src python scripts/probe_live_sources.py
+PYTHONPATH=src python scripts/compare_live_signals.py --symbol AAPL --fee-bps 1
+```
+
+The source probe isolates upstream failures so one unavailable publisher cannot erase evidence from the
+others; `--strict` requires every source to succeed. Fetches use verified TLS, fixed HTTPS host allowlists,
+one-megabyte response bounds and explicit SEC identification. The comparison runner follows bounded Alpaca
+pagination and reports the data cutoff, fees, observations, return, drawdown, turnover and position changes.
 
 ## Local verification
 
@@ -161,7 +175,15 @@ guard, the deterministic session rule stopped the order before an approval event
 new submission provenance and reported `brokerWriteAttempted: false`. The same runner contains the exact
 allow, broker-evidence and retry-dedup assertions for the next regular session.
 
-The current local suite has 84 guard tests and 20 research/Skill tests. It covers hot-reloaded human
+The current local suite has 84 guard tests and 29 research/Skill tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.
+
+On 27 August 2026 the live source probe parsed 20 Alpaca JSON events, 20 Apple Newsroom Atom events and
+20 NVIDIA investor-relations RSS events with unique content hashes and explicit symbol scope. SEC EDGAR's
+Atom endpoint returned HTTP 403 from this environment and is reported as an upstream failure rather than a
+successful parse. A live AAPL comparison then consumed 269 paginated IEX hourly bars and 50 Alpaca news
+items. With a 24-hour news window and 1 bp transaction cost, momentum returned 6.62% with 5.06% maximum
+drawdown while news-plus-price confirmation returned 1.37% with 0.95% maximum drawdown; mean reversion and
+breakout-with-volume were negative. These are engineering observations over this sample, not forecasts.

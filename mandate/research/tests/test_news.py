@@ -8,9 +8,11 @@ from mandate_research.news import (
     MAX_FEED_BYTES,
     NewsEvent,
     NewsParseError,
+    bind_symbol,
     clean_text,
     deduplicate,
     parse_alpaca_news,
+    parse_atom,
     parse_rss,
     parse_sec_atom,
 )
@@ -63,6 +65,18 @@ def test_sec_atom_parser_extracts_entry() -> None:
     assert event.summary == "Material event"
 
 
+def test_generic_atom_parser_supports_company_newsroom_feed() -> None:
+    xml = """<feed xmlns="http://www.w3.org/2005/Atom"><entry>
+    <id>apple-1</id><title>Apple product update</title>
+    <updated>2026-08-27T10:02:00Z</updated><content>Product details</content>
+    <link href="https://www.apple.com/newsroom/2026/08/example/" />
+    </entry></feed>"""
+    event = parse_atom(xml, source="apple-newsroom")[0]
+    assert event.source == "apple-newsroom"
+    assert event.summary == "Product details"
+    assert event.url == "https://www.apple.com/newsroom/2026/08/example/"
+
+
 def test_rss_parser_supports_rfc2822_date_and_ticker_attribute() -> None:
     xml = """<rss version="2.0"><channel><item>
       <guid>release-7</guid><title>Guidance raised</title>
@@ -96,3 +110,12 @@ def test_deduplicate_keeps_latest_version() -> None:
         "alpaca", "1", datetime(2026, 8, 26, 11, tzinfo=timezone.utc), "Corrected"
     )
     assert deduplicate([later, earlier]) == [later]
+
+
+def test_bind_symbol_makes_company_feed_scope_explicit() -> None:
+    event = NewsEvent(
+        "sec-edgar", "1", datetime(2026, 8, 26, 11, tzinfo=timezone.utc), "8-K filed"
+    )
+    bound = bind_symbol([event], " aapl ")[0]
+    assert bound.symbols == ("AAPL",)
+    assert bound.content_hash == event.content_hash

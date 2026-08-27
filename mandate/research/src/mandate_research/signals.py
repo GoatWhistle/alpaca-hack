@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Sequence
@@ -176,13 +176,18 @@ def news_price_confirmation_signal(
     symbol: str,
     lookback: int = 3,
     news_threshold: Decimal = Decimal("0.25"),
+    max_news_age: timedelta = timedelta(hours=24),
 ) -> TradeSignal:
     if not bars:
         raise ValueError("at least one bar is required")
     if not ZERO <= news_threshold <= ONE:
         raise ValueError("news_threshold must be between 0 and 1")
+    if max_news_age <= timedelta(0):
+        raise ValueError("max_news_age must be positive")
+    cutoff = bars[-1].timestamp
+    earliest = cutoff - max_news_age
     eligible_events = deduplicate(
-        event for event in events if event.published_at <= bars[-1].timestamp
+        event for event in events if earliest <= event.published_at <= cutoff
     )
     if not eligible_events:
         return _flat(bars, "no recent news")
