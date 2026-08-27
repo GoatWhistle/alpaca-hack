@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { TrueForgeUI } from "@truefoundry/trueforge-ui";
 import { getSnapshot, type Journal, type Snapshot } from "./api";
 import { decimal, money, number, percent, shortId, timestamp } from "./format";
 
 const REFRESH_MS = 5_000;
+type View = "overview" | "agent";
 
 function Icon({ name }: { name: "shield" | "refresh" | "external" | "pulse" }) {
   const paths = {
@@ -99,6 +101,7 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 export function App() {
+  const [view, setView] = useState<View>("overview");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -138,26 +141,36 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark"><Icon name="shield" /></span>
-          <div><strong>MANDATE</strong><small>OPERATOR CONSOLE</small></div>
-        </div>
-        <div className="top-actions">
-          <span className="paper-badge">PAPER ONLY</span>
-          <button className="ghost" onClick={() => setPaused((value) => !value)}>
-            <i className={paused ? "offline" : "online"} /> {paused ? "Paused" : "Auto-refresh"}
-          </button>
-          <button className="icon-button" aria-label="Refresh" onClick={() => void refresh()} disabled={refreshing}>
-            <span className={refreshing ? "spin" : ""}><Icon name="refresh" /></span>
-          </button>
-          <a className="primary-button" href={data?.agent_url ?? "http://127.0.0.1:8790"} target="_blank" rel="noreferrer">
-            Open agent <Icon name="external" />
-          </a>
-        </div>
-      </header>
+      <div className="mandate-chrome">
+        <header className="topbar">
+          <div className="brand">
+            <span className="brand-mark"><Icon name="shield" /></span>
+            <div><strong>MANDATE</strong><small>OPERATOR CONSOLE</small></div>
+          </div>
+          <nav className="view-tabs" aria-label="Workspace views">
+            <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>Overview</button>
+            <button className={view === "agent" ? "active" : ""} onClick={() => setView("agent")}>Agent workspace</button>
+          </nav>
+          <div className="top-actions">
+            <span className="paper-badge">PAPER ONLY</span>
+            {view === "overview" && (
+              <>
+                <button className="ghost" onClick={() => setPaused((value) => !value)}>
+                  <i className={paused ? "offline" : "online"} /> {paused ? "Paused" : "Auto-refresh"}
+                </button>
+                <button className="icon-button" aria-label="Refresh" onClick={() => void refresh()} disabled={refreshing}>
+                  <span className={refreshing ? "spin" : ""}><Icon name="refresh" /></span>
+                </button>
+              </>
+            )}
+            <button className="primary-button" onClick={() => setView(view === "agent" ? "overview" : "agent")}>
+              {view === "agent" ? "View overview" : "Open agent"} <Icon name={view === "agent" ? "pulse" : "external"} />
+            </button>
+          </div>
+        </header>
+      </div>
 
-      <main>
+      {view === "overview" ? <div className="mandate-chrome operator-view"><main>
         <section className="hero-row">
           <div>
             <div className="eyebrow"><Icon name="pulse" /> LIVE SUPERVISION</div>
@@ -272,7 +285,25 @@ export function App() {
         </section>
       </main>
 
-      <footer><span>MANDATE · Local operator surface</span><span>Paper trading only · Not investment advice</span></footer>
+      <footer><span>MANDATE · TrueForge operator surface</span><span>Paper trading only · Not investment advice</span></footer></div> : (
+        <section className="agent-workspace" aria-label="MANDATE agent workspace">
+          <TrueForgeUI
+            server={{ type: "trueforge", baseUrl: "/" }}
+            layout="sidebar"
+            theme={{
+              preset: "trueforge",
+              mode: "dark",
+              brand: { name: "MANDATE" },
+              tokens: {
+                primaryButtonBg: "oklch(0.86 0.20 125)",
+                primaryButtonHover: "oklch(0.91 0.18 125)",
+                primaryButtonText: "oklch(0.12 0.02 160)",
+                radius: "0.25rem",
+              },
+            }}
+          />
+        </section>
+      )}
     </div>
   );
 }

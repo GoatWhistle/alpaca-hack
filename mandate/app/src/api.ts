@@ -43,7 +43,9 @@ export type Snapshot = z.infer<typeof SnapshotSchema>;
 export type Journal = z.infer<typeof JournalEntry>;
 
 export async function getSnapshot(signal?: AbortSignal): Promise<Snapshot> {
-  const response = await fetch("/api/snapshot", {
+  const apiBase = import.meta.env.VITE_MANDATE_API_URL
+    ?? `${window.location.protocol}//${window.location.hostname}:8030`;
+  const response = await fetch(`${apiBase}/api/snapshot`, {
     headers: { Accept: "application/json" },
     cache: "no-store",
     signal,

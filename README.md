@@ -132,16 +132,18 @@ npm run eval:research-e2e
 MANDATE_E2E_ALLOW=true npm run eval:paper-e2e
 ```
 
-### Operator dashboard
+### Unified operator UI
 
-The local read-only dashboard makes the agent's state understandable without digging through raw MCP
-events. It shows live paper-account equity, positions and pending orders; mandate usage and headroom;
-service health; wake conditions; and the durable prepared, submitted, denied, deduplicated and parked
-decision timeline. Broker credentials never reach the browser: live data is read through the guard's
-read-only MCP tools. If the guard is restarting, the dashboard fails visibly into a degraded mode backed
-by the local mandate and journal instead of displaying stale values as live.
+The TrueForge UI at `http://127.0.0.1:8790` is the single operator surface. **Overview** shows live
+paper-account equity, positions and pending orders; mandate usage and headroom; service health; wake
+conditions; and the durable prepared, submitted, denied, deduplicated and parked decision timeline.
+**Agent workspace** keeps the stock TrueForge agent library, chat history, tool-call details, composer and
+approval cards. Broker credentials never reach the browser: live overview data is read through the guard's
+read-only MCP tools. If the guard is restarting, Overview fails visibly into a degraded mode backed by the
+local mandate and journal instead of displaying stale values as live.
 
-Build the web assets and start the local server after the guard is running:
+Use Node 22 or 24, build the web assets, then start the companion overview API and TrueForge after the
+guard is running:
 
 ```bash
 cd mandate/app
@@ -151,10 +153,13 @@ npm run build
 cd ../mcp-guard
 python -m pip install -e .
 mandate-dashboard
+
+# In another terminal, from the repository root:
+PORT=8790 FRONTEND_DIR=/absolute/path/to/harness/mandate/app/dist npx @truefoundry/trueforge@0.1.4
 ```
 
-Open `http://127.0.0.1:8030`. The **Open agent** button switches to the stock TrueForge UI for chat,
-tool-call details and approval decisions; the dashboard itself is deliberately read-only.
+Open only `http://127.0.0.1:8790` and switch between **Overview** and **Agent workspace**. Port `8030` is
+the local, read-only companion API consumed by Overview; it is not a second UI.
 
 `eval:approval` is a fail-safe live conformance probe. It creates a dedicated TrueForge session, asks
 the configured model to request `cancel_order` for a nonexistent probe ID, verifies the exact tool pauses

@@ -4,6 +4,8 @@ import asyncio
 import json
 import os
 from datetime import datetime, timezone
+from decimal import Decimal
+from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncIterator, Protocol
 from urllib.parse import urlparse
@@ -12,6 +14,7 @@ import yaml
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from starlette.applications import Starlette
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
@@ -65,6 +68,21 @@ def _tool_payload(result: Any) -> dict[str, Any]:
         if isinstance(payload, dict):
             return payload
     raise RuntimeError("guard returned no JSON object")
+
+
+def _wire_payload(value: Any) -> Any:
+    """Normalize typed MCP values before handing them to Starlette's JSON encoder."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {str(key): _wire_payload(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_wire_payload(item) for item in value]
+    return value
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -204,7 +222,7 @@ def create_dashboard(
             journal_path=active_journal,
             service_urls=urls,
         )
-        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+        return JSONResponse(_wire_payload(payload), headers={"Cache-Control": "no-store"})
 
     async def index(request: Request) -> Response:
         requested = request.path_params.get("path", "")
@@ -224,7 +242,14 @@ def create_dashboard(
         Route("/api/snapshot", snapshot),
         Route("/{path:path}", index),
     ]
-    return Starlette(routes=routes)
+    app = Starlette(routes=routes)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:8790", "http://127.0.0.1:8790"],
+        allow_methods=["GET"],
+        allow_headers=["Accept"],
+    )
+    return app
 
 
 def main() -> None:

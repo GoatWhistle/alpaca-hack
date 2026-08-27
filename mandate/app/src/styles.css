@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   font-family: "Manrope", system-ui, sans-serif;
   color: #dce9e5;
@@ -17,9 +19,9 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 50% -20%, #17332a 0, var(--bg) 35rem); }
-button, a { font: inherit; }
-button { color: inherit; }
-svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.mandate-chrome button, .mandate-chrome a { font: inherit; }
+.mandate-chrome button { color: inherit; }
+.mandate-chrome svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 .app-shell { min-height: 100vh; }
 .topbar { height: 72px; padding: 0 36px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; background: rgba(7, 17, 15, .86); backdrop-filter: blur(18px); position: sticky; top: 0; z-index: 20; }
@@ -28,13 +30,19 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .brand div { display: flex; flex-direction: column; }
 .brand strong { letter-spacing: .16em; font-size: 15px; }
 .brand small, .kicker { color: var(--muted); font-family: "DM Mono", monospace; font-size: 9px; letter-spacing: .17em; }
+.view-tabs { align-self: stretch; display: flex; margin-left: 32px; }
+.view-tabs button { position: relative; min-width: 104px; padding: 0 16px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; }
+.view-tabs button::after { content: ""; position: absolute; left: 14px; right: 14px; bottom: -1px; height: 2px; background: transparent; }
+.view-tabs button:hover { color: var(--text); }
+.view-tabs button.active { color: var(--lime); }
+.view-tabs button.active::after { background: var(--lime); }
 .top-actions { display: flex; align-items: center; gap: 10px; }
 .paper-badge { color: var(--lime); border: 1px solid #3e5c30; background: #152219; padding: 7px 10px; font: 500 9px "DM Mono", monospace; letter-spacing: .13em; }
 .ghost, .icon-button, .primary-button { border: 1px solid var(--line); background: #0c1714; height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; text-decoration: none; }
 .ghost { padding: 0 13px; font-size: 11px; color: #91a69f; }
 .ghost i, .service i, .live-label i { width: 6px; height: 6px; border-radius: 50%; display: block; }
-.online { background: var(--mint); box-shadow: 0 0 10px rgba(93,226,174,.65); }
-.offline { background: var(--red); }
+.mandate-chrome .online { background: var(--mint); box-shadow: 0 0 10px rgba(93,226,174,.65); }
+.mandate-chrome .offline { background: var(--red); }
 .icon-button { width: 38px; }
 .icon-button:disabled { opacity: .45; }
 .primary-button { padding: 0 15px; color: #07110f; border-color: var(--lime); background: var(--lime); font-size: 11px; font-weight: 800; }
@@ -42,11 +50,11 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .spin { display: flex; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-main { max-width: 1440px; margin: 0 auto; padding: 38px 36px 60px; }
+.operator-view main { max-width: 1440px; margin: 0 auto; padding: 38px 36px 60px; }
 .hero-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
 .eyebrow { color: var(--lime); display: flex; align-items: center; gap: 7px; font: 500 9px "DM Mono", monospace; letter-spacing: .16em; }
 .eyebrow svg { width: 14px; }
-h1 { margin: 10px 0 6px; color: #eff8f5; font-size: clamp(26px, 3vw, 42px); letter-spacing: -.035em; }
+.operator-view h1 { margin: 10px 0 6px; color: #eff8f5; font-size: clamp(26px, 3vw, 42px); letter-spacing: -.035em; }
 .hero-row p { margin: 0; color: var(--muted); font-size: 13px; }
 .market-state { text-align: right; display: flex; flex-direction: column; gap: 8px; }
 .market-state span { font: 500 10px "DM Mono", monospace; letter-spacing: .13em; padding: 7px 10px; border: 1px solid; }
@@ -145,7 +153,9 @@ pre { overflow: auto; color: #8fa69e; background: #07110f; padding: 12px; font: 
 .empty { color: var(--muted); padding: 28px 20px; text-align: center; }
 .empty span { font: 400 20px "DM Mono", monospace; }
 .empty p { font-size: 10px; margin: 7px 0 0; }
-footer { max-width: 1440px; margin: 0 auto; padding: 18px 36px 30px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; color: #456158; font: 400 9px "DM Mono", monospace; }
+.operator-view footer { max-width: 1440px; margin: 0 auto; padding: 18px 36px 30px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; color: #456158; font: 400 9px "DM Mono", monospace; }
+.agent-workspace { height: calc(100dvh - 72px); min-height: 560px; background: #07110f; overflow: hidden; }
+.agent-workspace > .aui-theme-root { height: 100%; }
 
 @media (max-width: 1050px) {
   .metrics-grid { grid-template-columns: repeat(2, 1fr); }
@@ -155,10 +165,12 @@ footer { max-width: 1440px; margin: 0 auto; padding: 18px 36px 30px; border-top:
   .flow { flex-wrap: wrap; }
 }
 @media (max-width: 720px) {
-  .topbar { height: auto; padding: 14px 18px; align-items: flex-start; }
-  .top-actions { flex-wrap: wrap; justify-content: flex-end; }
-  .ghost, .paper-badge { display: none; }
-  main { padding: 26px 18px 40px; }
+  .topbar { height: 67px; padding: 10px 14px; align-items: center; }
+  .brand div { display: none; }
+  .view-tabs { align-self: stretch; margin-left: auto; margin-right: auto; }
+  .view-tabs button { min-width: 72px; padding: 0 8px; }
+  .top-actions { display: none; }
+  .operator-view main { padding: 26px 18px 40px; }
   .hero-row { align-items: flex-start; flex-direction: column; }
   .market-state { text-align: left; }
   .status-strip { overflow-x: auto; }
@@ -168,5 +180,6 @@ footer { max-width: 1440px; margin: 0 auto; padding: 18px 36px 30px; border-top:
   .flow { align-items: flex-start; flex-direction: column; }
   .flow > i { transform: rotate(90deg); margin-left: 18px; }
   .timeline-topline { flex-direction: column; gap: 5px; }
-  footer { padding: 18px; flex-direction: column; gap: 7px; }
+  .operator-view footer { padding: 18px; flex-direction: column; gap: 7px; }
+  .agent-workspace { height: calc(100dvh - 67px); min-height: 480px; }
 }

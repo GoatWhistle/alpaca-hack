@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
-from mandate_guard.dashboard import build_snapshot
+from mandate_guard.dashboard import _wire_payload, build_snapshot
 
 
 class FakeGuard:
@@ -93,3 +95,12 @@ def test_snapshot_falls_back_to_local_evidence(tmp_path: Path, monkeypatch) -> N
     assert result["mandate"]["mandate"]["name"] == "cached-mandate"
     assert result["session"]["journal"][0]["outcome"] == "parked"
     assert result["errors"] == ["guard unavailable: ConnectionError"]
+
+
+def test_wire_payload_normalizes_typed_mcp_values() -> None:
+    at = datetime(2026, 8, 27, 13, 30, tzinfo=timezone.utc)
+    assert _wire_payload({"at": at, "equity": Decimal("100000.00"), "items": (at,)}) == {
+        "at": "2026-08-27T13:30:00+00:00",
+        "equity": "100000.00",
+        "items": ["2026-08-27T13:30:00+00:00"],
+    }
