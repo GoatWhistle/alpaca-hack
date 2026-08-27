@@ -40,6 +40,11 @@ replacement when editing it in production. The agent has no tool for writing or 
 The server refuses live, HTTP, look-alike, credential-bearing, port-bearing, and path-bearing base URLs.
 Secrets are read from environment variables and must never be committed.
 
+Short selling is a separate, explicit mandate capability and defaults to disabled. The guard considers
+already-pending sell orders when evaluating a new sell, so individually valid orders cannot collectively
+cross a long position through zero. Buys that reduce an existing short remain possible without expanding
+that authority.
+
 ## Implemented research paths
 
 News is normalized as untrusted data before it reaches any strategy:
@@ -143,7 +148,7 @@ harness emitted `tool.approval_required`, accepted an automated denial, complete
 the guard journal byte-for-byte unchanged. This proves the irreversible tool was stopped before reaching
 the execution boundary even while the market was closed.
 
-The current local suite has 81 guard tests and 20 research/Skill tests. It covers hot-reloaded human
+The current local suite has 84 guard tests and 20 research/Skill tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.

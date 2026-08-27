@@ -241,6 +241,34 @@ def check_order_count(mandate: Mandate, portfolio: Portfolio) -> Breach | None:
     return Breach("max_orders_per_day", str(limit), str(projected), str(limit - projected))
 
 
+def check_short_position(
+    mandate: Mandate, portfolio: Portfolio, order: OrderIntent
+) -> Breach | None:
+    if mandate.allow_short_positions or order.side is not Side.SELL:
+        return None
+    current_qty = portfolio.positions.get(
+        order.symbol, Position(qty=ZERO, market_price=ZERO)
+    ).qty
+    pending_sell_qty = sum(
+        (
+            pending.remaining_qty
+            for pending in portfolio.pending_orders
+            if pending.symbol == order.symbol and pending.side is Side.SELL
+        ),
+        ZERO,
+    )
+    minimum_before = current_qty - pending_sell_qty
+    minimum_after = minimum_before - order.qty
+    if minimum_after >= min(minimum_before, ZERO):
+        return None
+    return Breach(
+        "allow_short_positions",
+        "false",
+        str(minimum_after),
+        "short-position-not-authorized",
+    )
+
+
 def check_session_window(
     mandate: Mandate, now: datetime, *, market_is_open: bool | None = None
 ) -> Breach | None:
@@ -285,6 +313,7 @@ def check_order(
         check_gross_exposure(mandate, projection),
         check_daily_loss(mandate, portfolio),
         check_order_count(mandate, portfolio),
+        check_short_position(mandate, portfolio, order),
         check_session_window(mandate, checked_at, market_is_open=market_is_open),
         check_expiry(mandate, checked_at),
     )

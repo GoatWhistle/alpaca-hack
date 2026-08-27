@@ -110,3 +110,8 @@ def test_repository_example_mandate_loads() -> None:
 def test_risk_reducing_market_close_requires_explicit_opt_in() -> None:
     mandate = Mandate.model_validate(valid_data())
     assert mandate.allow_risk_reducing_market_close is False
+
+
+def test_short_positions_require_explicit_opt_in() -> None:
+    mandate = Mandate.model_validate(valid_data())
+    assert mandate.allow_short_positions is False

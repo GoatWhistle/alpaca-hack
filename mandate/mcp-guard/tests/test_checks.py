@@ -20,6 +20,7 @@ from mandate_guard.checks import (
     check_order_type,
     check_position_limit,
     check_session_window,
+    check_short_position,
     check_universe,
     project_order,
 )
@@ -116,6 +117,28 @@ def test_sell_reduces_long_position_before_opening_short(portfolio: Portfolio) -
     projection = project_order(portfolio, sell, Decimal("100"))
     assert projection.projected_qty == Decimal("5")
     assert projection.position_pct == Decimal("5")
+
+
+def test_short_position_requires_explicit_mandate_permission(mandate: Mandate) -> None:
+    portfolio = Portfolio(equity=Decimal("10000"), positions={})
+    sell = OrderIntent("AAPL", Side.SELL, Decimal("1"), "limit", limit_price=Decimal("100"))
+
+    assert check_short_position(mandate, portfolio, sell).rule == "allow_short_positions"  # type: ignore[union-attr]
+    opted_in = mandate.model_copy(update={"allow_short_positions": True})
+    assert check_short_position(opted_in, portfolio, sell) is None
+
+
+def test_pending_sells_cannot_collectively_cross_into_short(mandate: Mandate) -> None:
+    portfolio = Portfolio(
+        equity=Decimal("10000"),
+        positions={"AAPL": Position(Decimal("5"), Decimal("100"))},
+        pending_orders=(PendingOrder("AAPL", Side.SELL, Decimal("4"), Decimal("100")),),
+    )
+    safe_sell = OrderIntent("AAPL", Side.SELL, Decimal("1"), "limit", limit_price=Decimal("100"))
+    short_sell = OrderIntent("AAPL", Side.SELL, Decimal("2"), "limit", limit_price=Decimal("100"))
+
+    assert check_short_position(mandate, portfolio, safe_sell) is None
+    assert check_short_position(mandate, portfolio, short_sell).rule == "allow_short_positions"  # type: ignore[union-attr]
 
 
 def test_composite_check_reports_all_independent_breaches(

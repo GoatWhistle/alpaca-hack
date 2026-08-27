@@ -19,5 +19,6 @@ predecided:
   - when: single_symbol_move_pct >= 5
     then: park_new_orders
     reason: Reassess event risk after an exceptional single-name move.
+allow_short_positions: false
 allow_risk_reducing_market_close: true
 expires: 2099-08-28T20:00:00Z

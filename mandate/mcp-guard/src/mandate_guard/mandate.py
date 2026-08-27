@@ -59,6 +59,7 @@ class Mandate(BaseModel):
     limits: Limits
     wake_me_if: list[str] = Field(default_factory=list)
     predecided: list[Predecision] = Field(default_factory=list)
+    allow_short_positions: bool = False
     allow_risk_reducing_market_close: bool = False
     expires: datetime
 
