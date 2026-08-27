@@ -354,7 +354,7 @@ export function App() {
                 <div className="outcome-scorecard">
                   <div className="subsection-title"><span>60m strategy scorecard</span><b>{outcomeScorecard.length}</b></div>
                   {outcomeScorecard.length ? <table>
-                    <thead><tr><th>Strategy</th><th>N</th><th>Mean</th><th>Hit</th></tr></thead>
+                    <thead><tr><th>Strategy</th><th>N</th><th>Mean</th><th>Hit</th><th>Weight</th></tr></thead>
                     <tbody>{outcomeScorecard.map(([name, raw]) => {
                       const item = raw as Record<string, unknown>;
                       return <tr key={name}>
@@ -362,6 +362,7 @@ export function App() {
                         <td>{String(item.observations ?? 0)}</td>
                         <td>{String(item.mean_signed_return_pct ?? "—")}%</td>
                         <td>{String(item.directional_accuracy_pct ?? "—")}%</td>
+                        <td>{String(item.adaptive_multiplier ?? "—")}×</td>
                       </tr>;
                     })}</tbody>
                   </table> : <p className="muted">Appears after proposed signals receive a 60-minute outcome.</p>}

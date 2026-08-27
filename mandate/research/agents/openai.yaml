@@ -1,4 +1,4 @@
 interface:
-  display_name: "MANDATE Decision Math"
-  short_description: "Deterministic multi-symbol trading research math"
-  default_prompt: "Use $mandate-research to evaluate the active trajectory without writing sandbox math code."
+  display_name: "MANDATE Decision Intelligence"
+  short_description: "LLM-scored adaptive trading research"
+  default_prompt: "Use $mandate-research to score news and evaluate the active trajectory without sandbox math."

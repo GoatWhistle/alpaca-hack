@@ -21,6 +21,7 @@ def test_regime_distinguishes_trend_and_range() -> None:
     assert trend["regime"] == "trend"
     assert trend["direction"] == "up"
     assert trend["strategy_weights"]["momentum"] == "0.45"
+    assert trend["risk_off"] is False
     assert ranged["regime"] == "range"
     assert ranged["strategy_weights"]["mean_reversion"] == "0.45"
 

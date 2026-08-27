@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from urllib.parse import urlencode
@@ -14,11 +15,13 @@ from mandate_research.live_sources import (
     _fetch,
     collect_official_news,
 )
+from mandate_research.llm_news import score_news_batch_llm
 from mandate_research.news import MAX_FEED_BYTES, deduplicate, parse_alpaca_news
 
 
 ALPACA_BARS_ENDPOINT = "https://data.alpaca.markets/v2/stocks/{symbol}/bars"
 JsonFetcher = Callable[[str, dict[str, str]], dict[str, Any]]
+NewsScorer = Callable[..., list[dict[str, Any]]]
 
 
 def _fetch_json(url: str, headers: dict[str, str]) -> dict[str, Any]:
@@ -62,6 +65,7 @@ def compare_live_signals(
     fetcher: JsonFetcher = _fetch_json,
     source_fetcher: Fetcher = _fetch,
     fee_bps: str = "1",
+    news_scorer: NewsScorer = score_news_batch_llm,
 ) -> dict[str, Any]:
     normalized = symbol.strip().upper()
     if not normalized:
@@ -99,10 +103,29 @@ def compare_live_signals(
         strict=False,
     )
     events = deduplicate([*alpaca_events, *official_events])
+    scored_events = []
+    scoring_available = 0
+    for start_index in range(0, len(events), 50):
+        chunk = events[start_index : start_index + 50]
+        scores = news_scorer(chunk, symbol=normalized)
+        if len(scores) != len(chunk):
+            raise ValueError("news scorer must return exactly one result per event")
+        for event, score in zip(chunk, scores):
+            if score.get("available") is True:
+                scoring_available += 1
+            scored_events.append(replace(event, metadata={
+                **event.metadata,
+                "llm_score": str(score.get("score", "0")),
+                "llm_confidence": str(score.get("confidence", "0")),
+                "llm_reason": str(score.get("reason", "")),
+                "llm_event_type": str(score.get("event_type", "other")),
+                "llm_horizon": str(score.get("horizon", "intraday")),
+            }))
+    events = scored_events
     payload = {
         "symbol": normalized,
         "fee_bps": fee_bps,
-        "slippage_bps": "1",
+        "slippage_bps": "2",
         "news_max_age_hours": "24",
         "bars": [
             {
@@ -124,6 +147,11 @@ def compare_live_signals(
                 "summary": event.summary,
                 "symbols": event.symbols,
                 "url": event.url,
+                "llm_score": event.metadata.get("llm_score", "0"),
+                "llm_confidence": event.metadata.get("llm_confidence", "0"),
+                "llm_reason": event.metadata.get("llm_reason", ""),
+                "llm_event_type": event.metadata.get("llm_event_type", "other"),
+                "llm_horizon": event.metadata.get("llm_horizon", "intraday"),
             }
             for event in events
         ],
@@ -134,6 +162,7 @@ def compare_live_signals(
             "source": "alpaca-iex",
             "bars": len(raw_bars),
             "news": len(events),
+            "news_llm_scored": scoring_available,
             "news_sources": {
                 "alpaca": {"status": "ok", "events": len(alpaca_events)},
                 **official_sources,

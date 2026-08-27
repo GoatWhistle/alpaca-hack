@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -132,41 +131,19 @@ def breakout_volume_signal(
     return _flat(bars, f"no price breakout; volume ratio {volume_ratio:.3f}")
 
 
-POSITIVE_WORDS = {
-    "beat",
-    "beats",
-    "growth",
-    "raised",
-    "raises",
-    "record",
-    "approval",
-    "approved",
-    "profit",
-}
-NEGATIVE_WORDS = {
-    "miss",
-    "misses",
-    "cut",
-    "cuts",
-    "fraud",
-    "investigation",
-    "recall",
-    "loss",
-    "downgrade",
-}
-
-
 def score_news(event: NewsEvent, *, symbol: str) -> Decimal:
     if event.symbols and symbol.upper() not in event.symbols:
         return ZERO
-    headline_tokens = re.findall(r"[a-z]+", event.headline.lower())
-    summary_tokens = re.findall(r"[a-z]+", event.summary.lower())
-    positive = Decimal(2 * sum(token in POSITIVE_WORDS for token in headline_tokens))
-    positive += Decimal(sum(token in POSITIVE_WORDS for token in summary_tokens))
-    negative = Decimal(2 * sum(token in NEGATIVE_WORDS for token in headline_tokens))
-    negative += Decimal(sum(token in NEGATIVE_WORDS for token in summary_tokens))
-    total = positive + negative
-    return ZERO if total == ZERO else (positive - negative) / total
+    try:
+        score = Decimal(event.metadata.get("llm_score", "0"))
+        confidence = Decimal(event.metadata.get("llm_confidence", "0"))
+    except (ArithmeticError, ValueError):
+        return ZERO
+    if not score.is_finite() or not confidence.is_finite():
+        return ZERO
+    if not -ONE <= score <= ONE or not ZERO <= confidence <= ONE:
+        return ZERO
+    return score * confidence
 
 
 def news_price_confirmation_signal(

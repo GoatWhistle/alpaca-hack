@@ -9,6 +9,7 @@ from mcp.types import ToolAnnotations
 
 from mandate_research.live_comparison import compare_live_signals as compare_live
 from mandate_research.live_sources import probe_live_sources as probe_live
+from mandate_research.llm_news import score_news_llm as score_llm
 from mandate_research.monitoring import collect_market_monitoring as collect_monitoring
 from mandate_research.decision_math import evaluate_trajectory as evaluate_math
 
@@ -27,6 +28,7 @@ def create_server(
     probe: Callable[..., dict[str, Any]] = probe_live,
     monitor: Callable[..., dict[str, Any]] = collect_monitoring,
     evaluate: Callable[..., dict[str, Any]] = evaluate_math,
+    score: Callable[..., dict[str, Any]] = score_llm,
     host: str = "127.0.0.1",
     port: int = 8020,
 ) -> FastMCP:
@@ -53,6 +55,11 @@ def create_server(
         return compare(symbol=symbol, fee_bps=fee_bps)
 
     @mcp.tool(annotations=READ_ONLY)
+    def score_news_llm(headline: str, summary: str = "", symbol: str = "AAPL") -> dict[str, Any]:
+        """Convert untrusted news into a bounded structured market-impact score; never execution authority."""
+        return score(headline=headline, summary=summary, symbol=symbol)
+
+    @mcp.tool(annotations=READ_ONLY)
     def get_market_monitoring(
         symbols: str = "AAPL,MSFT,NVDA,SPY",
         feed: str = "auto",
@@ -74,6 +81,7 @@ def create_server(
         atr_multiplier: str = "2",
         position_headroom_pct: str = "",
         gross_headroom_pct: str = "",
+        adaptive_weights_json: str = "{}",
     ) -> dict[str, Any]:
         """Compute one deterministic multi-symbol quality, signal, and backtest decision matrix."""
         normalized = [value.strip().upper() for value in symbols.split(",") if value.strip()]
@@ -89,6 +97,7 @@ def create_server(
             atr_multiplier=atr_multiplier,
             position_headroom_pct=position_headroom_pct,
             gross_headroom_pct=gross_headroom_pct,
+            adaptive_weights_json=adaptive_weights_json,
         )
 
     return mcp

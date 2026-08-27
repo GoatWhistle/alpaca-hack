@@ -69,6 +69,7 @@ def test_news_score_respects_symbol_and_balances_words() -> None:
         "AAPL beats estimates",
         "Growth offsets one loss",
         ("AAPL",),
+        metadata={"llm_score": "0.8", "llm_confidence": "0.75"},
     )
     assert score_news(event, symbol="AAPL") > Decimal("0")
     assert score_news(event, symbol="MSFT") == Decimal("0")
@@ -81,6 +82,7 @@ def test_news_signal_requires_matching_price_direction() -> None:
         datetime(2026, 8, 26, 13, 30, tzinfo=timezone.utc),
         "AAPL beats estimates and raises guidance",
         symbols=("AAPL",),
+        metadata={"llm_score": "0.8", "llm_confidence": "0.9"},
     )
     confirmed = news_price_confirmation_signal(
         bars(["100", "101", "102", "103"]), [positive], symbol="AAPL", lookback=3
@@ -99,6 +101,7 @@ def test_future_news_is_excluded_from_signal() -> None:
         datetime(2026, 8, 26, 15, tzinfo=timezone.utc),
         "AAPL beats estimates and raises guidance",
         symbols=("AAPL",),
+        metadata={"llm_score": "0.8", "llm_confidence": "0.9"},
     )
     result = news_price_confirmation_signal(
         bars(["100", "101", "102", "103"]), [future], symbol="AAPL", lookback=3
@@ -113,6 +116,7 @@ def test_stale_news_is_excluded_from_signal() -> None:
         datetime(2026, 8, 25, 12, tzinfo=timezone.utc),
         "AAPL beats estimates and raises guidance",
         symbols=("AAPL",),
+        metadata={"llm_score": "0.8", "llm_confidence": "0.9"},
     )
     result = news_price_confirmation_signal(
         bars(["100", "101", "102", "103"]), [stale], symbol="AAPL", lookback=3

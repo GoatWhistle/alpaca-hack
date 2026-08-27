@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from decimal import Decimal, InvalidOperation
+import json
 from typing import Any, Callable
 
 from mandate_research.live_comparison import compare_live_signals
@@ -58,6 +59,57 @@ def _compact_strategy(comparison: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _adaptive_weights(value: str) -> dict[str, Decimal]:
+    try:
+        decoded = json.loads(value or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError("adaptive_weights_json must be valid JSON") from exc
+    if not isinstance(decoded, dict):
+        raise ValueError("adaptive_weights_json must be an object")
+    allowed = {"momentum", "mean_reversion", "breakout_volume", "news_price_confirmation"}
+    result: dict[str, Decimal] = {}
+    for name, raw in decoded.items():
+        if name not in allowed:
+            continue
+        multiplier = _decimal(raw, f"adaptive weight {name}")
+        if not Decimal("0.25") <= multiplier <= Decimal("2"):
+            raise ValueError("adaptive weight multipliers must be between 0.25 and 2")
+        result[name] = multiplier
+    return result
+
+
+def _weighted_payload_ensemble(
+    strategies: dict[str, Any], base_weights: dict[str, Any], adaptive: dict[str, Decimal]
+) -> tuple[dict[str, Any], dict[str, str]]:
+    components = ("momentum", "mean_reversion", "breakout_volume", "news_price_confirmation")
+    raw_weights = {
+        name: _decimal(base_weights.get(name, "0.25"), f"base weight {name}") * adaptive.get(name, Decimal("1"))
+        for name in components
+    }
+    total = sum(raw_weights.values(), Decimal("0"))
+    weights = {name: value / total for name, value in raw_weights.items()} if total else {
+        name: Decimal("0.25") for name in components
+    }
+    score = Decimal("0")
+    contributions: list[str] = []
+    for name in components:
+        signal = strategies[name]
+        direction = {"buy": Decimal("1"), "sell": Decimal("-1")}.get(signal.get("direction"), Decimal("0"))
+        strength = _decimal(signal.get("strength", "0"), f"{name} strength")
+        contribution = direction * strength * weights[name]
+        score += contribution
+        contributions.append(f"{name}={contribution:.3f}")
+    direction = "flat"
+    if abs(score) >= Decimal("0.15"):
+        direction = "buy" if score > 0 else "sell"
+    return ({
+        "direction": direction,
+        "strength": str(min(abs(score), Decimal("1"))),
+        "rationale": f"SPY-regime adaptive score {score:.4f}; " + ", ".join(contributions),
+        "backtest": strategies.get("regime_ensemble", {}).get("backtest", {}),
+    }, {name: str(value.quantize(Decimal("0.0001"))) for name, value in weights.items()})
+
+
 def summarize_trajectory_math(
     *,
     symbols: list[str],
@@ -72,6 +124,7 @@ def summarize_trajectory_math(
     atr_multiplier: str = "2",
     position_headroom_pct: str = "",
     gross_headroom_pct: str = "",
+    adaptive_weights_json: str = "{}",
 ) -> dict[str, Any]:
     normalized = _normalized_symbols(symbols)
     spread_limit = _decimal(max_spread_bps, "max_spread_bps")
@@ -85,6 +138,11 @@ def summarize_trajectory_math(
     market_is_open = monitoring.get("market_is_open") is True
     results: dict[str, Any] = {}
     candidates: list[str] = []
+    adaptive = _adaptive_weights(adaptive_weights_json)
+    spy_risk = comparisons.get("SPY", {}).get("risk", {})
+    spy_regime = spy_risk.get("market_regime", {}) if isinstance(spy_risk, dict) else {}
+    base_weights = spy_regime.get("strategy_weights", {}) if isinstance(spy_regime, dict) else {}
+    risk_off = isinstance(spy_regime, dict) and spy_regime.get("risk_off") is True
     sizing_enabled = all(
         value.strip() for value in (equity, position_headroom_pct, gross_headroom_pct)
     )
@@ -93,6 +151,8 @@ def summarize_trajectory_math(
         item = quality.get(symbol, {}) if isinstance(quality, dict) else {}
         comparison = comparisons.get(symbol, {})
         strategies = _compact_strategy(comparison)
+        ensemble, effective_weights = _weighted_payload_ensemble(strategies, base_weights, adaptive)
+        strategies["regime_ensemble"] = ensemble
         directions = [
             str(value.get("direction"))
             for value in strategies.values()
@@ -146,6 +206,7 @@ def summarize_trajectory_math(
             candidates.append(symbol)
         sizing: dict[str, Any] = {"available": False, "reason": "mandate_inputs_required"}
         risk = comparison.get("risk", {}) if isinstance(comparison.get("risk"), dict) else {}
+        data = comparison.get("data", {}) if isinstance(comparison.get("data"), dict) else {}
         if sizing_enabled and item.get("last") is not None and risk.get("atr14") is not None:
             sizing = {
                 "available": True,
@@ -157,7 +218,10 @@ def summarize_trajectory_math(
                     risk_budget_pct=_decimal(risk_budget_pct, "risk_budget_pct"),
                     atr_multiplier=_decimal(atr_multiplier, "atr_multiplier"),
                     position_headroom_pct=_decimal(position_headroom_pct, "position_headroom_pct"),
-                    gross_headroom_pct=_decimal(gross_headroom_pct, "gross_headroom_pct"),
+                    gross_headroom_pct=(
+                        _decimal(gross_headroom_pct, "gross_headroom_pct")
+                        * (Decimal("0.5") if risk_off else Decimal("1"))
+                    ),
                 ),
             }
         results[symbol] = {
@@ -173,6 +237,11 @@ def summarize_trajectory_math(
             "direction_counts": counts,
             "strategies": strategies,
             "risk": risk,
+            "news_scoring": {
+                "events": data.get("news"),
+                "llm_scored": data.get("news_llm_scored"),
+            },
+            "effective_strategy_weights": effective_weights,
             "sizing": sizing,
             "news_price_aligned": price_news_aligned,
             "single_symbol_move_breach": move_breach,
@@ -193,6 +262,7 @@ def summarize_trajectory_math(
         "benchmark": benchmark,
         "symbols": results,
         "research_candidates": candidates,
+        "spy_regime": spy_regime,
         "decision": "PROPOSE_RESEARCH" if candidates else "PARK",
         "execution_authority": False,
     }
@@ -211,6 +281,7 @@ def evaluate_trajectory(
     atr_multiplier: str = "2",
     position_headroom_pct: str = "",
     gross_headroom_pct: str = "",
+    adaptive_weights_json: str = "{}",
     compare: Comparison = compare_live_signals,
     monitor: Monitoring = collect_market_monitoring,
 ) -> dict[str, Any]:
@@ -223,7 +294,8 @@ def evaluate_trajectory(
         max_spread_bps=max_spread_bps,
         min_relative_volume=min_relative_volume,
     )
-    comparisons = {symbol: compare(symbol=symbol, fee_bps=fee_bps) for symbol in normalized}
+    comparison_symbols = normalized if "SPY" in normalized else [*normalized, "SPY"]
+    comparisons = {symbol: compare(symbol=symbol, fee_bps=fee_bps) for symbol in comparison_symbols}
     return summarize_trajectory_math(
         symbols=normalized,
         monitoring=monitoring,
@@ -237,4 +309,5 @@ def evaluate_trajectory(
         atr_multiplier=atr_multiplier,
         position_headroom_pct=position_headroom_pct,
         gross_headroom_pct=gross_headroom_pct,
+        adaptive_weights_json=adaptive_weights_json,
     )

@@ -28,6 +28,10 @@ def always_buy(history: list[PriceBar] | tuple[PriceBar, ...]) -> TradeSignal:
     return TradeSignal(Direction.BUY, Decimal("1"), "baseline", history[-1].timestamp)
 
 
+def quarter_buy(history: list[PriceBar] | tuple[PriceBar, ...]) -> TradeSignal:
+    return TradeSignal(Direction.BUY, Decimal("0.25"), "weak", history[-1].timestamp)
+
+
 def test_backtest_uses_only_history_available_at_decision_time() -> None:
     bars = make_bars(["100", "101", "102", "103"])
     observed_lengths: list[int] = []
@@ -49,6 +53,14 @@ def test_fees_reduce_return_and_turnover_is_reported() -> None:
     assert paid.total_return_pct < free.total_return_pct
     assert paid.turnover == Decimal("1")
     assert paid.position_changes == 1
+
+
+def test_signal_strength_scales_backtest_exposure() -> None:
+    bars = make_bars(["100", "110", "121"])
+    full = evaluate_strategy(bars, always_buy, warmup=1)
+    weak = evaluate_strategy(bars, quarter_buy, warmup=1)
+    assert Decimal("0") < weak.total_return_pct < full.total_return_pct
+    assert weak.turnover == Decimal("0.25")
 
 
 def test_slippage_charges_entry_and_final_exit_on_holdout() -> None:

@@ -60,7 +60,7 @@ def evaluate_strategy(
         first_index = max(first_index, evaluation_start - 1)
     for index in range(first_index, len(bars) - 1):
         signal = strategy(bars[: index + 1])
-        target = _target(signal.direction)
+        target = _target(signal.direction) * signal.strength
         traded = abs(target - position)
         if traded:
             changes += 1

@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Sequence
 
-from mandate_research.backtest import compare_strategies
+from mandate_research.backtest import Strategy, compare_strategies, evaluate_strategy
 from mandate_research.news import NewsEvent, deduplicate
 from mandate_research.regime import classify_market_regime, weighted_ensemble
 from mandate_research.signals import (
@@ -16,6 +16,36 @@ from mandate_research.signals import (
     news_price_confirmation_signal,
 )
 from mandate_research.sizing import average_true_range
+
+
+DEFAULT_PARAMETERS: dict[str, dict[str, Any]] = {
+    "momentum": {"lookback": 5, "threshold_pct": Decimal("0.5")},
+    "mean_reversion": {"lookback": 20, "z_threshold": Decimal("2")},
+    "breakout_volume": {"lookback": 20, "min_volume_ratio": Decimal("1.5")},
+    "news_price_confirmation": {"lookback": 3, "news_threshold": Decimal("0.25")},
+}
+PARAMETER_GRID: dict[str, list[dict[str, Any]]] = {
+    "momentum": [
+        {"lookback": lookback, "threshold_pct": threshold}
+        for lookback in (3, 5, 10)
+        for threshold in (Decimal("0.25"), Decimal("0.5"), Decimal("1"))
+    ],
+    "mean_reversion": [
+        {"lookback": lookback, "z_threshold": threshold}
+        for lookback in (10, 20)
+        for threshold in (Decimal("1.5"), Decimal("2"), Decimal("2.5"))
+    ],
+    "breakout_volume": [
+        {"lookback": lookback, "min_volume_ratio": ratio}
+        for lookback in (10, 20)
+        for ratio in (Decimal("1.25"), Decimal("1.5"), Decimal("2"))
+    ],
+    "news_price_confirmation": [
+        {"lookback": lookback, "news_threshold": threshold}
+        for lookback in (2, 3, 5)
+        for threshold in (Decimal("0.15"), Decimal("0.25"), Decimal("0.4"))
+    ],
+}
 
 
 def _decimal(value: Any) -> Decimal:
@@ -54,7 +84,90 @@ def _news(item: dict[str, Any]) -> NewsEvent:
         summary=str(item.get("summary", "")),
         symbols=symbols,
         url=str(item["url"]) if item.get("url") else None,
+        metadata={
+            key: str(item[key])
+            for key in ("llm_score", "llm_confidence", "llm_reason", "llm_event_type", "llm_horizon")
+            if item.get(key) is not None
+        },
     )
+
+
+def _component_strategies(
+    *, symbol: str, events: list[NewsEvent], max_news_age: timedelta,
+    parameters: dict[str, dict[str, Any]],
+) -> dict[str, tuple[Strategy, int]]:
+    momentum = parameters["momentum"]
+    reversion = parameters["mean_reversion"]
+    breakout = parameters["breakout_volume"]
+    news = parameters["news_price_confirmation"]
+    return {
+        "momentum": (
+            lambda window: momentum_signal(window, **momentum),
+            int(momentum["lookback"]) + 1,
+        ),
+        "mean_reversion": (
+            lambda window: mean_reversion_signal(window, **reversion),
+            int(reversion["lookback"]),
+        ),
+        "breakout_volume": (
+            lambda window: breakout_volume_signal(window, **breakout),
+            int(breakout["lookback"]) + 1,
+        ),
+        "news_price_confirmation": (
+            lambda window: news_price_confirmation_signal(
+                window, events, symbol=symbol, max_news_age=max_news_age, **news,
+            ),
+            int(news["lookback"]) + 1,
+        ),
+    }
+
+
+def _with_ensemble(
+    components: dict[str, tuple[Strategy, int]],
+) -> dict[str, tuple[Strategy, int]]:
+    strategies = dict(components)
+
+    def regime_ensemble(window: Sequence[PriceBar]):
+        component_signals = {
+            name: strategy(window) for name, (strategy, _warmup) in components.items()
+        }
+        regime = classify_market_regime(window)
+        return weighted_ensemble(component_signals, regime["strategy_weights"])
+
+    strategies["regime_ensemble"] = (regime_ensemble, 21)
+    return strategies
+
+
+def _select_train_parameters(
+    *, bars: list[PriceBar], symbol: str, events: list[NewsEvent], max_news_age: timedelta,
+    fee_bps: Decimal, slippage_bps: Decimal,
+) -> dict[str, dict[str, Any]]:
+    selected: dict[str, dict[str, Any]] = {}
+    for name, candidates in PARAMETER_GRID.items():
+        best: tuple[Decimal, dict[str, Any]] | None = None
+        for candidate in candidates:
+            parameters = {**DEFAULT_PARAMETERS, name: candidate}
+            strategy, warmup = _component_strategies(
+                symbol=symbol, events=events, max_news_age=max_news_age, parameters=parameters,
+            )[name]
+            if len(bars) <= warmup:
+                continue
+            metrics = evaluate_strategy(
+                bars, strategy, warmup=warmup, fee_bps=fee_bps,
+                slippage_bps=slippage_bps, liquidate_at_end=True,
+            )
+            objective = metrics.total_return_pct - metrics.max_drawdown_pct
+            if best is None or objective > best[0]:
+                best = (objective, candidate)
+        selected[name] = dict(best[1] if best else DEFAULT_PARAMETERS[name])
+    return selected
+
+
+def _wire_parameters(parameters: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        name: {key: str(value) if isinstance(value, Decimal) else value for key, value in values.items()}
+        for name, values in parameters.items()
+    }
 
 
 def analyze(payload: dict[str, Any]) -> dict[str, Any]:
@@ -80,33 +193,12 @@ def analyze(payload: dict[str, Any]) -> dict[str, Any]:
         event for event in all_eligible_events if event.published_at >= cutoff - max_news_age
     )
 
-    strategies: dict[str, tuple[Any, int]] = {
-        "momentum": (lambda window: momentum_signal(window, lookback=5), 6),
-        "mean_reversion": (lambda window: mean_reversion_signal(window, lookback=20), 20),
-        "breakout_volume": (lambda window: breakout_volume_signal(window, lookback=20), 21),
-        "news_price_confirmation": (
-            lambda window: news_price_confirmation_signal(
-                window,
-                all_eligible_events,
-                symbol=symbol,
-                lookback=3,
-                max_news_age=max_news_age,
-            ),
-            4,
-        ),
-    }
-    def regime_ensemble(window: list[PriceBar]) -> Any:
-        component_signals = {
-            name: strategy(window)
-            for name, (strategy, _warmup) in strategies.items()
-            if name != "regime_ensemble"
-        }
-        regime = classify_market_regime(window)
-        return weighted_ensemble(component_signals, regime["strategy_weights"])
-
-    strategies["regime_ensemble"] = (regime_ensemble, 21)
+    strategies = _with_ensemble(_component_strategies(
+        symbol=symbol, events=all_eligible_events, max_news_age=max_news_age,
+        parameters=DEFAULT_PARAMETERS,
+    ))
     fee_bps = _decimal(payload.get("fee_bps", "1"))
-    slippage_bps = _decimal(payload.get("slippage_bps", "1"))
+    slippage_bps = _decimal(payload.get("slippage_bps", "2"))
     metrics = compare_strategies(
         bars, strategies, fee_bps=fee_bps, slippage_bps=slippage_bps,
         liquidate_at_end=True,
@@ -114,12 +206,20 @@ def analyze(payload: dict[str, Any]) -> dict[str, Any]:
     split = max(22, int(len(bars) * 2 / 3))
     holdout: dict[str, Any] = {"status": "insufficient_history"}
     if split < len(bars):
+        selected_parameters = _select_train_parameters(
+            bars=bars[:split], symbol=symbol, events=all_eligible_events,
+            max_news_age=max_news_age, fee_bps=fee_bps, slippage_bps=slippage_bps,
+        )
+        selected_strategies = _with_ensemble(_component_strategies(
+            symbol=symbol, events=all_eligible_events, max_news_age=max_news_age,
+            parameters=selected_parameters,
+        ))
         train_metrics = compare_strategies(
-            bars[:split], strategies, fee_bps=fee_bps, slippage_bps=slippage_bps,
+            bars[:split], selected_strategies, fee_bps=fee_bps, slippage_bps=slippage_bps,
             liquidate_at_end=True,
         )
         test_metrics = compare_strategies(
-            bars, strategies, fee_bps=fee_bps, slippage_bps=slippage_bps,
+            bars, selected_strategies, fee_bps=fee_bps, slippage_bps=slippage_bps,
             evaluation_start=split, liquidate_at_end=True,
         )
         holdout = {
@@ -127,6 +227,8 @@ def analyze(payload: dict[str, Any]) -> dict[str, Any]:
             "train_bars": split,
             "test_bars": len(bars) - split,
             "parameters_frozen": True,
+            "selection_objective": "train total_return_pct minus max_drawdown_pct",
+            "selected_parameters": _wire_parameters(selected_parameters),
             "train": {
                 name: {key: str(value) for key, value in asdict(result).items()}
                 for name, result in train_metrics.items()

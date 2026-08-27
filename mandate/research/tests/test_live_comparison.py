@@ -54,6 +54,13 @@ def fake_source_fetch(url: str, headers: dict[str, str]) -> bytes:
     raise AssertionError(f"unexpected source URL {url}")
 
 
+def fake_news_scorer(events, *, symbol: str) -> list[dict]:
+    return [{
+        "available": True, "score": "0.8", "confidence": "0.9", "reason": "material guidance",
+        "event_type": "guidance", "horizon": "multiday", "novelty_48h": "0.8",
+    } for _event in events]
+
+
 def test_live_comparison_uses_real_shape_and_all_strategies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -64,6 +71,7 @@ def test_live_comparison_uses_real_shape_and_all_strategies(
         fetcher=fake_fetch,
         source_fetcher=fake_source_fetch,
         fee_bps="2",
+        news_scorer=fake_news_scorer,
     )
 
     assert result["data"]["source"] == "alpaca-iex"
@@ -117,6 +125,7 @@ def test_live_comparison_follows_bounded_bar_pagination(
         now=NOW,
         fetcher=paged_fetch,
         source_fetcher=fake_source_fetch,
+        news_scorer=fake_news_scorer,
     )
     assert result["data"]["bars"] == 30
     assert result["as_of"] == (NOW - timedelta(hours=1)).isoformat()

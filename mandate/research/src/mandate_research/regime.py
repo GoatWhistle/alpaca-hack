@@ -40,6 +40,9 @@ def classify_market_regime(bars: Sequence[PriceBar], *, lookback: int = 20) -> d
     r_squared, slope = _linear_r_squared(window)
     slope_pct = slope / (sum(window, ZERO) / Decimal(lookback)) * Decimal("100")
     current_volatility = _realized_volatility(window)
+    sma20 = sum(window, ZERO) / Decimal(lookback)
+    price_vs_sma_pct = (window[-1] / sma20 - ONE) * Decimal("100")
+    risk_off = window[-1] < sma20
     historical = [
         _realized_volatility(closes[end - lookback : end])
         for end in range(lookback, len(closes) + 1)
@@ -62,6 +65,10 @@ def classify_market_regime(bars: Sequence[PriceBar], *, lookback: int = 20) -> d
         "volatility_pct": str(current_volatility.quantize(Decimal("0.0001"))),
         "volatility_percentile": str(percentile.quantize(Decimal("0.1"))),
         "volatility_bucket": volatility,
+        "sma20": str(sma20.quantize(Decimal("0.0001"))),
+        "price_vs_sma20_pct": str(price_vs_sma_pct.quantize(Decimal("0.0001"))),
+        "risk_off": risk_off,
+        "gross_scale": "0.5" if risk_off else "1",
         "strategy_weights": weights,
     }
 

@@ -5,6 +5,7 @@ import {
   buildAutonomyPrompt,
   buildOutcomeScorecard,
   detectNewEvents,
+  discoveryWatchlist,
   enforceProposalSafety,
   updateForwardOutcomes,
   type MarketResult,
@@ -120,9 +121,22 @@ test("scorecard learns descriptive 60m accuracy from proposed strategy direction
   }]);
   assert.deepEqual(scorecard.momentum, {
     observations: 1, mean_signed_return_pct: "2.0000", directional_accuracy_pct: "100.0",
+    sharpe_like: "0.0000", adaptive_multiplier: "1.0000",
   });
   assert.equal(scorecard.mean_reversion?.directional_accuracy_pct, "0.0");
   assert.equal(scorecard.news_driven?.mean_signed_return_pct, "2.0000");
+});
+
+test("discovery watchlist selects three valid symbols without expanding mandate", () => {
+  const market = {
+    checked_at: "2026-08-27T10:05:00Z", feed: "iex", market_is_open: true, sources: {},
+    quality: {}, benchmark: {}, corporate_actions: [], options_confirmation: {},
+    discovery: {
+      movers: { gainers: [{ symbol: "TSLA" }, { symbol: "AAPL" }], losers: [{ symbol: "AMD" }] },
+      most_active: [{ symbol: "META" }, { symbol: "INVALID SYMBOL" }],
+    },
+  } satisfies MarketResult;
+  assert.deepEqual(discoveryWatchlist(market, ["AAPL"]), ["TSLA", "AMD", "META"]);
 });
 
 test("proposal safety fails closed on market hours and any missing quality evidence", () => {

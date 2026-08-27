@@ -68,7 +68,8 @@ headroom, SPY trend/range regime, and a regime-weighted ensemble over five expla
 - price momentum;
 - mean reversion by rolling z-score;
 - price breakout confirmed by relative volume;
-- lexicon news score confirmed by price momentum.
+- structured Z.AI news impact score (sentiment, confidence, event type, horizon and 48-hour novelty)
+  confirmed by price momentum;
 - regime-weighted ensemble that favors momentum/breakout in trends and mean reversion in ranges.
 
 Signals receive only the history available at their decision timestamp. The harness reports return,
@@ -76,8 +77,10 @@ maximum drawdown, turnover and position changes, with configurable fees plus exp
 slippage on entries, changes and final exit. It also emits a chronological frozen-parameter holdout. This is an
 engineering comparison, not a profitability claim.
 
-The same package exposes a separate read-only MCP boundary with four tools:
-`probe_news_sources`, `compare_live_signals`, `get_market_monitoring`, and `evaluate_trajectory`. It has
+The same package exposes a separate read-only MCP boundary with five tools:
+`probe_news_sources`, `compare_live_signals`, `get_market_monitoring`, `score_news_llm`, and
+`evaluate_trajectory`. The scorer batches and caches bounded JSON results from Z.AI and fails closed when
+credentials, transport or the structured response are invalid. It has
 no trading client or write tool. This gives the
 TrueForge agent a server-side path to fixed-host news/data fetches without placing paper credentials in
 the turn sandbox; execution authority remains exclusively in `mandate-guard`.
@@ -186,6 +189,9 @@ The shared trajectory defaults to AAPL/MSFT/NVDA/SPY, realtime streams, a 60-sec
 confirmation, observation-only movers/most-actives discovery and corporate-action risks. Optional option
 chain confirmation is disabled by default. Discovery never expands the mandate universe. A deterministic
 post-model gate converts `PROPOSE` to `PARK` when regular-hours, liquidity or SPY checks fail.
+The three strongest movers are exposed as an observation-only research watchlist. SPY's 20-bar regime
+changes ensemble weights and halves gross sizing below its 20-period moving average. Strategy multipliers
+learn only from completed 60-minute proposal outcomes, are evidence-shrunk and remain bounded.
 In normal chat, ask the agent to explain `get_autonomy_state`, pause/resume monitoring, narrow the symbols,
 change cadence, risk posture or thesis. Persistent changes go through `update_trajectory`, require approval,
 and cannot add a symbol outside the hard mandate. Runtime heartbeat, next analysis and news deliveries are
@@ -213,6 +219,7 @@ checks that no broker write was attempted, reports `deferred: market_closed`, an
 
 `eval:research-e2e` is intentionally read-only. It requires TrueForge/Z.AI to call `get_mandate` and one
 `evaluate_trajectory` for the complete symbol set. The verifier requires five strategy outputs and a
+structured LLM score whenever live news is present, and rejects sandbox execution or broker-write calls.
 mandate-bounded whole-share quantity for every symbol, rejects sandbox `exec`, redundant low-level
 research calls and every execution tool, and requires a bounded `ACTION: PARK` or `ACTION: PROPOSE` conclusion.
 
@@ -281,7 +288,7 @@ artifact is [`docs/evidence/paper-e2e-2026-08-27.json`](docs/evidence/paper-e2e-
 requires durable submitted provenance before requesting cancellation, validates the persisted TrueForge
 call before approval, and can re-audit an existing session without replaying the cancel action.
 
-The current local suite has 91 guard tests, 48 research/Skill/MCP tests and 8 autonomy-runner tests. It covers hot-reloaded human
+The current local suite has 91 guard tests, 55 research/Skill/MCP tests and 9 autonomy-runner tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.

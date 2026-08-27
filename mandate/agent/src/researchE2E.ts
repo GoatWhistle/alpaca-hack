@@ -118,11 +118,15 @@ const symbols = object(evaluation.symbols, "evaluation.symbols");
 for (const symbol of ["AAPL", "MSFT", "NVDA", "SPY"]) {
   const result = object(symbols[symbol], `evaluation.symbols.${symbol}`);
   const strategies = object(result.strategies, `${symbol}.strategies`);
-  for (const strategy of ["momentum", "mean_reversion", "breakout_volume", "news_price_confirmation"]) {
+  for (const strategy of ["momentum", "mean_reversion", "breakout_volume", "news_price_confirmation", "regime_ensemble"]) {
     if (!(strategy in strategies)) throw new Error(`${symbol} omitted strategy ${strategy}`);
   }
   object(result.direction_counts, `${symbol}.direction_counts`);
   if (!Array.isArray(result.blocked_by)) throw new Error(`${symbol}.blocked_by was not an array`);
+  const newsScoring = object(result.news_scoring, `${symbol}.news_scoring`);
+  if (Number(newsScoring.events ?? 0) > 0 && Number(newsScoring.llm_scored ?? 0) < 1) {
+    throw new Error(`${symbol} had news but no successful structured LLM score`);
+  }
   const sizing = object(result.sizing, `${symbol}.sizing`);
   if (sizing.available !== true || !Number.isInteger(sizing.qty)) {
     throw new Error(`${symbol} did not return a mandate-bounded whole-share quantity`);

@@ -7,12 +7,17 @@ from mandate_research.server import create_server
 
 def test_research_mcp_has_only_bounded_read_only_tools() -> None:
     server = create_server(
-        compare=lambda **_: {}, probe=lambda **_: {}, monitor=lambda **_: {}, evaluate=lambda **_: {}
+        compare=lambda **_: {}, probe=lambda **_: {}, monitor=lambda **_: {}, evaluate=lambda **_: {},
+        score=lambda **_: {},
     )
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
 
     assert set(tools) == {
-        "probe_news_sources", "compare_live_signals", "get_market_monitoring", "evaluate_trajectory"
+        "probe_news_sources",
+        "score_news_llm",
+        "compare_live_signals",
+        "get_market_monitoring",
+        "evaluate_trajectory",
     }
     assert all(tool.annotations is not None for tool in tools.values())
     assert all(tool.annotations.readOnlyHint is True for tool in tools.values())
@@ -34,7 +39,11 @@ def test_research_mcp_delegates_with_bounded_arguments() -> None:
         calls.append(("evaluate", kwargs))
         return {"kind": "decision-math"}
 
-    server = create_server(compare=compare, probe=probe, evaluate=evaluate)
+    def score(**kwargs: object) -> dict[str, object]:
+        calls.append(("score", kwargs))
+        return {"kind": "llm-score"}
+
+    server = create_server(compare=compare, probe=probe, evaluate=evaluate, score=score)
     probe_result = asyncio.run(server.call_tool("probe_news_sources", {"symbol": "NVDA"}))
     compare_result = asyncio.run(
         server.call_tool("compare_live_signals", {"symbol": "AAPL", "fee_bps": "2"})
@@ -42,10 +51,14 @@ def test_research_mcp_delegates_with_bounded_arguments() -> None:
     evaluate_result = asyncio.run(
         server.call_tool("evaluate_trajectory", {"symbols": "AAPL,SPY", "fee_bps": "2"})
     )
+    score_result = asyncio.run(server.call_tool(
+        "score_news_llm", {"headline": "Beat but guidance cut", "symbol": "AAPL"}
+    ))
 
     assert probe_result[1] == {"kind": "probe"}
     assert compare_result[1] == {"kind": "comparison"}
     assert evaluate_result[1] == {"kind": "decision-math"}
+    assert score_result[1] == {"kind": "llm-score"}
     assert calls == [
         ("probe", {"symbol": "NVDA", "strict": False}),
         ("compare", {"symbol": "AAPL", "fee_bps": "2"}),
@@ -63,6 +76,8 @@ def test_research_mcp_delegates_with_bounded_arguments() -> None:
                 "atr_multiplier": "2",
                 "position_headroom_pct": "",
                 "gross_headroom_pct": "",
+                "adaptive_weights_json": "{}",
             },
         ),
+        ("score", {"headline": "Beat but guidance cut", "summary": "", "symbol": "AAPL"}),
     ]

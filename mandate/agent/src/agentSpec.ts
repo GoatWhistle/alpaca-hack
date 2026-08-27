@@ -33,7 +33,7 @@ export function buildAgentSpec(
       },
       {
         name: "mandate-research",
-        enableTools: ["probe_news_sources", "compare_live_signals", "get_market_monitoring", "evaluate_trajectory"],
+        enableTools: ["probe_news_sources", "score_news_llm", "compare_live_signals", "get_market_monitoring", "evaluate_trajectory"],
         disableTools: [],
         preloadTools: ["evaluate_trajectory", "compare_live_signals", "get_market_monitoring"],
         preload: false,
