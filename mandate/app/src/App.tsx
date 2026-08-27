@@ -6,12 +6,14 @@ import { decimal, money, number, percent, shortId, timestamp } from "./format";
 const REFRESH_MS = 5_000;
 type View = "overview" | "agent";
 
-function Icon({ name }: { name: "shield" | "refresh" | "external" | "pulse" }) {
+function Icon({ name }: { name: "shield" | "refresh" | "external" | "pulse" | "settings" | "close" }) {
   const paths = {
     shield: <path d="M12 3 5 6v5c0 4.5 2.8 8 7 10 4.2-2 7-5.5 7-10V6l-7-3Zm-3 9 2 2 4-5" />,
     refresh: <path d="M20 12a8 8 0 1 1-2.3-5.7L20 8M20 4v4h-4" />,
     external: <path d="M14 4h6v6M20 4l-9 9M18 13v6H5V6h6" />,
     pulse: <path d="M3 12h4l2-6 4 12 2-6h6" />,
+    settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9A1.7 1.7 0 0 0 21 10h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></>,
+    close: <path d="m6 6 12 12M18 6 6 18" />,
   };
   return <svg aria-hidden="true" viewBox="0 0 24 24">{paths[name]}</svg>;
 }
@@ -100,12 +102,13 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div className="empty"><span>○</span><p>{children}</p></div>;
 }
 
-function TrajectorySettings({ trajectory, universe, onSaved }: {
+function TrajectorySettings({ trajectory, universe, open, onClose, onSaved }: {
   trajectory: Record<string, unknown>;
   universe: string[];
+  open: boolean;
+  onClose: () => void;
   onSaved: () => Promise<unknown>;
 }) {
-  const [open, setOpen] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -126,6 +129,19 @@ function TrajectorySettings({ trajectory, universe, onSaved }: {
     risk_posture: String(trajectory.risk_posture ?? "balanced"),
     thesis: String(trajectory.thesis ?? ""),
   });
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open, onClose]);
   const toggleSymbol = (symbol: string) => setForm((value) => ({
     ...value,
     symbols: value.symbols.includes(symbol)
@@ -140,13 +156,19 @@ function TrajectorySettings({ trajectory, universe, onSaved }: {
       setMessage("Applied. The runner will reload this trajectory on its next wake.");
       setReviewing(false);
       await onSaved();
+      onClose();
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : "Could not apply trajectory");
     } finally { setSaving(false); }
   };
-  return <div className="trajectory-settings">
-    <button className="settings-toggle" onClick={() => setOpen((value) => !value)}>{open ? "Close settings" : "Monitoring settings"}</button>
-    {open && <div className="settings-form">
+  if (!open) return null;
+  return <div className="mandate-chrome settings-backdrop" onMouseDown={onClose}>
+    <aside className="settings-drawer" role="dialog" aria-modal="true" aria-labelledby="monitoring-settings-title" onMouseDown={(event) => event.stopPropagation()}>
+      <header className="settings-drawer-header">
+        <div><span className="kicker">CONTROL PLANE</span><h2 id="monitoring-settings-title">Monitoring settings</h2></div>
+        <button className="icon-button" aria-label="Close monitoring settings" onClick={onClose}><Icon name="close" /></button>
+      </header>
+      <div className="settings-form">
       <div className="settings-grid">
         <label>Mode<select value={form.monitoring_mode} onChange={(event) => setForm({ ...form, monitoring_mode: event.target.value })}><option value="realtime">Realtime + REST fallback</option><option value="polling">REST polling</option></select></label>
         <label>Market feed<select value={form.market_data_feed} onChange={(event) => setForm({ ...form, market_data_feed: event.target.value })}><option value="auto">Auto / IEX</option><option value="iex">IEX</option><option value="sip">SIP (entitlement required)</option></select></label>
@@ -168,7 +190,8 @@ function TrajectorySettings({ trajectory, universe, onSaved }: {
       <label className="thesis-field">Research trajectory<textarea maxLength={2000} value={form.thesis} onChange={(event) => setForm({ ...form, thesis: event.target.value })} /></label>
       {!reviewing ? <button className="settings-save" disabled={!form.symbols.length} onClick={() => setReviewing(true)}>Review changes</button> : <div className="confirm-box"><p>This changes monitoring and proposal logic only. It cannot place an order or expand the mandate universe.</p><button disabled={saving} onClick={() => void save()}>{saving ? "Applying…" : "Confirm & apply"}</button><button onClick={() => setReviewing(false)}>Back</button></div>}
       {message && <p className="settings-message">{message}</p>}
-    </div>}
+      </div>
+    </aside>
   </div>;
 }
 
@@ -178,6 +201,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -230,6 +254,9 @@ export function App() {
           </nav>
           <div className="top-actions">
             <span className="paper-badge">PAPER</span>
+            <button className="icon-button settings-button" aria-label="Monitoring settings" title="Monitoring settings" onClick={() => setSettingsOpen(true)}>
+              <Icon name="settings" />
+            </button>
             {view === "overview" && (
               <>
                 <button
@@ -312,7 +339,6 @@ export function App() {
                   <p>{String(trajectory.thesis ?? "Start the runner to initialize the shared trajectory.")}</p>
                   <div>{Array.isArray(trajectory.symbols) && trajectory.symbols.map((symbol) => <b key={String(symbol)}>{String(symbol)}</b>)}</div>
                 </div>
-                <TrajectorySettings key={String(trajectory.version ?? "new")} trajectory={trajectory} universe={universe} onSaved={refresh} />
                 <div className="monitor-health">
                   <span><small>News stream</small><b>{String((autonomyRuntime.stream as Record<string, unknown> | undefined)?.news ?? "—")}</b></span>
                   <span><small>Market stream</small><b>{String((autonomyRuntime.stream as Record<string, unknown> | undefined)?.market ?? "—")}</b></span>
@@ -403,6 +429,14 @@ export function App() {
           />
         </section>
       )}
+      <TrajectorySettings
+        key={String(trajectory.version ?? "new")}
+        trajectory={trajectory}
+        universe={universe}
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSaved={refresh}
+      />
     </div>
   );
 }
