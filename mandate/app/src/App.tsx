@@ -136,6 +136,10 @@ export function App() {
   const positions = Object.entries(data?.session.positions ?? {});
   const journal = useMemo(() => [...(data?.session.journal ?? [])].reverse(), [data]);
   const pending = data?.session.pending_orders ?? [];
+  const trajectory = data?.autonomy.trajectory ?? {};
+  const autonomyRuntime = data?.autonomy.runtime ?? {};
+  const newsAlerts = [...(data?.autonomy.alerts ?? [])].reverse().slice(0, 3);
+  const autonomyStatus = String(autonomyRuntime.status ?? "not_started");
   const dailyPnl = number(account.daily_pnl);
   const isOpen = data?.mandate.market_is_open ?? false;
 
@@ -201,22 +205,6 @@ export function App() {
 
         <section className="content-grid">
           <div className="main-column">
-            <article className="panel flow-panel">
-              <div className="panel-heading">
-                <div><span className="kicker">SYSTEM FLOW</span><h2>What is happening</h2></div>
-                <span className="live-label"><i /> monitoring</span>
-              </div>
-              <div className="flow">
-                <div><b>01</b><span><strong>Research</strong><small>News + price signals</small></span></div>
-                <i>→</i>
-                <div><b>02</b><span><strong>Mandate check</strong><small>Deterministic limits</small></span></div>
-                <i>→</i>
-                <div><b>03</b><span><strong>Human gate</strong><small>Approve irreversible action</small></span></div>
-                <i>→</i>
-                <div><b>04</b><span><strong>Paper broker</strong><small>Alpaca execution</small></span></div>
-              </div>
-            </article>
-
             <article className="panel">
               <div className="panel-heading">
                 <div><span className="kicker">DURABLE AUDIT TRAIL</span><h2>Agent timeline</h2></div>
@@ -231,6 +219,37 @@ export function App() {
           </div>
 
           <aside className="side-column">
+            <article className="panel autonomy-panel">
+              <div className="panel-heading">
+                <div><span className="kicker">AUTONOMOUS SUPERVISOR</span><h2>24/7 research runner</h2></div>
+                <span className={`runner-status runner-status--${autonomyStatus}`}><i /> {autonomyStatus.replace("_", " ")}</span>
+              </div>
+              <div className="autonomy-body">
+                <div className="autonomy-facts">
+                  <span><small>Heartbeat</small><b>{timestamp(autonomyRuntime.heartbeat_at)}</b></span>
+                  <span><small>Last analysis</small><b>{timestamp(autonomyRuntime.last_analysis_at)}</b></span>
+                  <span><small>Next analysis</small><b>{timestamp(autonomyRuntime.next_analysis_at)}</b></span>
+                  <span><small>Last action</small><b>{String(autonomyRuntime.last_action ?? "—")}</b></span>
+                </div>
+                <div className="trajectory-summary">
+                  <span>Trajectory v{String(trajectory.version ?? "—")} · {String(trajectory.risk_posture ?? "unconfigured")}</span>
+                  <p>{String(trajectory.thesis ?? "Start the runner to initialize the shared trajectory.")}</p>
+                  <div>{Array.isArray(trajectory.symbols) && trajectory.symbols.map((symbol) => <b key={String(symbol)}>{String(symbol)}</b>)}</div>
+                </div>
+                <div className="alert-list">
+                  <div className="subsection-title"><span>Latest news deliveries</span><b>{data?.autonomy.alerts.length ?? 0}</b></div>
+                  {newsAlerts.length ? newsAlerts.map((alert, index) => (
+                    <div className="alert-item" key={`${String(alert.at ?? alert.published_at)}-${index}`}>
+                      <span>{String(alert.status ?? alert.kind ?? "event")}</span>
+                      <b>{String(alert.headline ?? `${alert.count ?? 0} alerts → ${alert.action ?? "analysis"}`)}</b>
+                      <small>{timestamp(alert.at ?? alert.published_at)}</small>
+                    </div>
+                  )) : <p className="muted">No new headline has crossed the durable alert cursor.</p>}
+                </div>
+                {autonomyRuntime.last_error ? <div className="attention">{String(autonomyRuntime.last_error)}</div> : null}
+              </div>
+            </article>
+
             <article className="panel mandate-panel">
               <div className="panel-heading">
                 <div><span className="kicker">HUMAN AUTHORITY</span><h2>Mandate limits</h2></div>
@@ -290,6 +309,7 @@ export function App() {
           <TrueForgeUI
             server={{ type: "trueforge", baseUrl: "/" }}
             layout="sidebar"
+            agentConfig={{ mode: "SingleAgent", name: "mandate-paper-agent" }}
             theme={{
               preset: "trueforge",
               mode: "dark",

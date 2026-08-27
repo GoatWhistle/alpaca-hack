@@ -56,6 +56,12 @@ def _files(tmp_path: Path) -> tuple[Path, Path]:
 
 def test_snapshot_prefers_live_guard_data(tmp_path: Path, monkeypatch) -> None:
     mandate, journal = _files(tmp_path)
+    trajectory = tmp_path / "trajectory.json"
+    trajectory.write_text(json.dumps({"version": 2, "enabled": True}), encoding="utf-8")
+    runtime = tmp_path / "runtime.json"
+    runtime.write_text(json.dumps({"status": "running"}), encoding="utf-8")
+    alerts = tmp_path / "alerts.jsonl"
+    alerts.write_text(json.dumps({"kind": "news", "headline": "Test"}) + "\n", encoding="utf-8")
 
     async def online(name: str, url: str):
         return {"name": name, "url": url, "ok": True}
@@ -66,6 +72,9 @@ def test_snapshot_prefers_live_guard_data(tmp_path: Path, monkeypatch) -> None:
             guard=FakeGuard(),
             mandate_path=mandate,
             journal_path=journal,
+            trajectory_path=trajectory,
+            runtime_path=runtime,
+            alerts_path=alerts,
             service_urls={"trueforge": "http://local:8790", "guard": "http://local:8010"},
         )
     )
@@ -73,6 +82,9 @@ def test_snapshot_prefers_live_guard_data(tmp_path: Path, monkeypatch) -> None:
     assert result["paper_only"] is True
     assert result["mandate"]["mandate"]["name"] == "test-mandate"
     assert result["session"]["account"]["equity"] == "100000"
+    assert result["autonomy"]["trajectory"]["version"] == 2
+    assert result["autonomy"]["runtime"]["status"] == "running"
+    assert result["autonomy"]["alerts"][0]["headline"] == "Test"
     assert not result["errors"]
 
 

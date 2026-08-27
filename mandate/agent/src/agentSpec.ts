@@ -20,6 +20,7 @@ export function buildAgentSpec(
           "submit_order_under_mandate",
           "cancel_order",
           "close_position",
+          "update_trajectory",
         ],
       },
       {

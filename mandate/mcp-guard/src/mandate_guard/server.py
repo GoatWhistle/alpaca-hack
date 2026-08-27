@@ -10,6 +10,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from mandate_guard.alpaca import AlpacaPaperClient
+from mandate_guard.autonomy import AutonomyStore
 from mandate_guard.checks import OrderIntent, Side
 from mandate_guard.mandate import load_mandate
 from mandate_guard.service import GuardService
@@ -45,9 +46,21 @@ def _build_service() -> GuardService:
     )
 
 
+def _build_autonomy_store() -> AutonomyStore:
+    return AutonomyStore(
+        os.environ.get("MANDATE_TRAJECTORY_PATH", "./logs/trajectory.json"),
+        os.environ.get("MANDATE_ALERTS_PATH", "./logs/news-alerts.jsonl"),
+    )
+
+
 def create_server(
-    service: GuardService, *, host: str = "127.0.0.1", port: int = 8010
+    service: GuardService,
+    *,
+    autonomy_store: AutonomyStore | None = None,
+    host: str = "127.0.0.1",
+    port: int = 8010,
 ) -> FastMCP:
+    autonomy = autonomy_store or _build_autonomy_store()
     mcp = FastMCP(
         "mandate-guard",
         instructions=(
@@ -115,6 +128,44 @@ def create_server(
     async def get_session_state() -> dict[str, Any]:
         return await service.session_state()
 
+    @mcp.tool(annotations=READ_ONLY)
+    def get_autonomy_state(alert_limit: int = 20) -> dict[str, Any]:
+        """Read the autonomous research trajectory and recent news-alert deliveries."""
+        return {
+            "trajectory": autonomy.read().model_dump(mode="json"),
+            "recent_alerts": autonomy.recent_alerts(alert_limit),
+            "execution_policy": "human_approval_required",
+        }
+
+    @mcp.tool(annotations=LOCAL_WRITE)
+    def update_trajectory(
+        rationale: str,
+        enabled: bool | None = None,
+        symbols: list[str] | None = None,
+        news_poll_seconds: int | None = None,
+        analysis_interval_minutes: int | None = None,
+        risk_posture: str | None = None,
+        thesis: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist operator-requested research preferences without changing mandate authority."""
+        if not rationale.strip():
+            raise ValueError("trajectory update rationale is required")
+        trajectory = autonomy.update(
+            mandate_symbols=service.mandate_universe(),
+            updated_by=f"chat:{rationale.strip()[:100]}",
+            enabled=enabled,
+            symbols=symbols,
+            news_poll_seconds=news_poll_seconds,
+            analysis_interval_minutes=analysis_interval_minutes,
+            risk_posture=risk_posture,
+            thesis=thesis,
+        )
+        return {
+            "trajectory": trajectory.model_dump(mode="json"),
+            "mandate_unchanged": True,
+            "execution_policy": "human_approval_required",
+        }
+
     @mcp.tool(annotations=LOCAL_WRITE)
     def park(reason: str, intended_action: str) -> dict[str, Any]:
         return service.park(reason=reason, intended_action=intended_action)
@@ -128,7 +179,9 @@ def main() -> None:
         raise ValueError("MANDATE_GUARD_TRANSPORT must be stdio, sse, or streamable-http")
     host = os.environ.get("MANDATE_GUARD_HOST", "127.0.0.1")
     port = int(os.environ.get("MANDATE_GUARD_PORT", "8010"))
-    create_server(_build_service(), host=host, port=port).run(transport=transport)
+    create_server(
+        _build_service(), autonomy_store=_build_autonomy_store(), host=host, port=port
+    ).run(transport=transport)
 
 
 if __name__ == "__main__":

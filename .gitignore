@@ -3,6 +3,7 @@
 logs/*
 !logs/.gitkeep
 mandate/logs/*.jsonl
+mandate/logs/*.json
 __pycache__/
 *.pyc
 .venv/

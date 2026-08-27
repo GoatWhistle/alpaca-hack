@@ -161,6 +161,33 @@ PORT=8790 FRONTEND_DIR=/absolute/path/to/harness/mandate/app/dist npx @truefound
 Open only `http://localhost:8790` and switch between **Overview** and **Agent workspace**. Port `8030` is
 the local, read-only companion API consumed by Overview; it is not a second UI.
 
+### 24/7 autonomy and chat control plane
+
+The autonomy runner stays alive outside chat, polls bounded news feeds, deduplicates events through a
+durable cursor and starts a read-only TrueForge analysis immediately for new headlines or on the configured
+cadence. Each cycle is visible in Chat History and must finish with `ACTION: PARK` or `ACTION: PROPOSE`.
+Background turns are mechanically audited after completion and fail if they request an execution,
+trajectory-write or approval tool. `PROPOSE` is a notification for the human, never permission to trade.
+
+Start it after TrueForge, guard and research MCP are healthy:
+
+```bash
+cd mandate/agent
+npm run autonomy
+```
+
+The shared trajectory defaults to AAPL/MSFT/NVDA/SPY, a 60-second news poll and a 15-minute full analysis.
+In normal chat, ask the agent to explain `get_autonomy_state`, pause/resume monitoring, narrow the symbols,
+change cadence, risk posture or thesis. Persistent changes go through `update_trajectory`, require approval,
+and cannot add a symbol outside the hard mandate. Runtime heartbeat, next analysis and news deliveries are
+shown on Overview. State lives in ignored `mandate/logs/trajectory.json`, `autonomy-runtime.json`,
+`news-cursor.json` and `news-alerts.jsonl` files so restarts do not replay old headlines.
+
+For unattended operation across terminal disconnects or machine restarts, run `npm run autonomy` under the
+host process manager. The runner is restart-safe and immediately reports `degraded` plus the last error when
+news, TrueForge or the model is unavailable; it never silently converts an infrastructure failure into a
+proposal.
+
 `eval:approval` is a fail-safe live conformance probe. It creates a dedicated TrueForge session, asks
 the configured model to request `cancel_order` for a nonexistent probe ID, verifies the exact tool pauses
 at `tool.approval_required`, sends a denial, and asserts the guard journal remains byte-for-byte unchanged.
@@ -240,7 +267,7 @@ artifact is [`docs/evidence/paper-e2e-2026-08-27.json`](docs/evidence/paper-e2e-
 requires durable submitted provenance before requesting cancellation, validates the persisted TrueForge
 call before approval, and can re-audit an existing session without replaying the cancel action.
 
-The current local suite has 84 guard tests and 32 research/Skill/MCP tests. It covers hot-reloaded human
+The current local suite has 90 guard tests, 33 research/Skill/MCP tests and 4 autonomy-runner tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.

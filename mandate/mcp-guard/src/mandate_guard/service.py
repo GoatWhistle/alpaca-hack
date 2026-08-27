@@ -63,6 +63,10 @@ class GuardService:
         # content raises before any irreversible action and therefore fails closed.
         return load_mandate(self.mandate_path) if self.mandate_path is not None else self.mandate
 
+    def mandate_universe(self) -> list[str]:
+        """Return the currently valid universe without fetching broker state."""
+        return list(self._current_mandate().universe)
+
     async def _snapshot(self, now: datetime) -> PortfolioSnapshot:
         market_date = now.astimezone(NEW_YORK).date()
         start_of_day = datetime.combine(market_date, time.min, tzinfo=NEW_YORK).astimezone(timezone.utc)

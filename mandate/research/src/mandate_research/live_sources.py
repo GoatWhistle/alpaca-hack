@@ -157,6 +157,27 @@ def probe_live_sources(
     fetcher: Fetcher = _fetch,
     strict: bool = False,
 ) -> dict[str, Any]:
+    _events, sources = collect_live_news(
+        symbol=symbol,
+        cik=cik,
+        fetcher=fetcher,
+        strict=strict,
+    )
+    return {
+        "symbol": symbol.strip().upper(),
+        "checked_at": datetime.now().astimezone(),
+        "sources": sources,
+    }
+
+
+def collect_live_news(
+    *,
+    symbol: str = "AAPL",
+    cik: str | None = None,
+    fetcher: Fetcher = _fetch,
+    strict: bool = False,
+) -> tuple[list[NewsEvent], dict[str, dict[str, Any]]]:
+    """Collect bounded attributable events for alerting as untrusted data."""
     normalized_symbol = symbol.strip().upper()
     if not normalized_symbol:
         raise ValueError("symbol cannot be blank")
@@ -166,31 +187,29 @@ def probe_live_sources(
         raise ValueError("Alpaca paper/data credentials are required")
 
     alpaca_url = f"{ALPACA_NEWS_ENDPOINT}?{urlencode({'symbols': normalized_symbol, 'limit': 20, 'sort': 'desc'})}"
-    _official_events, official_sources = collect_official_news(
+    official_events, official_sources = collect_official_news(
         symbol=normalized_symbol,
         cik=cik,
         fetcher=fetcher,
         strict=False,
     )
-    sources = {
-        "alpaca": _probe_source(
-            lambda: parse_alpaca_news(
-                fetcher(
-                    alpaca_url,
-                    {
-                        "APCA-API-KEY-ID": alpaca_key,
-                        "APCA-API-SECRET-KEY": alpaca_secret,
-                        "Accept": "application/json",
-                    },
-                )
+    alpaca_events, alpaca_status = _load_source(
+        lambda: parse_alpaca_news(
+            fetcher(
+                alpaca_url,
+                {
+                    "APCA-API-KEY-ID": alpaca_key,
+                    "APCA-API-SECRET-KEY": alpaca_secret,
+                    "Accept": "application/json",
+                },
             )
-        ),
+        )
+    )
+    sources = {
+        "alpaca": alpaca_status,
         **official_sources,
     }
     if strict and any(summary["status"] != "ok" for summary in sources.values()):
         raise RuntimeError("one or more live sources failed strict probing")
-    return {
-        "symbol": normalized_symbol,
-        "checked_at": datetime.now().astimezone(),
-        "sources": sources,
-    }
+    scoped_alpaca = [event for event in alpaca_events if normalized_symbol in event.symbols]
+    return deduplicate([*scoped_alpaca, *official_events]), sources

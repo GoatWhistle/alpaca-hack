@@ -37,6 +37,11 @@ const SnapshotSchema = z.object({
     pending_orders: z.array(UnknownRecord).optional().default([]),
     journal: z.array(JournalEntry).optional().default([]),
   }),
+  autonomy: z.object({
+    trajectory: UnknownRecord.optional().default({}),
+    runtime: UnknownRecord.optional().default({}),
+    alerts: z.array(UnknownRecord).optional().default([]),
+  }).optional().default({ trajectory: {}, runtime: {}, alerts: [] }),
 });
 
 export type Snapshot = z.infer<typeof SnapshotSchema>;

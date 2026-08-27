@@ -113,6 +113,18 @@ def _read_journal(path: Path, *, limit: int = 100) -> list[dict[str, Any]]:
     return entries
 
 
+def _read_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"cannot read {path.name}: {type(exc).__name__}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{path.name} must contain a JSON object")
+    return payload
+
+
 async def _service_status(name: str, url: str) -> dict[str, Any]:
     parsed = urlparse(url)
     host = parsed.hostname
@@ -134,6 +146,9 @@ async def build_snapshot(
     mandate_path: Path,
     journal_path: Path,
     service_urls: dict[str, str],
+    trajectory_path: Path | None = None,
+    runtime_path: Path | None = None,
+    alerts_path: Path | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     local_mandate: dict[str, Any] = {}
@@ -146,6 +161,24 @@ async def build_snapshot(
         local_journal = _read_journal(journal_path)
     except RuntimeError as exc:
         errors.append(str(exc))
+    autonomy: dict[str, Any] = {
+        "trajectory": {},
+        "runtime": {"status": "not_started"},
+        "alerts": [],
+    }
+    for key, path, reader in (
+        ("trajectory", trajectory_path, _read_json),
+        ("runtime", runtime_path, _read_json),
+        ("alerts", alerts_path, lambda value: _read_journal(value, limit=50)),
+    ):
+        if path is None:
+            continue
+        try:
+            payload = reader(path)
+            if payload:
+                autonomy[key] = payload
+        except RuntimeError as exc:
+            errors.append(str(exc))
 
     statuses_task = asyncio.gather(
         *(_service_status(name, url) for name, url in service_urls.items())
@@ -184,16 +217,28 @@ async def build_snapshot(
         "mandate": mandate_state,
         "session": session_state,
         "services": services,
+        "autonomy": autonomy,
         "errors": errors,
     }
 
 
-def _default_paths() -> tuple[Path, Path, Path]:
+def _default_paths() -> tuple[Path, Path, Path, Path, Path, Path]:
     mandate_root = Path(__file__).resolve().parents[3]
     dist = Path(os.environ.get("MANDATE_DASHBOARD_DIST", mandate_root / "app" / "dist"))
     mandate_path = Path(os.environ.get("MANDATE_PATH", mandate_root / "mandates" / "example.yaml"))
     journal_path = Path(os.environ.get("MANDATE_JOURNAL_PATH", mandate_root / "logs" / "session.jsonl"))
-    return dist, mandate_path, journal_path
+    trajectory_path = Path(
+        os.environ.get("MANDATE_TRAJECTORY_PATH", mandate_root / "logs" / "trajectory.json")
+    )
+    runtime_path = Path(
+        os.environ.get(
+            "MANDATE_AUTONOMY_RUNTIME_PATH", mandate_root / "logs" / "autonomy-runtime.json"
+        )
+    )
+    alerts_path = Path(
+        os.environ.get("MANDATE_ALERTS_PATH", mandate_root / "logs" / "news-alerts.jsonl")
+    )
+    return dist, mandate_path, journal_path, trajectory_path, runtime_path, alerts_path
 
 
 def create_dashboard(
@@ -202,9 +247,19 @@ def create_dashboard(
     dist_path: Path | None = None,
     mandate_path: Path | None = None,
     journal_path: Path | None = None,
+    trajectory_path: Path | None = None,
+    runtime_path: Path | None = None,
+    alerts_path: Path | None = None,
     service_urls: dict[str, str] | None = None,
 ) -> Starlette:
-    default_dist, default_mandate, default_journal = _default_paths()
+    (
+        default_dist,
+        default_mandate,
+        default_journal,
+        default_trajectory,
+        default_runtime,
+        default_alerts,
+    ) = _default_paths()
     urls = service_urls or {
         "trueforge": os.environ.get("TRUEFORGE_BASE_URL", DEFAULT_TRUEFORGE_URL),
         "guard": os.environ.get("MANDATE_GUARD_URL", DEFAULT_GUARD_URL),
@@ -214,6 +269,9 @@ def create_dashboard(
     web_root = dist_path or default_dist
     active_mandate = mandate_path or default_mandate
     active_journal = journal_path or default_journal
+    active_trajectory = trajectory_path or default_trajectory
+    active_runtime = runtime_path or default_runtime
+    active_alerts = alerts_path or default_alerts
 
     async def snapshot(_request: Request) -> Response:
         payload = await build_snapshot(
@@ -221,6 +279,9 @@ def create_dashboard(
             mandate_path=active_mandate,
             journal_path=active_journal,
             service_urls=urls,
+            trajectory_path=active_trajectory,
+            runtime_path=active_runtime,
+            alerts_path=active_alerts,
         )
         return JSONResponse(_wire_payload(payload), headers={"Cache-Control": "no-store"})
 

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from mandate_research.live_sources import collect_official_news, probe_live_sources
+from mandate_research.live_sources import collect_live_news, collect_official_news, probe_live_sources
 
 
 ALPACA = json.dumps(
@@ -56,6 +56,19 @@ def test_probe_parses_and_scopes_all_three_sources(monkeypatch: pytest.MonkeyPat
     assert all(item["status"] == "ok" for item in result["sources"].values())
     assert all(item["events"] == 1 for item in result["sources"].values())
     assert all(item["symbol_bound_events"] == 1 for item in result["sources"].values())
+
+
+def test_collect_live_news_returns_bounded_attributable_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALPACA_API_KEY", "paper-key")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "paper-secret")
+    events, sources = collect_live_news(fetcher=fake_fetch)
+
+    assert set(sources) == {"alpaca", "sec_edgar_atom", "apple_newsroom_atom"}
+    assert {event.source for event in events} == {"alpaca", "sec-edgar", "apple-newsroom"}
+    assert all(event.symbols == ("AAPL",) for event in events)
+    assert all(event.content_hash for event in events)
 
 
 @pytest.mark.parametrize(("symbol", "cik"), [("", "0000320193"), ("AAPL", "320193")])
