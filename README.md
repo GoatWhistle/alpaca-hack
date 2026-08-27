@@ -119,6 +119,10 @@ market clocks, obtained an AAPL IEX quote, and asked the guard to evaluate TSLA.
 independent reasons: TSLA was outside the mandate universe and the exchange was closed. No write tool was
 called, and the agent's Alpaca tool discovery contained no order-placement tool.
 
+A separate restart test parked a hypothetical out-of-mandate action, stopped the guard process, created a
+fresh guard process and a new TrueForge session, then recovered the exact rationale and intended action from
+the fsynced JSONL journal. No broker write tool was involved.
+
 The current local suite has 76 guard tests and 20 research/Skill tests. It covers concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.
