@@ -12,7 +12,7 @@ Qodo Code Review установлен на `GoatWhistle/harness-hack` до по�
 | [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M3 — multi-source research MCP + live agent eval | Qodo на commit `26b5da8`: **Bugs 0, Rule violations 0, Skill insights 0** | Внутренний аудит до review исправил неверную привязку NVIDIA RSS к AAPL; добавлены fixed issuer mappings и регрессионный тест | Нет |
 | [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M4 — open-market paper E2E + cleanup | Qodo на commit `49378d4`: **Bugs 0, Rule violations 0, Skill insights 0** | Два approval, broker readback, idempotent retry и provenance-safe cancel зафиксированы в sanitized evidence artifact | Нет |
 | [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M4 — operator dashboard | Qodo на commit `bdb602a`: **Bugs 0, Rule violations 0, Skill insights 0** | Read-only live MCP surface, degraded journal fallback, secret-free browser payload и responsive UI проверены тестами и в браузере | Нет |
-| [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M5 — unified TrueForge operator UI | Qodo на commit `a14c70c`: **Bugs 0, Rule violations 0, Skill insights 0** | Overview встроен рядом со stock Agent workspace; история, tool calls, composer, approval UI и mobile layout проверены в живом браузере | Нет |
+| [#2](https://github.com/GoatWhistle/harness-hack/pull/2) | M5 — unified TrueForge operator UI | Qodo на commit `dcdbc31`: **Bugs 0, Rule violations 0, Skill insights 0** | Overview встроен рядом со stock Agent workspace; история, tool calls, composer, approval UI, mobile layout и оригинальная TrueForge palette проверены в живом браузере | Нет |
 
 Подробности исправлений deep review PR #1:
 
