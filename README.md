@@ -132,6 +132,30 @@ npm run eval:research-e2e
 MANDATE_E2E_ALLOW=true npm run eval:paper-e2e
 ```
 
+### Operator dashboard
+
+The local read-only dashboard makes the agent's state understandable without digging through raw MCP
+events. It shows live paper-account equity, positions and pending orders; mandate usage and headroom;
+service health; wake conditions; and the durable prepared, submitted, denied, deduplicated and parked
+decision timeline. Broker credentials never reach the browser: live data is read through the guard's
+read-only MCP tools. If the guard is restarting, the dashboard fails visibly into a degraded mode backed
+by the local mandate and journal instead of displaying stale values as live.
+
+Build the web assets and start the local server after the guard is running:
+
+```bash
+cd mandate/app
+npm install
+npm run build
+
+cd ../mcp-guard
+python -m pip install -e .
+mandate-dashboard
+```
+
+Open `http://127.0.0.1:8030`. The **Open agent** button switches to the stock TrueForge UI for chat,
+tool-call details and approval decisions; the dashboard itself is deliberately read-only.
+
 `eval:approval` is a fail-safe live conformance probe. It creates a dedicated TrueForge session, asks
 the configured model to request `cancel_order` for a nonexistent probe ID, verifies the exact tool pauses
 at `tool.approval_required`, sends a denial, and asserts the guard journal remains byte-for-byte unchanged.

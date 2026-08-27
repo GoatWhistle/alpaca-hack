@@ -12,10 +12,13 @@ dependencies = [
   "mcp>=1.27,<2",
   "pydantic>=2.8,<3",
   "PyYAML>=6.0,<7",
+  "starlette>=1,<2",
+  "uvicorn>=0.42,<1",
 ]
 
 [project.scripts]
 mandate-guard = "mandate_guard.server:main"
+mandate-dashboard = "mandate_guard.dashboard:main"
 
 [project.optional-dependencies]
 test = [
