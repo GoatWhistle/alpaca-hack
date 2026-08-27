@@ -23,7 +23,9 @@ Approval does not bypass the mandate. Direct Alpaca execution tools are excluded
 research-tool allowlist. Stable intent IDs make submission retries idempotent, and cancellation is allowed
 only when the order's client ID is backed by a submitted event in the persistent guard journal. Every
 prepared, denied and submitted decision records a SHA-256 fingerprint of the exact validated mandate, so
-auditors can distinguish decisions made before and after a human hot-reload.
+auditors can distinguish decisions made before and after a human hot-reload. Retries recover their original
+broker client ID from durable provenance, so renaming a mandate cannot turn one intent into a second order;
+conflicting stored IDs fail closed.
 
 Human predecisions are executable YAML, not model guidance. A directive such as
 `daily_loss_pct >= 1 → park_new_orders` is evaluated from the fresh broker snapshot before every order.
@@ -141,7 +143,7 @@ harness emitted `tool.approval_required`, accepted an automated denial, complete
 the guard journal byte-for-byte unchanged. This proves the irreversible tool was stopped before reaching
 the execution boundary even while the market was closed.
 
-The current local suite has 79 guard tests and 20 research/Skill tests. It covers hot-reloaded human
+The current local suite has 81 guard tests and 20 research/Skill tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.

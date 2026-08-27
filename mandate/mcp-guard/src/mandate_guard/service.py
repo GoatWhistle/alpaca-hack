@@ -306,8 +306,6 @@ class GuardService:
         # fetched again immediately before every irreversible action.
         async with self._submit_lock:
             active_mandate = self._current_mandate()
-            digest = hashlib.sha256(f"{active_mandate.name}:{intent_id}".encode()).hexdigest()[:24]
-            client_order_id = f"mandate-{digest}"
             canonical_order = self._canonical_order(order)
             order_fingerprint = self._order_fingerprint(order)
             mandate_fingerprint = self._mandate_fingerprint(active_mandate)
@@ -318,6 +316,20 @@ class GuardService:
                 if entry["outcome"]
                 in {"prepared", "submitted", "submitted_reconciled", "denied"}
             ]
+            bound_client_order_ids = {
+                entry["details"].get("client_order_id")
+                for entry in binding_records
+                if entry["details"].get("client_order_id")
+            }
+            if len(bound_client_order_ids) > 1:
+                raise RuntimeError("intent_id has conflicting durable client order IDs")
+            if bound_client_order_ids:
+                client_order_id = next(iter(bound_client_order_ids))
+            else:
+                digest = hashlib.sha256(
+                    f"{active_mandate.name}:{intent_id}".encode()
+                ).hexdigest()[:24]
+                client_order_id = f"mandate-{digest}"
             bound_mandate_fingerprint = next(
                 (
                     entry["details"].get("mandate_fingerprint")

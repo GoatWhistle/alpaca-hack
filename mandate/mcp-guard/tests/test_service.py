@@ -194,6 +194,62 @@ def test_hot_reloaded_mandate_versions_are_distinguishable_in_audit_log(
     assert first["mandate_fingerprint"] != second["mandate_fingerprint"]
 
 
+def test_retry_keeps_durable_client_id_after_mandate_rename(
+    mandate: Mandate, market_open: datetime, tmp_path: Path
+) -> None:
+    mandate_path = tmp_path / "mandate.yaml"
+    _write_mandate(mandate_path, mandate)
+    broker = FakeBroker()
+    service = GuardService(mandate, broker, mandate_path=mandate_path)
+    order = OrderIntent("AAPL", Side.BUY, Decimal("1"), "limit", limit_price=Decimal("100"))
+
+    first = asyncio.run(
+        service.submit(order, rationale="original", intent_id="rename-safe", now=market_open)
+    )
+    _write_mandate(mandate_path, mandate.model_copy(update={"name": "renamed-mandate"}))
+    retry = asyncio.run(
+        service.submit(order, rationale="retry", intent_id="rename-safe", now=market_open)
+    )
+
+    assert retry["submitted"] is True
+    assert retry["deduplicated"] is True
+    assert retry["client_order_id"] == first["client_order_id"]
+    assert len(broker.submitted) == 1
+
+
+def test_conflicting_durable_client_ids_fail_closed(
+    mandate: Mandate, market_open: datetime
+) -> None:
+    broker = FakeBroker()
+    journal = SessionJournal()
+    order = OrderIntent("AAPL", Side.BUY, Decimal("1"), "limit", limit_price=Decimal("100"))
+    fingerprint = GuardService._order_fingerprint(order)
+    for client_order_id in ("mandate-first", "mandate-second"):
+        journal.append(
+            "submit_order",
+            "prepared",
+            "corrupt provenance fixture",
+            {
+                "intent_id": "conflicting-provenance",
+                "client_order_id": client_order_id,
+                "order_fingerprint": fingerprint,
+            },
+        )
+    service = GuardService(mandate, broker, journal)
+
+    with pytest.raises(RuntimeError, match="conflicting durable client order IDs"):
+        asyncio.run(
+            service.submit(
+                order,
+                rationale="must fail closed",
+                intent_id="conflicting-provenance",
+                now=market_open,
+            )
+        )
+
+    assert broker.submitted == []
+
+
 def test_park_is_recorded(mandate: Mandate) -> None:
     service = GuardService(mandate, FakeBroker())
     result = service.park(reason="outside universe", intended_action="buy TSLA")
