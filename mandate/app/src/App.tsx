@@ -294,12 +294,6 @@ export function App() {
               preset: "trueforge",
               mode: "dark",
               brand: { name: "MANDATE" },
-              tokens: {
-                primaryButtonBg: "oklch(0.86 0.20 125)",
-                primaryButtonHover: "oklch(0.91 0.18 125)",
-                primaryButtonText: "oklch(0.12 0.02 160)",
-                radius: "0.25rem",
-              },
             }}
           />
         </section>
