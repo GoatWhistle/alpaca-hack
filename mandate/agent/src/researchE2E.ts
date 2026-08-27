@@ -99,7 +99,10 @@ for (const [callId, name] of calls) {
 }
 for (const name of requiredTools) {
   if (!logicalCalls.has(name)) {
-    throw new Error(`required tool was not called: ${name}; observed: ${[...calledNames].sort().join(",")}`);
+    throw new Error(
+      `required tool was not called: ${name}; session=${sessionId}; ` +
+      `observed=${[...calledNames].sort().join(",")}; final=${JSON.stringify(finalText.slice(-300))}`,
+    );
   }
 }
 for (const name of calledNames) {
@@ -113,7 +116,12 @@ if (!evaluationCallId) throw new Error("evaluate_trajectory response was not obs
 const evaluationResponse = responses.get(evaluationCallId);
 if (!evaluationResponse) throw new Error("evaluate_trajectory returned no response");
 const evaluation = parseObject(evaluationResponse);
-if (evaluation.execution_authority !== false) throw new Error("decision math exposed execution authority");
+if (evaluation.execution_authority !== false) {
+  throw new Error(
+    `decision math exposed no explicit false authority; session=${sessionId}; ` +
+    `response=${JSON.stringify(evaluationResponse.slice(0, 500))}`,
+  );
+}
 const symbols = object(evaluation.symbols, "evaluation.symbols");
 for (const symbol of ["AAPL", "MSFT", "NVDA", "SPY"]) {
   const result = object(symbols[symbol], `evaluation.symbols.${symbol}`);

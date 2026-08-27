@@ -110,11 +110,9 @@ def test_live_wrapper_fetches_monitoring_once_and_each_symbol_once() -> None:
 
     result = evaluate_trajectory(symbols=["aapl", "MSFT"], compare=compare, monitor=monitor)
     assert result["research_candidates"] == ["AAPL", "MSFT"]
-    assert calls == [
-        ("monitor", ["AAPL", "MSFT"]),
-        ("compare", "AAPL"),
-        ("compare", "MSFT"),
-        ("compare", "SPY"),
+    assert calls[0] == ("monitor", ["AAPL", "MSFT"])
+    assert sorted(calls[1:]) == [
+        ("compare", "AAPL"), ("compare", "MSFT"), ("compare", "SPY"),
     ]
     assert result["spy_regime"]["regime"] == "trend"
 

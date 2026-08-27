@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation
 import json
 from typing import Any, Callable
@@ -295,7 +296,12 @@ def evaluate_trajectory(
         min_relative_volume=min_relative_volume,
     )
     comparison_symbols = normalized if "SPY" in normalized else [*normalized, "SPY"]
-    comparisons = {symbol: compare(symbol=symbol, fee_bps=fee_bps) for symbol in comparison_symbols}
+    with ThreadPoolExecutor(max_workers=min(4, len(comparison_symbols))) as pool:
+        comparison_values = pool.map(
+            lambda symbol: compare(symbol=symbol, fee_bps=fee_bps),
+            comparison_symbols,
+        )
+        comparisons = dict(zip(comparison_symbols, comparison_values))
     return summarize_trajectory_math(
         symbols=normalized,
         monitoring=monitoring,
