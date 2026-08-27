@@ -2,11 +2,14 @@ import type { TrueForgeApi } from "@truefoundry/trueforge-sdk";
 
 import { ALPACA_RESEARCH_TOOLS, ALPACA_WRITE_TOOLS } from "./alpacaTools.js";
 
-export function buildAgentSpec(instructions: string): TrueForgeApi.AgentSpec {
+export function buildAgentSpec(
+  instructions: string,
+  enableResearchSkill = false,
+): TrueForgeApi.AgentSpec {
   return {
     model: { name: "zai/glm-5-3-flash" },
     instructions,
-    skills: [{ name: "mandate-research" }],
+    ...(enableResearchSkill ? { skills: [{ name: "mandate-research" }] } : {}),
     mcpServers: [
       {
         name: "mandate-guard",

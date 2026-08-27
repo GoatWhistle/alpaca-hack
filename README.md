@@ -83,8 +83,11 @@ npm run apply
 ```
 
 The registered `mandate-paper-agent` uses `zai/glm-5-3-flash`, sandbox execution, dynamic subagents,
-generative UI, context compaction, the `mandate-research` Skill and two MCP servers. Alpaca exposes only
+generative UI, context compaction and two MCP servers. Alpaca exposes only
 calendar, clock and stock-data research tools to the model; all execution flows through `mandate-guard`.
+The `mandate-research` Git Skill is enabled with `MANDATE_ENABLE_RESEARCH_SKILL=true`; TrueForge's secure
+downloader intentionally supports public Git repositories without ambient credentials, so keep it disabled
+while this repository is private.
 
 The example mandate is [`mandate/mandates/example.yaml`](mandate/mandates/example.yaml). An expired or
 invalid mandate prevents startup.

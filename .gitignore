@@ -2,6 +2,7 @@
 .env.local
 logs/*
 !logs/.gitkeep
+mandate/logs/*.jsonl
 __pycache__/
 *.pyc
 .venv/

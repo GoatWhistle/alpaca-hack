@@ -8,6 +8,7 @@ import { buildAgentSpec } from "./agentSpec.js";
 const AGENT_NAME = "mandate-paper-agent";
 const baseUrl = process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790";
 const skillRef = process.env.MANDATE_GIT_REF ?? "feat/mandate-integration";
+const enableResearchSkill = process.env.MANDATE_ENABLE_RESEARCH_SKILL === "true";
 const promptPath = fileURLToPath(new URL("../prompt.md", import.meta.url));
 const instructions = await readFile(promptPath, "utf8");
 const client = new TrueForge({
@@ -24,19 +25,21 @@ await client.settings.mcpServers.createOrUpdate({
   },
 });
 
-await client.settings.skills.createOrUpdate({
-  manifest: {
-    type: "git",
-    name: "mandate-research",
-    url: "https://github.com/GoatWhistle/harness-hack",
-    ref: skillRef,
-    path: "mandate/research",
-    description:
-      "Compare point-in-time-safe news-confirmed, momentum, mean-reversion, and breakout signals in the sandbox.",
-  },
-});
+if (enableResearchSkill) {
+  await client.settings.skills.createOrUpdate({
+    manifest: {
+      type: "git",
+      name: "mandate-research",
+      url: "https://github.com/GoatWhistle/harness-hack",
+      ref: skillRef,
+      path: "mandate/research",
+      description:
+        "Compare point-in-time-safe news-confirmed, momentum, mean-reversion, and breakout signals in the sandbox.",
+    },
+  });
+}
 
-const manifest = buildAgentSpec(instructions);
+const manifest = buildAgentSpec(instructions, enableResearchSkill);
 const existing = (await client.agents.list()).data.find((agent) => agent.name === AGENT_NAME);
 const result = existing
   ? await client.agents.update(existing.id, { manifest })
