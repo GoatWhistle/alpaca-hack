@@ -60,21 +60,25 @@ news strategy uses only revisions available at each historical cutoff within a b
 issuer feed is never rebound to another ticker: AAPL can use Apple Newsroom and NVDA can use NVIDIA IR,
 while other symbols receive neither feed unless an attributable source is added explicitly.
 
-The unprivileged `mandate-research` package is also a loadable TrueForge Skill. It contains the common
-evaluation harness and compares four
-explainable approaches:
+The unprivileged `mandate-research` package is also a loadable TrueForge Skill. Its
+`evaluate_trajectory` tool replaces repeated agent-authored arithmetic with one Decimal-based decision
+matrix. It computes liquidity and stale-data gates, session movement, ATR14 sizing capped by live mandate
+headroom, SPY trend/range regime, and a regime-weighted ensemble over five explainable approaches:
 
 - price momentum;
 - mean reversion by rolling z-score;
 - price breakout confirmed by relative volume;
 - lexicon news score confirmed by price momentum.
+- regime-weighted ensemble that favors momentum/breakout in trends and mean reversion in ranges.
 
 Signals receive only the history available at their decision timestamp. The harness reports return,
-maximum drawdown, turnover and position changes, with configurable transaction costs. This is an
+maximum drawdown, turnover and position changes, with configurable fees plus explicit spread-crossing
+slippage on entries, changes and final exit. It also emits a chronological frozen-parameter holdout. This is an
 engineering comparison, not a profitability claim.
 
-The same package exposes a separate read-only MCP boundary with exactly two tools:
-`probe_news_sources` and `compare_live_signals`. It has no trading client or write tool. This gives the
+The same package exposes a separate read-only MCP boundary with four tools:
+`probe_news_sources`, `compare_live_signals`, `get_market_monitoring`, and `evaluate_trajectory`. It has
+no trading client or write tool. This gives the
 TrueForge agent a server-side path to fixed-host news/data fetches without placing paper credentials in
 the turn sandbox; execution authority remains exclusively in `mandate-guard`.
 
@@ -207,10 +211,14 @@ execution argument. During regular hours it requires and allows the first approv
 `deduplicated=true` without another submission. Outside regular hours it proves the guard's session breach,
 checks that no broker write was attempted, reports `deferred: market_closed`, and exits successfully.
 
-`eval:research-e2e` is intentionally read-only. It requires TrueForge/Z.AI to obtain multi-source news
-health, Alpaca market monitoring, all four point-in-time strategy comparisons and current mandate headroom. The verifier reconciles
-streaming events with persisted session events, unwraps Code Mode `call_tool` bridge calls, rejects any
-nested or direct execution tool, and requires a bounded `ACTION: PARK` or `ACTION: PROPOSE` conclusion.
+`eval:research-e2e` is intentionally read-only. It requires TrueForge/Z.AI to call `get_mandate` and one
+`evaluate_trajectory` for the complete symbol set. The verifier requires five strategy outputs and a
+mandate-bounded whole-share quantity for every symbol, rejects sandbox `exec`, redundant low-level
+research calls and every execution tool, and requires a bounded `ACTION: PARK` or `ACTION: PROPOSE` conclusion.
+
+`eval:patterns` audits the latest persisted agent sessions without mutating them. The extraction baseline
+found 77 sandbox `exec` calls in 25 sessions, dominated by basis-point/spread, return, ratio, drawdown,
+exposure and VWAP calculations. This is the regression baseline for the decision-math tool.
 
 `eval:sandbox` proves deterministic Code Mode execution with one persisted `exec` call and no MCP or
 approval event. `eval:subagents` requires exactly two `create_sub_agent` delegations, distinct isolated
@@ -223,9 +231,8 @@ embedded credentials. `MANDATE_RESEARCH_URL` independently configures the read-o
 The registered `mandate-paper-agent` uses `zai/glm-5-3-flash`, sandbox execution, dynamic subagents,
 generative UI, context compaction and three MCP servers. Alpaca exposes only
 calendar, clock and stock-data research tools to the model; all execution flows through `mandate-guard`.
-The `mandate-research` Git Skill is enabled with `MANDATE_ENABLE_RESEARCH_SKILL=true`; TrueForge's secure
-downloader intentionally supports public Git repositories without ambient credentials, so keep it disabled
-while this repository is private. The read-only research MCP remains enabled independently of the Git Skill.
+The `mandate-research` Git Skill is enabled by default and can be disabled with
+`MANDATE_ENABLE_RESEARCH_SKILL=false`. The read-only research MCP remains enabled independently of the Git Skill.
 
 The example mandate is [`mandate/mandates/example.yaml`](mandate/mandates/example.yaml). An expired or
 invalid mandate prevents startup and blocks subsequent policy operations if introduced while running.
@@ -274,7 +281,7 @@ artifact is [`docs/evidence/paper-e2e-2026-08-27.json`](docs/evidence/paper-e2e-
 requires durable submitted provenance before requesting cancellation, validates the persisted TrueForge
 call before approval, and can re-audit an existing session without replaying the cancel action.
 
-The current local suite has 91 guard tests, 36 research/Skill/MCP tests and 7 autonomy-runner tests. It covers hot-reloaded human
+The current local suite has 91 guard tests, 48 research/Skill/MCP tests and 8 autonomy-runner tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.
@@ -292,3 +299,9 @@ A subsequent live read-only decision E2E ran through TrueForge, Z.AI, `mandate-r
 IEX market monitoring, current paper-account mandate headroom and no write call. The live autonomy cycle
 observed four passing quality gates, one MSFT corporate action and returned `ACTION: PARK`; its first durable
 5-minute forward outcome was then measured without any broker write.
+
+The decision-math E2E session `01m1269wsz849mfa0hac88yqbg` subsequently called only `get_mandate` and
+`evaluate_trajectory` for AAPL/MSFT/NVDA/SPY. It returned five-strategy evidence and ready whole-share
+sizing, chose `PARK`, made no sandbox-code call and attempted no broker write. The dashboard now exposes a
+60-minute per-strategy/news-vs-price outcome scorecard; historical records without captured directions are
+excluded rather than guessed.

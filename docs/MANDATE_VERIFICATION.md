@@ -6,10 +6,10 @@ of a broker-side effect, and a model statement is not used as proof of a tool ca
 | Requirement | Status | Authoritative evidence |
 |---|---|---|
 | Paper-only broker boundary | Verified | `AlpacaPaperClient` accepts only the exact HTTPS paper host; config and client rejection tests are in `mandate/mcp-guard/tests/test_config.py` and `test_alpaca.py`. |
-| TrueForge/Z.AI agent integration | Verified | Agent manifest uses `zai/glm-5-3-flash`, sandbox, dynamic subagents and explicit MCP allowlists. Live persisted research session `01m11kyaz2b3c5rrctmecem5kh` passed `npm run eval:research-e2e`. |
+| TrueForge/Z.AI agent integration | Verified | Agent manifest uses `zai/glm-5-3-flash`, sandbox, dynamic subagents and explicit MCP allowlists. Live persisted session `01m1269wsz849mfa0hac88yqbg` called only `get_mandate` and `evaluate_trajectory`; no sandbox code or write tool was observed. |
 | Deterministic sandbox code | Verified | Session `01m11mzx7n026dagnhx1g5k057` persisted exactly one `exec` call, returned `42` for `7 * 6`, requested no approval and made no broker call. |
 | Dynamic subagent delegation | Verified | Session `01m11mp0tm5wgej7jvejrbjj10` persisted exactly two `create_sub_agent` calls and isolated threads for source health and strategy/risk analysis; no approval or write was observed. |
-| Deterministic mandate enforcement | Verified | 84 guard tests cover universe, instrument, order type, session, expiry, daily loss, order count, position/gross exposure, pending sells, predecisions and mandate hot reload. |
+| Deterministic mandate enforcement | Verified | 91 guard tests cover universe, instrument, order type, session, expiry, daily loss, order count, position/gross exposure, pending sells, predecisions and mandate hot reload. |
 | Multiple news parsers and sources | Verified | Alpaca JSON, generic Atom/SEC Atom, RSS2 and issuer binding have parser tests. Live MCP evidence saw Alpaca and Apple healthy while preserving SEC HTTP 403 as an isolated upstream failure. |
 | News decision compared with explainable baselines | Verified | `compare_live_signals` returned momentum, mean reversion, breakout-with-volume and news-plus-price confirmation over 270 paginated IEX hourly bars and 70 deduplicated news events at `2026-08-27T12:00:00Z`. The agent returned `ACTION: PARK` for a flat news-confirmed signal. |
 | Human approval denial boundary | Verified | `npm run eval:approval` observed `tool.approval_required`, sent deny and proved the guard journal was unchanged. |
@@ -19,8 +19,10 @@ of a broker-side effect, and a model statement is not used as proof of a tool ca
 | Provenance-safe paper cleanup | Verified | Session `01m11ptfz4zemy4h63s5ge800z` paused on exact `cancel_order`, received approval, wrote `cancel_order/submitted`, and official Alpaca MCP readback changed the same broker order from `new` to `canceled`. |
 | Realtime market/news monitoring | Verified | Alpaca news and IEX WebSockets reported connected; REST snapshots, clock, movers, most actives and corporate actions were healthy. Four mandate symbols passed the live quality snapshot and discovery remained observation-only. |
 | Forward outcome measurement | Verified | The autonomy cycle persisted baseline prices and a 5-minute return for all four symbols in `forward-outcomes.json`; 15/60-minute horizons settle on later polls without broker writes. |
+| Deterministic decision intelligence | Verified | `evaluate_trajectory` returns Decimal liquidity/session gates, ATR14, mandate-headroom-capped whole-share sizing, SPY regime, a five-strategy weighted ensemble and fee-plus-slippage chronological holdout evidence. Research suite: 48 passing tests. |
+| Outcome feedback loop | Verified | The runner aggregates only completed 60-minute outcomes from proposals with captured strategy directions into per-strategy and news-vs-price mean signed return/accuracy; the compact scorecard is supplied to the next prompt and rendered in the dashboard. |
 | Monitoring control plane | Verified | Browser E2E verified realtime status, quality/discovery telemetry and the separate Review → Confirm gate. Backend tests reject unconfirmed writes and symbols outside the mandate universe. |
-| Qodo review of implementation head | Verified | PR #2 Qodo deep review points to implementation commit `30aff5d` and reports Bugs 0, Rule violations 0 and Skill insights 0. |
+| Qodo review of implementation head | Verified | PR #2 Qodo deep review points to implementation commit `c2c4a0c` and reports Bugs 0, Rule violations 0 and Skill insights 0. |
 
 ## Repeatable commands
 
