@@ -228,6 +228,8 @@ def check_gross_exposure(mandate: Mandate, projection: Projection) -> Breach | N
 def check_daily_loss(mandate: Mandate, portfolio: Portfolio) -> Breach | None:
     loss_pct = _percent(max(-portfolio.realized_pnl_today, ZERO), portfolio.equity)
     limit = mandate.limits.max_daily_loss_pct
+    # Exposure and order-count limits describe usable capacity, so equality is
+    # allowed there. A loss limit is a hard stop and activates at equality.
     if loss_pct < limit:
         return None
     return Breach("max_daily_loss_pct", str(limit), str(loss_pct), str(limit - loss_pct))

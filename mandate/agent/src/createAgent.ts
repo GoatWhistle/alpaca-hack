@@ -37,16 +37,16 @@ await client.settings.mcpServers.createOrUpdate({
   },
 });
 
+await client.settings.mcpServers.createOrUpdate({
+  manifest: {
+    type: "remote",
+    name: "mandate-research",
+    url: parsedResearchUrl.toString(),
+    description: "Read-only multi-source news parsing and explainable live signal comparison.",
+  },
+});
+
 if (enableResearchSkill) {
-  await client.settings.mcpServers.createOrUpdate({
-    manifest: {
-      type: "remote",
-      name: "mandate-research",
-      url: parsedResearchUrl.toString(),
-      description:
-        "Read-only multi-source news parsing and explainable live signal comparison.",
-    },
-  });
   await client.settings.skills.createOrUpdate({
     manifest: {
       type: "git",

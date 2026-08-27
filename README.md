@@ -124,7 +124,9 @@ MANDATE_RESEARCH_TRANSPORT=streamable-http mandate-research-mcp
 cd mandate/agent
 npm install
 npm run typecheck
-MANDATE_ENABLE_RESEARCH_SKILL=true npm run apply
+npm run apply
+npm run eval:sandbox
+npm run eval:subagents
 npm run eval:approval
 npm run eval:research-e2e
 MANDATE_E2E_ALLOW=true npm run eval:paper-e2e
@@ -147,6 +149,10 @@ health, all four point-in-time strategy comparisons and current mandate headroom
 streaming events with persisted session events, unwraps Code Mode `call_tool` bridge calls, rejects any
 nested or direct execution tool, and requires a bounded `ACTION: PARK` or `ACTION: PROPOSE` conclusion.
 
+`eval:sandbox` proves deterministic Code Mode execution with one persisted `exec` call and no MCP or
+approval event. `eval:subagents` requires exactly two `create_sub_agent` delegations, distinct isolated
+threads, no approval and no direct or nested execution tool.
+
 `MANDATE_GUARD_HOST` and `MANDATE_GUARD_PORT` control the server bind address. Set the separate
 `MANDATE_GUARD_URL` to the HTTP(S) address reachable from TrueForge; it is validated and may not contain
 embedded credentials. `MANDATE_RESEARCH_URL` independently configures the read-only research endpoint.
@@ -156,7 +162,7 @@ generative UI, context compaction and three MCP servers. Alpaca exposes only
 calendar, clock and stock-data research tools to the model; all execution flows through `mandate-guard`.
 The `mandate-research` Git Skill is enabled with `MANDATE_ENABLE_RESEARCH_SKILL=true`; TrueForge's secure
 downloader intentionally supports public Git repositories without ambient credentials, so keep it disabled
-while this repository is private.
+while this repository is private. The read-only research MCP remains enabled independently of the Git Skill.
 
 The example mandate is [`mandate/mandates/example.yaml`](mandate/mandates/example.yaml). An expired or
 invalid mandate prevents startup and blocks subsequent policy operations if introduced while running.

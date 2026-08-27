@@ -30,18 +30,14 @@ export function buildAgentSpec(
         preload: false,
         requireApprovalForTools: [],
       },
-      ...(enableResearchSkill
-        ? [
-            {
-              name: "mandate-research",
-              enableTools: ["probe_news_sources", "compare_live_signals"],
-              disableTools: [],
-              preloadTools: ["compare_live_signals"],
-              preload: false,
-              requireApprovalForTools: [],
-            },
-          ]
-        : []),
+      {
+        name: "mandate-research",
+        enableTools: ["probe_news_sources", "compare_live_signals"],
+        disableTools: [],
+        preloadTools: ["compare_live_signals"],
+        preload: false,
+        requireApprovalForTools: [],
+      },
     ],
     config: {
       iterationLimit: 100,
