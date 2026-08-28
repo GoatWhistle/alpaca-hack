@@ -44,6 +44,11 @@ const SnapshotSchema = z.object({
     market: UnknownRecord.optional().default({}),
     outcomes: UnknownRecord.optional().default({}),
   }).optional().default({ trajectory: {}, runtime: {}, alerts: [], market: {}, outcomes: {} }),
+  approvals: z.object({
+    count: z.number().optional().default(0),
+    items: z.array(UnknownRecord).optional().default([]),
+    error: z.string().optional(),
+  }).optional().default({ count: 0, items: [] }),
 });
 
 export type Snapshot = z.infer<typeof SnapshotSchema>;
@@ -76,4 +81,29 @@ export async function updateTrajectory(payload: Record<string, unknown>): Promis
   const body = await response.json() as Record<string, unknown>;
   if (!response.ok) throw new Error(String(body.error ?? `Dashboard API returned ${response.status}`));
   return body;
+}
+
+export async function respondToApproval(payload: {
+  sessionId: string;
+  toolCallId: string;
+  threadId: string;
+  approve: boolean;
+  reason?: string;
+}): Promise<void> {
+  const response = await fetch(`${getApiBase()}/api/approvals/respond`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: payload.sessionId,
+      tool_call_id: payload.toolCallId,
+      thread_id: payload.threadId,
+      approve: payload.approve,
+      reason: payload.reason ?? "",
+      confirmed: true,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    throw new Error(String(body.error ?? `Dashboard API returned ${response.status}`));
+  }
 }

@@ -8,7 +8,14 @@ from pathlib import Path
 
 from starlette.testclient import TestClient
 
-from mandate_guard.dashboard import _wire_payload, build_snapshot, create_dashboard
+from mandate_guard.dashboard import (
+    TrueForgeApprovalsReader,
+    _approval_turn_body,
+    _pending_approvals,
+    _wire_payload,
+    build_snapshot,
+    create_dashboard,
+)
 
 
 class FakeGuard:
@@ -148,3 +155,197 @@ def test_trajectory_update_requires_confirmation_and_cannot_expand_universe(tmp_
         )
         assert denied.status_code == 400
         assert "cannot expand mandate universe" in denied.json()["error"]
+
+
+class FakeApprovals:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+    async def read(self):
+        return self.payload
+
+
+def _session(session_id: str) -> dict:
+    return {
+        "id": session_id,
+        "title": "session",
+        "updated_at": "2026-08-28T10:00:00Z",
+        "agent": {"name": "mandate-paper-agent"},
+    }
+
+
+def _approval_fixtures() -> tuple[dict, dict, dict]:
+    model_message = {
+        "id": "evt-model-1",
+        "type": "model.message",
+        "tool_calls": [
+            {
+                "id": "call-1",
+                "function": {
+                    "name": "submit_order_under_mandate",
+                    "arguments": '{"symbol":"NVDA","side":"buy","qty":"3"}',
+                },
+            }
+        ],
+    }
+    approval = {
+        "id": "evt-approval-1",
+        "type": "tool.approval_required",
+        "thread_id": "thread-1",
+        "created_at": "2026-08-28T10:01:00Z",
+        "tool_calls": [{"id": "call-1", "source_event_id": "evt-model-1"}],
+    }
+    return model_message, approval, {
+        "s-1": [
+            {"event": model_message, "turn_id": "t-1"},
+            {"event": approval, "turn_id": "t-1"},
+        ]
+    }
+
+
+def test_pending_approvals_resolve_tool_name_and_arguments() -> None:
+    _model, _approval, events = _approval_fixtures()
+    items = _pending_approvals([_session("s-1")], events, {})
+    assert len(items) == 1
+    assert items[0]["tool_call_id"] == "call-1"
+    assert items[0]["tool_name"] == "submit_order_under_mandate"
+    assert items[0]["arguments"] == {"symbol": "NVDA", "side": "buy", "qty": "3"}
+    assert items[0]["thread_id"] == "thread-1"
+    assert items[0]["session_id"] == "s-1"
+
+
+def test_pending_approvals_exclude_answered_and_executed_calls() -> None:
+    _model, _approval, events = _approval_fixtures()
+    answered_turns = {
+        "s-1": [
+            {
+                "input": [
+                    {
+                        "type": "user.tool_approval",
+                        "thread_id": "thread-1",
+                        "tool_call_id": "call-1",
+                        "approval": {"status": "deny", "reason": "too large"},
+                    }
+                ]
+            }
+        ]
+    }
+    assert _pending_approvals([_session("s-1")], events, answered_turns) == []
+    executed_events = {
+        "s-1": [
+            *events["s-1"],
+            {"event": {"type": "tool.response", "tool_call_id": "call-1"}, "turn_id": "t-2"},
+        ]
+    }
+    assert _pending_approvals([_session("s-1")], executed_events, {}) == []
+
+
+def test_pending_approvals_skip_sessions_without_approval_events() -> None:
+    items = _pending_approvals(
+        [_session("s-1")],
+        {"s-1": [{"event": {"type": "model.message", "id": "evt-model-1"}, "turn_id": "t-1"}]},
+        {},
+    )
+    assert items == []
+
+
+def test_snapshot_includes_approvals_payload(tmp_path: Path, monkeypatch) -> None:
+    mandate, journal = _files(tmp_path)
+
+    async def online(name: str, url: str):
+        return {"name": name, "url": url, "ok": True}
+
+    monkeypatch.setattr("mandate_guard.dashboard._service_status", online)
+    result = asyncio.run(
+        build_snapshot(
+            guard=FakeGuard(),
+            mandate_path=mandate,
+            journal_path=journal,
+            approvals_reader=FakeApprovals({"count": 1, "items": [{"tool_call_id": "call-1"}]}),
+            service_urls={"trueforge": "http://local:8790", "guard": "http://local:8010"},
+        )
+    )
+    assert result["approvals"]["count"] == 1
+    assert result["approvals"]["items"][0]["tool_call_id"] == "call-1"
+    assert not result["errors"]
+
+
+def test_approvals_reader_fails_soft_when_trueforge_is_down() -> None:
+    reader = TrueForgeApprovalsReader("http://127.0.0.1:9", timeout=0.2)
+    result = asyncio.run(reader.read())
+    assert result["count"] == 0
+    assert result["items"] == []
+    assert "error" in result
+
+
+def test_approval_turn_body_allow_and_deny() -> None:
+    allow = _approval_turn_body(thread_id="th", tool_call_id="c1", approve=True)
+    assert allow["previous_turn_id"] == "auto"
+    assert allow["input"][0]["thread_id"] == "th"
+    assert allow["input"][0]["tool_call_id"] == "c1"
+    assert allow["input"][0]["approval"] == {"status": "allow"}
+    deny = _approval_turn_body(thread_id="th", tool_call_id="c1", approve=False, reason="breach")
+    assert deny["input"][0]["approval"] == {"status": "deny", "reason": "breach"}
+
+
+class _StubResponse:
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+
+
+class _StubClient:
+    def __init__(self, *_args, **_kwargs) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    async def post(self, url: str, json: dict):
+        _StubClient.last_url, _StubClient.last_json = url, json
+        return _StubResponse(200)
+
+
+def test_respond_approval_forwards_human_decision_to_trueforge(tmp_path: Path, monkeypatch) -> None:
+    mandate = tmp_path / "mandate.yaml"
+    mandate.write_text("name: test\nuniverse: [AAPL]\nlimits: {}\n", encoding="utf-8")
+    journal = tmp_path / "session.jsonl"
+    app = create_dashboard(
+        guard=FakeGuard(),
+        dist_path=tmp_path,
+        mandate_path=mandate,
+        journal_path=journal,
+        service_urls={"trueforge": "http://local:8790", "guard": "http://local:8010"},
+    )
+    monkeypatch.setattr("mandate_guard.dashboard.httpx.AsyncClient", _StubClient)
+    with TestClient(app) as client:
+        unconfirmed = client.post(
+            "/api/approvals/respond",
+            json={"session_id": "s-1", "tool_call_id": "c1", "thread_id": "t", "approve": True},
+        )
+        assert unconfirmed.status_code == 409
+        invalid = client.post(
+            "/api/approvals/respond",
+            json={"session_id": "../escape", "tool_call_id": "c1", "thread_id": "t", "approve": True, "confirmed": True},
+        )
+        assert invalid.status_code == 400
+        ok = client.post(
+            "/api/approvals/respond",
+            json={
+                "session_id": "s-1",
+                "tool_call_id": "c1",
+                "thread_id": "thread-1",
+                "approve": False,
+                "reason": "breach of max position",
+                "confirmed": True,
+            },
+        )
+        assert ok.status_code == 200
+        assert _StubClient.last_url == "/api/v1/sessions/s-1/turns"
+        assert _StubClient.last_json["input"][0]["approval"] == {
+            "status": "deny",
+            "reason": "breach of max position",
+        }
+        assert _StubClient.last_json["previous_turn_id"] == "auto"
