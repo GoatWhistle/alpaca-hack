@@ -23,16 +23,50 @@ ALPACA_NEWS_ENDPOINT = "https://data.alpaca.markets/v1beta1/news"
 SEC_ATOM_ENDPOINT = "https://www.sec.gov/cgi-bin/browse-edgar"
 APPLE_RSS_ENDPOINT = "https://www.apple.com/newsroom/rss-feed.rss"
 NVIDIA_RSS_ENDPOINT = "https://nvidianews.nvidia.com/cats/press_release.xml"
+MICROSOFT_RSS_ENDPOINT = "https://blogs.microsoft.com/feed/"
+GOOGLE_RSS_ENDPOINT = "https://blog.google/rss/"
+AWS_RSS_ENDPOINT = "https://aws.amazon.com/about-aws/whats-new/recent/feed/"
+META_RSS_ENDPOINT = "https://about.fb.com/news/feed/"
+FEDERAL_RESERVE_RSS_ENDPOINT = "https://www.federalreserve.gov/feeds/press_all.xml"
 ALLOWED_HOSTS = {
     "data.alpaca.markets",
     "www.sec.gov",
     "www.apple.com",
     "nvidianews.nvidia.com",
+    "blogs.microsoft.com",
+    "blog.google",
+    "aws.amazon.com",
+    "about.fb.com",
+    "www.federalreserve.gov",
 }
 Fetcher = Callable[[str, dict[str, str]], bytes]
 CIK_BY_SYMBOL = {
     "AAPL": "0000320193",
+    "MSFT": "0000789019",
     "NVDA": "0001045810",
+    "GOOG": "0001652044",
+    "GOOGL": "0001652044",
+    "AMZN": "0001018724",
+    "META": "0001326801",
+    "AMD": "0000002488",
+    "AVGO": "0001730168",
+    "ORCL": "0001341439",
+    "IBM": "0000051143",
+    "PLTR": "0001321655",
+    "CRM": "0001108524",
+    "ANET": "0001596532",
+    "TSM": "0001046179",
+    "ASML": "0000937966",
+    "ARM": "0001973239",
+    "BABA": "0001577552",
+    "BIDU": "0001329099",
+}
+ISSUER_RSS_BY_SYMBOL = {
+    "MSFT": ("microsoft_official_rss", MICROSOFT_RSS_ENDPOINT, "microsoft-official"),
+    "GOOG": ("google_official_rss", GOOGLE_RSS_ENDPOINT, "google-official"),
+    "GOOGL": ("google_official_rss", GOOGLE_RSS_ENDPOINT, "google-official"),
+    "AMZN": ("aws_official_rss", AWS_RSS_ENDPOINT, "aws-official"),
+    "META": ("meta_official_rss", META_RSS_ENDPOINT, "meta-official"),
 }
 
 
@@ -137,6 +171,24 @@ def collect_official_news(
                 source="nvidia-ir",
             ),
             "NVDA",
+        )
+    issuer_rss = ISSUER_RSS_BY_SYMBOL.get(normalized_symbol)
+    if issuer_rss is not None:
+        name, endpoint, source = issuer_rss
+        loaders[name] = lambda endpoint=endpoint, source=source: bind_symbol(
+            parse_rss(
+                fetcher(endpoint, {"User-Agent": "MANDATE research probe"}),
+                source=source,
+            ),
+            normalized_symbol,
+        )
+    if normalized_symbol == "SPY":
+        loaders["federal_reserve_rss"] = lambda: bind_symbol(
+            parse_rss(
+                fetcher(FEDERAL_RESERVE_RSS_ENDPOINT, {"User-Agent": "MANDATE research probe"}),
+                source="federal-reserve",
+            ),
+            "SPY",
         )
 
     events: list[NewsEvent] = []

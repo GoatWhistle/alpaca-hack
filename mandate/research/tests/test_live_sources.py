@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from mandate_research.live_sources import collect_live_news, collect_official_news, probe_live_sources
+from mandate_research.live_sources import CIK_BY_SYMBOL, collect_live_news, collect_official_news, probe_live_sources
 
 
 ALPACA = json.dumps(
@@ -26,6 +26,9 @@ RSS = b"""<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>apple-1</id>
 <title>Apple product update</title><updated>2026-08-27T10:02:00Z</updated></entry></feed>"""
 NVIDIA_RSS = b"""<rss><channel><item><guid>nvda-1</guid><title>NVIDIA product update</title>
 <pubDate>Thu, 27 Aug 2026 10:03:00 GMT</pubDate></item></channel></rss>"""
+GENERIC_RSS = b"""<rss><channel><item><guid>official-1</guid><title>Official update</title>
+<description>Primary-source company or macro news.</description>
+<pubDate>Thu, 27 Aug 2026 10:04:00 GMT</pubDate></item></channel></rss>"""
 
 
 def fake_fetch(url: str, headers: dict[str, str]) -> bytes:
@@ -39,6 +42,10 @@ def fake_fetch(url: str, headers: dict[str, str]) -> bytes:
         return RSS
     if "nvidia.com" in url:
         return NVIDIA_RSS
+    if any(host in url for host in (
+        "blogs.microsoft.com", "blog.google", "aws.amazon.com", "about.fb.com", "federalreserve.gov"
+    )):
+        return GENERIC_RSS
     raise AssertionError(f"unexpected URL {url}")
 
 
@@ -111,3 +118,33 @@ def test_official_company_feed_is_never_rebound_to_another_issuer() -> None:
     assert all(event.symbols == ("NVDA",) for event in events)
     assert any("nvidia.com" in url for url in requested_urls)
     assert not any("apple.com" in url for url in requested_urls)
+
+
+@pytest.mark.parametrize(
+    ("symbol", "source_name", "event_source"),
+    [
+        ("MSFT", "microsoft_official_rss", "microsoft-official"),
+        ("GOOGL", "google_official_rss", "google-official"),
+        ("AMZN", "aws_official_rss", "aws-official"),
+        ("META", "meta_official_rss", "meta-official"),
+        ("SPY", "federal_reserve_rss", "federal-reserve"),
+    ],
+)
+def test_additional_official_feeds_are_attributable(
+    symbol: str, source_name: str, event_source: str
+) -> None:
+    events, sources = collect_official_news(symbol=symbol, fetcher=fake_fetch)
+
+    assert sources[source_name]["status"] == "ok"
+    matching = [event for event in events if event.source == event_source]
+    assert matching
+    assert all(event.symbols == (symbol,) for event in matching)
+
+
+def test_sec_mapping_covers_every_traded_issuer() -> None:
+    expected = {
+        "AAPL", "MSFT", "NVDA", "GOOG", "GOOGL", "AMZN", "META", "AMD", "AVGO",
+        "ORCL", "IBM", "PLTR", "CRM", "ANET", "TSM", "ASML", "ARM", "BABA", "BIDU",
+    }
+    assert expected <= set(CIK_BY_SYMBOL)
+    assert all(cik.isdigit() and len(cik) == 10 for cik in CIK_BY_SYMBOL.values())
