@@ -583,11 +583,18 @@ export function App() {
               <span>Universe</span>
               <div>{universe.length ? universe.map((symbol) => <b key={symbol}>{symbol}</b>) : "—"}</div>
             </div>
-            <span className="mandate-meta">
-              {String(rawMandate.name ?? "mandate")} · updated {timestamp(data?.mandate.as_of)}
-            </span>
           </div>
         </section>
+
+        {newsItems[0] && (
+          <section className="panel latest-news-panel">
+            <div className="panel-heading">
+              <div><h2>Latest news</h2></div>
+              <button className="text-button" onClick={() => setView("news")}>Open news feed</button>
+            </div>
+            <NewsCard item={newsItems[0]} featured />
+          </section>
+        )}
 
         <section className="dashboard-grid">
           <div className="main-column">

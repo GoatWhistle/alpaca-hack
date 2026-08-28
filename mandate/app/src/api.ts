@@ -68,8 +68,14 @@ export async function getSnapshot(signal?: AbortSignal): Promise<Snapshot> {
 }
 
 function getApiBase(): string {
-  return import.meta.env.VITE_MANDATE_API_URL
-    ?? `${window.location.protocol}//${window.location.hostname}:8030`;
+  if (import.meta.env.VITE_MANDATE_API_URL) {
+    return import.meta.env.VITE_MANDATE_API_URL;
+  }
+  const hostname = window.location.hostname;
+  const apiHostname = hostname === "localhost" || hostname === "::1"
+    ? "127.0.0.1"
+    : hostname;
+  return `${window.location.protocol}//${apiHostname}:8030`;
 }
 
 export async function updateTrajectory(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
