@@ -538,7 +538,7 @@ def create_dashboard(
         if not isinstance(payload, dict) or payload.pop("confirmed", False) is not True:
             return JSONResponse({"error": "explicit confirmation required"}, status_code=409)
         allowed_fields = {
-            "enabled", "symbols", "news_poll_seconds", "analysis_interval_minutes", "risk_posture",
+            "enabled", "execution_mode", "symbols", "news_poll_seconds", "analysis_interval_minutes", "risk_posture",
             "thesis", "monitoring_mode", "market_data_feed", "discovery_enabled", "discovery_top",
             "regular_hours_only", "max_spread_bps", "min_relative_volume",
             "monitor_corporate_actions", "options_confirmation",

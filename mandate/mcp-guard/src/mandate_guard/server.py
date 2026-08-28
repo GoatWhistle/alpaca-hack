@@ -134,13 +134,14 @@ def create_server(
         return {
             "trajectory": autonomy.read().model_dump(mode="json"),
             "recent_alerts": autonomy.recent_alerts(alert_limit),
-            "execution_policy": "human_approval_required",
+            "execution_policy": autonomy.read().execution_mode,
         }
 
     @mcp.tool(annotations=LOCAL_WRITE)
     def update_trajectory(
         rationale: str,
         enabled: bool | None = None,
+        execution_mode: str | None = None,
         symbols: list[str] | None = None,
         news_poll_seconds: int | None = None,
         analysis_interval_minutes: int | None = None,
@@ -163,6 +164,7 @@ def create_server(
             mandate_symbols=service.mandate_universe(),
             updated_by=f"chat:{rationale.strip()[:100]}",
             enabled=enabled,
+            execution_mode=execution_mode,
             symbols=symbols,
             news_poll_seconds=news_poll_seconds,
             analysis_interval_minutes=analysis_interval_minutes,
@@ -181,7 +183,7 @@ def create_server(
         return {
             "trajectory": trajectory.model_dump(mode="json"),
             "mandate_unchanged": True,
-            "execution_policy": "human_approval_required",
+            "execution_policy": trajectory.execution_mode,
         }
 
     @mcp.tool(annotations=LOCAL_WRITE)

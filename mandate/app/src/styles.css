@@ -67,6 +67,11 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); }
 
 .approval-badge { border: 1px solid #604b27; background: #211b11; color: var(--amber); padding: 7px 10px; cursor: pointer; font: 500 9px "DM Mono", monospace; letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; }
 .approval-badge:hover { color: #ffd97a; border-color: #8a6a33; }
+.execution-toggle { height: 32px; padding: 0 10px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--panel-2); cursor: pointer; font: 600 9px "DM Mono", monospace; letter-spacing: .08em; white-space: nowrap; }
+.execution-toggle span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.execution-toggle--approval { color: var(--amber) !important; border-color: #604b27; background: #211b11; }
+.execution-toggle--auto { color: var(--mint) !important; border-color: #27664e; background: #10251e; }
+.execution-toggle:disabled { opacity: .55; cursor: wait; }
 
 .decisions { border: 1px solid #604b27; background: #1c1610; margin-bottom: 14px; }
 .decisions-heading { padding: 14px 20px; border-bottom: 1px solid #604b27; display: flex; align-items: center; justify-content: space-between; }

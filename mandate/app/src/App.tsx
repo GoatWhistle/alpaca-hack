@@ -233,6 +233,7 @@ function TrajectorySettings({ trajectory, universe, open, onClose, onSaved }: {
   const [message, setMessage] = useState("");
   const [form, setForm] = useState({
     enabled: Boolean(trajectory.enabled ?? true),
+    execution_mode: String(trajectory.execution_mode ?? "approval"),
     symbols: Array.isArray(trajectory.symbols) ? trajectory.symbols.map(String) : universe,
     news_poll_seconds: Number(trajectory.news_poll_seconds ?? 60),
     analysis_interval_minutes: Number(trajectory.analysis_interval_minutes ?? 15),
@@ -327,7 +328,7 @@ function TrajectorySettings({ trajectory, universe, open, onClose, onSaved }: {
           <div className="symbol-picker"><small>Monitored mandate universe</small><div>{universe.map((symbol) => <button className={form.symbols.includes(symbol) ? "selected" : ""} key={symbol} onClick={() => toggleSymbol(symbol)}>{symbol}</button>)}</div></div>
           <label className="thesis-field">Research trajectory<textarea maxLength={2000} value={form.thesis} onChange={(event) => setForm({ ...form, thesis: event.target.value })} /></label>
         </section>
-        {!reviewing ? <button className="settings-save" disabled={!form.symbols.length} onClick={() => setReviewing(true)}>Review changes</button> : <div className="confirm-box"><p>This changes monitoring and proposal logic only. It cannot place an order or expand the mandate universe.</p><button disabled={saving} onClick={() => void save()}>{saving ? "Applying…" : "Confirm & apply"}</button><button onClick={() => setReviewing(false)}>Back</button></div>}
+        {!reviewing ? <button className="settings-save" disabled={!form.symbols.length} onClick={() => setReviewing(true)}>Review changes</button> : <div className="confirm-box"><p>This changes monitoring preferences. Execution mode is controlled by the header switch; neither can expand the mandate universe.</p><button disabled={saving} onClick={() => void save()}>{saving ? "Applying…" : "Confirm & apply"}</button><button onClick={() => setReviewing(false)}>Back</button></div>}
         {message && <p className="settings-message">{message}</p>}
       </div>
     </aside>
@@ -338,6 +339,7 @@ export function App() {
   const [view, setView] = useState<View>("overview");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [switchingExecution, setSwitchingExecution] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [paused, setPaused] = useState(false);
   const [hidden, setHidden] = useState(() => document.visibilityState === "hidden");
@@ -461,6 +463,25 @@ export function App() {
       : `${generatedAgeS}s ago`;
   const stream = (autonomyRuntime.stream ?? {}) as Record<string, unknown>;
   const approvals = data?.approvals ?? { count: 0, items: [] };
+  const executionMode = String(trajectory.execution_mode ?? "approval") === "auto_paper"
+    ? "auto_paper"
+    : "approval";
+  const toggleExecutionMode = useCallback(async () => {
+    const target = executionMode === "auto_paper" ? "approval" : "auto_paper";
+    if (target === "auto_paper" && !window.confirm(
+      "Enable automatic PAPER order submission? Every order still passes research and mandate checks, but it will not wait for your approval.",
+    )) return;
+    setSwitchingExecution(true);
+    try {
+      await updateTrajectory({ execution_mode: target });
+      await refresh();
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not change execution mode");
+    } finally {
+      setSwitchingExecution(false);
+    }
+  }, [executionMode, refresh]);
   const handleApprovalRespond = useCallback(async (item: Record<string, unknown>, approve: boolean) => {
     const toolCallId = String(item.tool_call_id ?? "");
     if (!toolCallId) return;
@@ -498,6 +519,17 @@ export function App() {
             {data && <ServiceHealth services={data.services} />}
           </div>
           <div className="top-actions">
+            <button
+              className={`execution-toggle execution-toggle--${executionMode === "auto_paper" ? "auto" : "approval"}`}
+              onClick={() => void toggleExecutionMode()}
+              disabled={!data || switchingExecution}
+              title={executionMode === "auto_paper"
+                ? "Automatic paper submission is enabled. Click to require approval."
+                : "Orders wait for your approval. Click to enable automatic paper submission."}
+            >
+              <span aria-hidden="true" />
+              {switchingExecution ? "SWITCHING" : executionMode === "auto_paper" ? "AUTO PAPER" : "ASK APPROVAL"}
+            </button>
             <span className={`freshness${paused || hidden ? " stale" : ""}`} title={hidden ? "Auto-refresh paused while the tab is hidden" : undefined}>
               {hidden ? "auto-paused" : freshness}
             </span>

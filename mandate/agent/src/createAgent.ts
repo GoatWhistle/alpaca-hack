@@ -6,6 +6,7 @@ import { TrueForge } from "@truefoundry/trueforge-sdk";
 import { buildAgentSpec, parseOptionalBoolean } from "./agentSpec.js";
 
 const AGENT_NAME = "mandate-paper-agent";
+const AUTO_AGENT_NAME = "mandate-paper-agent-auto";
 const baseUrl = process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790";
 const guardUrl = process.env.MANDATE_GUARD_URL ?? "http://127.0.0.1:8010/mcp";
 const researchUrl = process.env.MANDATE_RESEARCH_URL ?? "http://127.0.0.1:8020/mcp";
@@ -63,10 +64,20 @@ if (enableResearchSkill) {
   });
 }
 
-const manifest = buildAgentSpec(instructions, enableResearchSkill);
-const existing = (await client.agents.list()).data.find((agent) => agent.name === AGENT_NAME);
-const result = existing
-  ? await client.agents.update(existing.id, { manifest })
-  : await client.agents.create({ name: AGENT_NAME, manifest });
+const agents = (await client.agents.list()).data;
+const applyAgent = async (name: string, requireSubmitApproval: boolean) => {
+  const manifest = buildAgentSpec(instructions, enableResearchSkill, requireSubmitApproval);
+  const existing = agents.find((agent) => agent.name === name);
+  return existing
+    ? client.agents.update(existing.id, { manifest })
+    : client.agents.create({ name, manifest });
+};
+const [manual, automatic] = await Promise.all([
+  applyAgent(AGENT_NAME, true),
+  applyAgent(AUTO_AGENT_NAME, false),
+]);
 
-console.log(JSON.stringify({ id: result.data.id, name: result.data.name }, null, 2));
+console.log(JSON.stringify({
+  manual: { id: manual.data.id, name: manual.data.name },
+  automatic: { id: automatic.data.id, name: automatic.data.name },
+}, null, 2));

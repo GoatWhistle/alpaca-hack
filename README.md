@@ -184,9 +184,12 @@ keeps REST polling as a configurable fallback, and deduplicates events through a
 a read-only TrueForge analysis immediately for new headlines or on the configured cadence. Each cycle is
 visible in Chat History and must finish with `ACTION: PARK` or `ACTION: PROPOSE`.
 Background turns are mechanically audited after completion and fail if they request an execution,
-trajectory-write or approval tool. They may run read-only sandbox code at any point to validate data,
-test hypotheses, reproduce parser behavior, or run bounded experiments; proposal math still comes from
-the deterministic research and guard tools. `PROPOSE` is a notification for the human, never permission to trade.
+trajectory-write or disallowed destructive tool. They may run read-only sandbox code at any point to
+validate data, test hypotheses, reproduce parser behavior, or run bounded experiments; proposal math
+still comes from the deterministic research and guard tools. The header execution switch selects either
+`ASK APPROVAL`, where a validated submission pauses in TrueForge, or `AUTO PAPER`, where a dedicated agent
+may submit without pausing. Both modes remain paper-only and use the same mandate guard; cancel, close and
+trajectory changes always require approval.
 
 Start it after TrueForge, guard and research MCP are healthy:
 
