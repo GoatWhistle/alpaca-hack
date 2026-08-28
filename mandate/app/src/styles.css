@@ -130,7 +130,7 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); }
 @keyframes pulse { 50% { opacity: .3; } }
 .count { color: var(--muted); }
 
-.filter-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.panel-heading > .filter-chips { display: flex; flex-direction: row; align-items: center; gap: 6px; flex-wrap: wrap; }
 .filter-chips button { border: 1px solid var(--line); background: transparent; color: var(--muted); padding: 5px 8px; cursor: pointer; font: 500 8px "DM Mono", monospace; text-transform: uppercase; display: inline-flex; align-items: center; gap: 6px; }
 .filter-chips button em { color: #71717a; font-style: normal; }
 .filter-chips button:hover { color: var(--text); }
