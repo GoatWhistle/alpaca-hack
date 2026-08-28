@@ -62,7 +62,7 @@ news strategy uses only revisions available at each historical cutoff within a b
 issuer feed is never rebound to another ticker: AAPL can use Apple Newsroom and NVDA can use NVIDIA IR,
 while other symbols receive neither feed unless an attributable source is added explicitly.
 
-The unprivileged `mandate-research` package is also a loadable TrueForge Skill. Its
+The unprivileged `mandate-research` package is also available as an opt-in TrueForge Git Skill. Its
 `evaluate_trajectory` tool replaces repeated agent-authored arithmetic with one Decimal-based decision
 matrix. It monitors the full mandate, ranks a production funnel of three equities plus SPY, and computes liquidity and
 stale-data gates, session movement, feature snapshots, ATR14 sizing capped by live mandate headroom and
@@ -251,8 +251,10 @@ embedded credentials. `MANDATE_RESEARCH_URL` independently configures the read-o
 The registered `mandate-paper-agent` uses `zai/glm-5-3-flash`, sandbox execution, dynamic subagents,
 generative UI, context compaction and three MCP servers. Alpaca exposes only
 calendar, clock and stock-data research tools to the model; all execution flows through `mandate-guard`.
-The `mandate-research` Git Skill is enabled by default and can be disabled with
-`MANDATE_ENABLE_RESEARCH_SKILL=false`. The read-only research MCP remains enabled independently of the Git Skill.
+The `mandate-research` Git Skill is disabled by default so sandbox startup never depends on cloning a
+private GitHub repository. Enable it explicitly with `MANDATE_ENABLE_RESEARCH_SKILL=true` only when
+TrueForge has repository credentials. The read-only research MCP remains enabled independently and
+provides the same decision tools without a Git clone.
 
 The example mandate is [`mandate/mandates/example.yaml`](mandate/mandates/example.yaml). An expired or
 invalid mandate prevents startup and blocks subsequent policy operations if introduced while running.

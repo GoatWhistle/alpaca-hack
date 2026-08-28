@@ -3,14 +3,17 @@ import { fileURLToPath } from "node:url";
 
 import { TrueForge } from "@truefoundry/trueforge-sdk";
 
-import { buildAgentSpec } from "./agentSpec.js";
+import { buildAgentSpec, parseOptionalBoolean } from "./agentSpec.js";
 
 const AGENT_NAME = "mandate-paper-agent";
 const baseUrl = process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790";
 const guardUrl = process.env.MANDATE_GUARD_URL ?? "http://127.0.0.1:8010/mcp";
 const researchUrl = process.env.MANDATE_RESEARCH_URL ?? "http://127.0.0.1:8020/mcp";
 const skillRef = process.env.MANDATE_GIT_REF ?? "feat/mandate-integration";
-const enableResearchSkill = process.env.MANDATE_ENABLE_RESEARCH_SKILL !== "false";
+const enableResearchSkill = parseOptionalBoolean(
+  process.env.MANDATE_ENABLE_RESEARCH_SKILL,
+  "MANDATE_ENABLE_RESEARCH_SKILL",
+);
 const parsedGuardUrl = new URL(guardUrl);
 const parsedResearchUrl = new URL(researchUrl);
 for (const [name, url] of [
