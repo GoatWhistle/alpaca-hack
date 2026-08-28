@@ -127,8 +127,10 @@ function NewsCard({ item, featured = false }: { item: Record<string, unknown>; f
       <span>{String(item.source ?? "news")}</span>
       <div>{symbols.map((symbol) => <b key={symbol}>{symbol}</b>)}</div>
     </div>
-    <h3>{newsText(item.headline ?? "Untitled market update")}</h3>
-    {item.summary ? <p>{newsText(item.summary)}</p> : null}
+    <div className="news-copy">
+      <h3>{newsText(item.headline ?? "Untitled market update")}</h3>
+      {item.summary ? <p>{newsText(item.summary)}</p> : null}
+    </div>
     {url ? <a href={url} target="_blank" rel="noreferrer">Read full article <Icon name="external" /></a> : null}
   </article>;
 }
@@ -482,7 +484,7 @@ export function App() {
             <div><span className="kicker">MARKET INTELLIGENCE</span><h1>News</h1></div>
             <span>{newsItems.length} unique stories</span>
           </section>
-          {newsItems.length ? <section className="news-grid">
+          {newsItems.length ? <section className="news-stream">
             {newsItems.map((item, index) => <NewsCard item={item} featured={index === 0} key={`${String(item.source)}:${String(item.external_id ?? item.url)}:${index}`} />)}
           </section> : <Empty>No news has been received yet.</Empty>}
         </main></div>
