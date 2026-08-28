@@ -4,7 +4,7 @@ import { getSnapshot, updateTrajectory, type Journal, type Snapshot } from "./ap
 import { decimal, money, number, percent, shortId } from "./format";
 
 const REFRESH_MS = 5_000;
-type View = "overview" | "agent";
+type View = "overview" | "news" | "agent";
 
 function Icon({ name }: { name: "shield" | "refresh" | "external" | "pulse" | "settings" | "close" }) {
   const paths = {
@@ -99,6 +99,38 @@ function TimelineItem({ entry, last }: { entry: Journal; last: boolean }) {
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <div className="empty"><span>○</span><p>{children}</p></div>;
+}
+
+function newsText(value: unknown): string {
+  const decodePoint = (match: string, raw: string, radix: number) => {
+    const point = Number.parseInt(raw, radix);
+    return Number.isInteger(point) && point >= 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff)
+      ? String.fromCodePoint(point)
+      : match;
+  };
+  return String(value ?? "")
+    .replace(/&#(\d+);/g, (match, code: string) => decodePoint(match, code, 10))
+    .replace(/&#x([0-9a-f]+);/gi, (match, code: string) => decodePoint(match, code, 16))
+    .replaceAll("&quot;", "\"")
+    .replaceAll("&apos;", "'")
+    .replaceAll("&#39;", "'")
+    .replaceAll("&amp;", "&")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">");
+}
+
+function NewsCard({ item, featured = false }: { item: Record<string, unknown>; featured?: boolean }) {
+  const symbols = Array.isArray(item.symbols) ? item.symbols.map(String) : [];
+  const url = typeof item.url === "string" ? item.url : "";
+  return <article className={`news-card${featured ? " news-card--featured" : ""}`}>
+    <div className="news-meta">
+      <span>{String(item.source ?? "news")}</span>
+      <div>{symbols.map((symbol) => <b key={symbol}>{symbol}</b>)}</div>
+    </div>
+    <h3>{newsText(item.headline ?? "Untitled market update")}</h3>
+    {item.summary ? <p>{newsText(item.summary)}</p> : null}
+    {url ? <a href={url} target="_blank" rel="noreferrer">Read full article <Icon name="external" /></a> : null}
+  </article>;
 }
 
 function TrajectorySettings({ trajectory, universe, open, onClose, onSaved }: {
@@ -237,11 +269,30 @@ export function App() {
   const outcomeScorecard = rawScorecard && typeof rawScorecard === "object" && !Array.isArray(rawScorecard)
     ? Object.entries(rawScorecard as Record<string, unknown>)
     : [];
-  const newsAlerts = [...(data?.autonomy.alerts ?? [])].reverse().slice(0, 3);
+  const newsItems = useMemo(() => {
+    const seen = new Set<string>();
+    return [...(data?.autonomy.alerts ?? [])].reverse().filter((item) => {
+      if (item.kind !== "news" || !item.headline) return false;
+      const key = `${String(item.source ?? "")}:${String(item.external_id ?? item.url ?? item.headline)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [data]);
+  const latestNews = newsItems[0];
   const autonomyStatus = String(autonomyRuntime.status ?? "not_started");
   const dailyPnl = number(account.daily_pnl);
   const isOpen = data?.mandate.market_is_open ?? false;
   const universe = Array.isArray(rawMandate.universe) ? rawMandate.universe.map(String) : [];
+  const qualityPass = number(autonomyRuntime.quality_pass);
+  const qualityTotal = number(autonomyRuntime.quality_total);
+  const parkReason = String(autonomyRuntime.last_action ?? "") === "PARK"
+    ? (!isOpen && Boolean(trajectory.regular_hours_only ?? true)
+      ? "Market closed — proposals are disabled outside regular hours."
+      : qualityTotal > 0 && qualityPass < qualityTotal
+        ? `Market data gate failed: ${qualityPass} of ${qualityTotal} symbols passed spread and freshness checks.`
+        : "No candidate cleared the combined signal and risk gates.")
+    : null;
 
   return (
     <div className="app-shell">
@@ -256,7 +307,7 @@ export function App() {
             <button className="icon-button settings-button" aria-label="Monitoring settings" title="Monitoring settings" onClick={() => setSettingsOpen(true)}>
               <Icon name="settings" />
             </button>
-            {view === "overview" && (
+            {view !== "agent" && (
               <>
                 <button
                   className={`icon-button refresh-state refresh-state--${paused ? "paused" : "live"}`}
@@ -278,15 +329,13 @@ export function App() {
       <div className="mandate-chrome workspace-nav-shell">
         <nav className="workspace-tabs" aria-label="MANDATE workspace">
           <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>Dashboard</button>
+          <button className={view === "news" ? "active" : ""} onClick={() => setView("news")}>News</button>
           <button className={view === "agent" ? "active" : ""} onClick={() => setView("agent")}>Agent chat</button>
         </nav>
       </div>
 
       {view === "overview" ? <div className="mandate-chrome operator-view"><main>
         <section className="hero-row">
-          <div>
-            <h1>{String(rawMandate.name ?? "Waiting for mandate")}</h1>
-          </div>
           <div className="market-state">
             <span className={isOpen ? "market-open" : "market-closed"}>{isOpen ? "MARKET OPEN" : "MARKET CLOSED"}</span>
           </div>
@@ -335,6 +384,7 @@ export function App() {
                   <span><small>Analysis cadence</small><b>Every {String(trajectory.analysis_interval_minutes ?? "—")} min</b></span>
                   <span><small>News cadence</small><b>Every {String(trajectory.news_poll_seconds ?? "—")} sec</b></span>
                 </div>
+                {parkReason ? <div className="decision-explanation"><b>Why PARK</b><span>{parkReason}</span></div> : null}
                 <div className="trajectory-summary">
                   <span>{String(trajectory.risk_posture ?? "unconfigured")} trajectory</span>
                   <p>{String(trajectory.thesis ?? "Start the runner to initialize the shared trajectory.")}</p>
@@ -364,14 +414,9 @@ export function App() {
                     })}</tbody>
                   </table> : <p className="muted">Appears after any evaluated signal receives a 60-minute counterfactual outcome.</p>}
                 </div>
-                <div className="alert-list">
-                  <div className="subsection-title"><span>Latest news deliveries</span><b>{data?.autonomy.alerts.length ?? 0}</b></div>
-                  {newsAlerts.length ? newsAlerts.map((alert, index) => (
-                    <div className="alert-item" key={`${String(alert.at ?? alert.published_at)}-${index}`}>
-                      <span>{String(alert.status ?? alert.kind ?? "event")}</span>
-                      <b>{String(alert.headline ?? `${alert.count ?? 0} alerts → ${alert.action ?? "analysis"}`)}</b>
-                    </div>
-                  )) : <p className="muted">No new headline has crossed the durable alert cursor.</p>}
+                <div className="latest-news">
+                  <div className="subsection-title"><span>Latest news</span><button onClick={() => setView("news")}>All news · {newsItems.length}</button></div>
+                  {latestNews ? <NewsCard item={latestNews} featured /> : <p className="muted">No new headline has crossed the durable alert cursor.</p>}
                 </div>
                 {autonomyRuntime.last_error ? <div className="attention">{String(autonomyRuntime.last_error)}</div> : null}
               </div>
@@ -431,7 +476,17 @@ export function App() {
         </section>
       </main>
 
-      </div> : (
+      </div> : view === "news" ? (
+        <div className="mandate-chrome news-view"><main>
+          <section className="news-page-heading">
+            <div><span className="kicker">MARKET INTELLIGENCE</span><h1>News</h1></div>
+            <span>{newsItems.length} unique stories</span>
+          </section>
+          {newsItems.length ? <section className="news-grid">
+            {newsItems.map((item, index) => <NewsCard item={item} featured={index === 0} key={`${String(item.source)}:${String(item.external_id ?? item.url)}:${index}`} />)}
+          </section> : <Empty>No news has been received yet.</Empty>}
+        </main></div>
+      ) : (
         <section className="agent-workspace" aria-label="MANDATE agent workspace">
           <TrueForgeUI
             server={{ type: "trueforge", baseUrl: "/" }}

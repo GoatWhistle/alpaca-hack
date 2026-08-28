@@ -50,7 +50,7 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .operator-view main { width: 100%; padding: 24px; }
-.hero-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
+.hero-row { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 14px; }
 .operator-view h1 { margin: 0; color: var(--text); font-size: clamp(24px, 2.6vw, 36px); letter-spacing: -.035em; }
 .market-state { text-align: right; display: flex; }
 .market-state span { font: 500 10px "DM Mono", monospace; letter-spacing: .13em; padding: 7px 10px; border: 1px solid; }
@@ -126,6 +126,9 @@ pre { overflow: auto; color: var(--muted); background: #101013; padding: 12px; f
 .autonomy-facts span { border-bottom: 0; }
 .autonomy-facts small { color: var(--muted); font-size: 8px; text-transform: uppercase; }
 .autonomy-facts b { overflow: hidden; color: var(--text); font: 500 9px "DM Mono", monospace; text-overflow: ellipsis; white-space: nowrap; }
+.decision-explanation { padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #604b27; background: #211b11; }
+.decision-explanation b { flex: 0 0 auto; color: var(--amber); font: 600 9px "DM Mono", monospace; text-transform: uppercase; }
+.decision-explanation span { color: #d2c29f; font-size: 10px; line-height: 1.5; }
 .trajectory-summary { padding: 15px 20px; border-bottom: 1px solid var(--line); }
 .trajectory-summary > span { color: var(--accent); font: 500 9px "DM Mono", monospace; text-transform: uppercase; }
 .trajectory-summary p { color: var(--muted); margin: 8px 0 11px; font-size: 10px; line-height: 1.5; }
@@ -168,10 +171,29 @@ pre { overflow: auto; color: var(--muted); background: #101013; padding: 12px; f
 .outcome-scorecard th { color: #71717a; font-weight: 500; text-transform: uppercase; }
 .outcome-scorecard td { color: var(--muted); }
 .outcome-scorecard tbody tr:last-child td { border-bottom: 0; }
-.alert-list .subsection-title { padding-left: 20px; padding-right: 20px; }
-.alert-item { display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 11px 20px; border-bottom: 1px solid var(--line); }
-.alert-item > span { color: var(--accent); font: 500 8px "DM Mono", monospace; text-transform: uppercase; }
-.alert-item b { min-width: 0; overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.latest-news { border-bottom: 1px solid var(--line); }
+.latest-news .subsection-title { padding-left: 20px; padding-right: 20px; }
+.subsection-title button { border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 9px; text-transform: uppercase; }
+.subsection-title button:hover { color: var(--text); }
+.news-card { min-width: 0; padding: 20px; border: 1px solid var(--line); background: var(--panel); }
+.latest-news .news-card { border: 0; }
+.news-meta { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.news-meta > span { color: var(--accent); font: 600 9px "DM Mono", monospace; text-transform: uppercase; }
+.news-meta > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.news-meta b { padding: 4px 6px; border: 1px solid var(--line); color: var(--muted); font: 500 8px "DM Mono", monospace; }
+.news-card h3 { margin: 14px 0 0; color: var(--text); font-size: 15px; line-height: 1.45; letter-spacing: -.01em; }
+.news-card p { margin: 10px 0 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
+.news-card a { width: fit-content; margin-top: 15px; display: inline-flex; align-items: center; gap: 7px; color: var(--text); font-size: 10px; text-decoration: none; }
+.news-card a:hover { color: var(--accent); }
+.news-card a svg { width: 14px; height: 14px; }
+.news-card--featured { border-color: #4c4c58; }
+.news-card--featured h3 { font-size: clamp(16px, 1.3vw, 21px); }
+.news-view main { width: 100%; padding: 24px; }
+.news-page-heading { margin-bottom: 20px; display: flex; align-items: end; justify-content: space-between; gap: 20px; }
+.news-page-heading h1 { margin: 5px 0 0; font-size: clamp(28px, 3vw, 42px); }
+.news-page-heading > span { color: var(--muted); font: 500 10px "DM Mono", monospace; text-transform: uppercase; }
+.news-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.news-grid .news-card--featured { grid-column: span 2; }
 .limit-row { padding: 15px 20px 0; }
 .limit-label { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
 .limit-label b { color: var(--text); font-family: "DM Mono", monospace; }
@@ -212,6 +234,7 @@ pre { overflow: auto; color: var(--muted); background: #101013; padding: 12px; f
   .metric:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
   .timeline-panel, .monitor-panel { grid-column: span 12; }
   .risk-panel, .broker-panel, .attention-panel { grid-column: span 6; }
+  .news-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
   .topbar { height: 58px; padding: 0 14px; gap: 10px; }
@@ -222,6 +245,7 @@ pre { overflow: auto; color: var(--muted); background: #101013; padding: 12px; f
   .settings-drawer { width: 100vw; border-left: 0; }
   .settings-grid { grid-template-columns: 1fr; }
   .operator-view main { padding: 18px 14px 36px; }
+  .news-view main { padding: 18px 14px 36px; }
   .hero-row { align-items: flex-start; flex-direction: column; }
   .market-state { text-align: left; }
   .status-strip { overflow-x: auto; }
@@ -233,6 +257,9 @@ pre { overflow: auto; color: var(--muted); background: #101013; padding: 12px; f
   .autonomy-facts { grid-template-columns: 1fr; }
   .autonomy-facts span { border-right: 0; border-bottom: 1px solid var(--line); }
   .autonomy-facts span:last-child { border-bottom: 0; }
+  .news-grid { grid-template-columns: 1fr; }
+  .news-grid .news-card--featured { grid-column: 1; }
+  .news-page-heading { align-items: flex-start; flex-direction: column; }
   .timeline-topline { flex-direction: column; gap: 5px; }
   .agent-workspace { height: calc(100dvh - 102px); min-height: 480px; }
 }
