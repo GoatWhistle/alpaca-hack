@@ -90,6 +90,33 @@ def test_summary_fails_closed_for_large_or_missing_session_move() -> None:
     assert "missing_session_move" in result["symbols"]["MSFT"]["blocked_by"]
 
 
+def test_macro_price_alignment_can_produce_candidate_without_company_news() -> None:
+    monitoring = {
+        "market_is_open": True,
+        "benchmark": {"quality_pass": True},
+        "macro_context": {
+            "active": True, "direction": "risk_on",
+            "trigger": "session_change_pct", "move_pct": "0.85",
+        },
+        "quality": {
+            "AAPL": {
+                "spread_bps": "2", "relative_volume": "0.8",
+                "session_change_pct": "1.2", "quality_pass": True,
+            }
+        },
+    }
+    comparison = _comparison("AAPL", news="flat", momentum="buy")
+    for name in ("mean_reversion", "breakout_volume"):
+        comparison["signals"][name]["direction"] = "buy"
+    result = summarize_trajectory_math(
+        symbols=["AAPL"], monitoring=monitoring, comparisons={"AAPL": comparison}
+    )
+    assert result["research_candidates"] == ["AAPL"]
+    assert result["symbols"]["AAPL"]["news_price_aligned"] is False
+    assert result["symbols"]["AAPL"]["macro_price_aligned"] is True
+    assert result["symbols"]["AAPL"]["signal_path"] == "macro_price"
+
+
 def test_live_wrapper_fetches_monitoring_once_and_each_symbol_once() -> None:
     calls: list[tuple[str, object]] = []
 

@@ -70,6 +70,7 @@ export type MarketResult = {
   sources: Record<string, unknown>;
   quality: Record<string, Record<string, unknown>>;
   benchmark: Record<string, unknown>;
+  macro_context?: Record<string, unknown>;
   discovery: Record<string, unknown>;
   corporate_actions: Record<string, unknown>[];
   options_confirmation: Record<string, unknown>;
@@ -207,6 +208,7 @@ export function buildAutonomyPrompt(
     feed: market.feed,
     market_is_open: market.market_is_open,
     benchmark: market.benchmark,
+    macro_context: market.macro_context ?? {},
     quality: Object.fromEntries(trajectory.symbols.map((symbol) => [symbol, market.quality[symbol] ?? null])),
     corporate_actions: market.corporate_actions.slice(0, 10),
     options_confirmation: market.options_confirmation,
@@ -228,7 +230,7 @@ export function buildAutonomyPrompt(
     `Observation-only discovery watchlist (top 3, never expands mandate authority): ${JSON.stringify(watchlist)}`,
     "Discovery candidates are observation-only and never expand the mandate universe.",
     "You may call compare_live_signals once per watchlist symbol for research, but a watchlist result can never cause PROPOSE until the human adds that symbol to the trajectory and mandate.",
-    "A PROPOSE action requires passing liquidity/staleness checks and confirmation by SPY context; conflicting or missing evidence means PARK.",
+    "A PROPOSE action requires passing liquidity/staleness checks and confirmation by SPY context. A macro-price research candidate may proceed without company news only when evaluate_trajectory explicitly reports signal_path=macro_price; conflicting or missing evidence means PARK.",
     "Only when evaluate_trajectory returns 1-3 research_candidates, use parallel read-only price-researcher, news-researcher, and risk-critic subagents to challenge those candidates before the final consensus. Never delegate execution or mandate changes.",
     trajectory.regular_hours_only
       ? "The trajectory permits proposals during regular market hours only. Outside regular hours, ACTION must be PARK."

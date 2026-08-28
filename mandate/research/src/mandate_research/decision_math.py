@@ -178,6 +178,9 @@ def summarize_trajectory_math(
     quality = monitoring.get("quality", {})
     benchmark = monitoring.get("benchmark", {})
     benchmark_pass = isinstance(benchmark, dict) and benchmark.get("quality_pass") is True
+    macro_context = monitoring.get("macro_context", {})
+    macro_active = isinstance(macro_context, dict) and macro_context.get("active") is True
+    macro_direction = macro_context.get("direction") if isinstance(macro_context, dict) else None
     market_is_open = monitoring.get("market_is_open") is True
     results: dict[str, Any] = {}
     candidates: list[str] = []
@@ -209,7 +212,8 @@ def summarize_trajectory_math(
                 "news_scoring": {"events": None, "llm_scored": None},
                 "effective_strategy_weights": {},
                 "sizing": {"available": False, "reason": "research_funnel"},
-                "news_price_aligned": False, "single_symbol_move_breach": False,
+                "news_price_aligned": False, "macro_price_aligned": False,
+                "signal_path": None, "single_symbol_move_breach": False,
                 "research_candidate": False, "blocked_by": ["research_funnel"],
             }
             continue
@@ -244,17 +248,27 @@ def summarize_trajectory_math(
         news_direction = strategies["news_price_confirmation"].get("direction")
         ensemble = strategies["regime_ensemble"]
         ensemble_direction = ensemble.get("direction")
-        price_directions = {
+        price_directions = [
             strategies[name].get("direction")
             for name in (
                 "momentum", "mean_reversion", "breakout_volume",
                 "rsi_reversion", "macd_trend", "volatility_adjusted_momentum",
             )
-        }
+        ]
         price_news_aligned = (
             news_direction in {"buy", "sell"}
             and news_direction == ensemble_direction
             and news_direction in price_directions
+        )
+        macro_signal_direction = {
+            "risk_on": "buy",
+            "risk_off": "sell",
+        }.get(macro_direction)
+        macro_price_aligned = (
+            macro_active
+            and macro_signal_direction is not None
+            and ensemble_direction == macro_signal_direction
+            and sum(direction == macro_signal_direction for direction in price_directions) >= 2
         )
         reasons: list[str] = []
         if regular_hours_only and not market_is_open:
@@ -265,8 +279,8 @@ def summarize_trajectory_math(
             reasons.append("spy_quality_gate")
         if move_breach:
             reasons.append("single_symbol_move_gate" if session_move is not None else "missing_session_move")
-        if not price_news_aligned:
-            reasons.append("news_price_not_aligned")
+        if not (price_news_aligned or macro_price_aligned):
+            reasons.append("news_or_macro_price_not_aligned")
         candidate = not reasons
         if candidate:
             candidates.append(symbol)
@@ -319,6 +333,10 @@ def summarize_trajectory_math(
             "effective_strategy_weights": effective_weights,
             "sizing": sizing,
             "news_price_aligned": price_news_aligned,
+            "macro_price_aligned": macro_price_aligned,
+            "signal_path": (
+                "news_price" if price_news_aligned else "macro_price" if macro_price_aligned else None
+            ),
             "single_symbol_move_breach": move_breach,
             "research_candidate": candidate,
             "blocked_by": reasons,
@@ -358,6 +376,7 @@ def summarize_trajectory_math(
             "regular_hours_only": regular_hours_only,
         },
         "benchmark": benchmark,
+        "macro_context": macro_context,
         "symbols": results,
         "research_candidates": candidates,
         "spy_regime": spy_regime,

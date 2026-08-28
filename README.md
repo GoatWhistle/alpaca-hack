@@ -195,10 +195,12 @@ npm run autonomy
 
 The shared trajectory defaults to 18 liquid AI-platform/infrastructure equities plus SPY: direct public
 companies and listed proxies for private labs such as Anthropic and DeepSeek. It uses realtime streams, a
-60-second REST fallback and a 15-minute full analysis. Every market poll adds Alpaca snapshots, spread/staleness/volume gates, SPY
-confirmation, observation-only movers/most-actives discovery and corporate-action risks. Optional option
+60-second REST fallback and a 15-minute full analysis. Every market poll adds Alpaca snapshots, spread/staleness/time-adjusted
+intraday volume-pace gates, SPY macro-move context, observation-only movers/most-actives discovery and corporate-action risks. Optional option
 chain confirmation is disabled by default. Discovery never expands the mandate universe. A deterministic
-post-model gate converts `PROPOSE` to `PARK` when regular-hours, liquidity or SPY checks fail.
+post-model gate converts `PROPOSE` to `PARK` when regular-hours, liquidity or SPY checks fail. A strong SPY
+session, gap, or intraday move can produce a macro-price candidate without company news, but only when the
+ensemble and at least two independent price strategies agree with the macro direction.
 The three strongest movers are exposed as an observation-only research watchlist. SPY's 20-bar regime
 changes ensemble weights and halves gross sizing below its 20-period moving average. Strategy multipliers
 learn from completed 60-minute counterfactual outcomes for both PARK and PROPOSE cycles, are evidence-shrunk

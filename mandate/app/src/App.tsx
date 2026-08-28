@@ -301,7 +301,7 @@ function TrajectorySettings({ trajectory, universe, open, onClose, onSaved }: {
           <small>Data quality gates</small>
           <div className="settings-grid">
             <label>Max spread, bps<input type="number" min="1" max="1000" value={form.max_spread_bps} onChange={(event) => setForm({ ...form, max_spread_bps: Number(event.target.value) })} /></label>
-            <label>Min relative volume<input type="number" min="0" max="100" step="0.05" value={form.min_relative_volume} onChange={(event) => setForm({ ...form, min_relative_volume: Number(event.target.value) })} /></label>
+            <label>Min volume pace ratio<input type="number" min="0" max="100" step="0.05" value={form.min_relative_volume} onChange={(event) => setForm({ ...form, min_relative_volume: Number(event.target.value) })} /></label>
           </div>
           <div className="check-grid">
             <label><input type="checkbox" checked={form.regular_hours_only} onChange={(event) => setForm({ ...form, regular_hours_only: event.target.checked })} />Proposals in regular market hours only</label>

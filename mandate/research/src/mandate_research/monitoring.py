@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 from mandate_research.features import top_of_book_imbalance
 from mandate_research.live_comparison import JsonFetcher, _fetch_json
@@ -15,6 +16,20 @@ MOVERS_ENDPOINT = "https://data.alpaca.markets/v1beta1/screener/stocks/movers"
 ACTIVES_ENDPOINT = "https://data.alpaca.markets/v1beta1/screener/stocks/most-actives"
 CORPORATE_ACTIONS_ENDPOINT = "https://data.alpaca.markets/v1/corporate-actions"
 OPTION_CHAIN_ENDPOINT = "https://data.alpaca.markets/v1beta1/options/snapshots"
+NEW_YORK = ZoneInfo("America/New_York")
+MACRO_MOVE_THRESHOLD_PCT = Decimal("0.60")
+VOLUME_CURVE = (
+    (0, Decimal("0.010")),
+    (5, Decimal("0.040")),
+    (15, Decimal("0.090")),
+    (30, Decimal("0.150")),
+    (60, Decimal("0.250")),
+    (120, Decimal("0.420")),
+    (180, Decimal("0.560")),
+    (270, Decimal("0.740")),
+    (330, Decimal("0.870")),
+    (390, Decimal("1.000")),
+)
 
 
 def _decimal(value: Any) -> Decimal | None:
@@ -42,6 +57,48 @@ def _iso_age_seconds(value: Any, now: datetime) -> int | None:
     return max(0, int((now - parsed.astimezone(timezone.utc)).total_seconds()))
 
 
+def _expected_volume_fraction(now: datetime) -> tuple[Decimal | None, str]:
+    """Approximate cumulative regular-session volume using a deterministic U-shaped curve."""
+    local = now.astimezone(NEW_YORK)
+    elapsed = (local.hour * 60 + local.minute) - (9 * 60 + 30)
+    if elapsed < 0:
+        return None, "pre_market"
+    if elapsed >= 390:
+        return Decimal("1"), "full_session"
+    for (left_minute, left_fraction), (right_minute, right_fraction) in zip(
+        VOLUME_CURVE, VOLUME_CURVE[1:]
+    ):
+        if left_minute <= elapsed <= right_minute:
+            progress = Decimal(elapsed - left_minute) / Decimal(right_minute - left_minute)
+            return left_fraction + (right_fraction - left_fraction) * progress, "time_adjusted"
+    return Decimal("1"), "full_session"
+
+
+def _macro_context(spy: dict[str, Any]) -> dict[str, Any]:
+    moves = {
+        name: value
+        for name in ("session_change_pct", "gap_pct", "intraday_pct")
+        if (value := _decimal(spy.get(name))) is not None
+    }
+    if not moves:
+        return {
+            "active": False,
+            "direction": "neutral",
+            "trigger": None,
+            "move_pct": None,
+            "threshold_pct": str(MACRO_MOVE_THRESHOLD_PCT),
+        }
+    trigger, move = max(moves.items(), key=lambda item: abs(item[1]))
+    active = abs(move) >= MACRO_MOVE_THRESHOLD_PCT
+    return {
+        "active": active,
+        "direction": "risk_on" if active and move > 0 else "risk_off" if active else "neutral",
+        "trigger": trigger,
+        "move_pct": str(move.quantize(Decimal("0.01"))),
+        "threshold_pct": str(MACRO_MOVE_THRESHOLD_PCT),
+    }
+
+
 def _quality(
     symbol: str,
     snapshot: dict[str, Any],
@@ -65,7 +122,14 @@ def _quality(
     mid = (bid + ask) / 2 if bid is not None and ask is not None and bid > 0 and ask >= bid else None
     spread_bps = (ask - bid) / mid * Decimal("10000") if mid else None
     current_volume, previous_volume = _decimal(daily.get("v")), _decimal(previous.get("v"))
-    relative_volume = current_volume / previous_volume if current_volume is not None and previous_volume else None
+    daily_volume_fraction = current_volume / previous_volume if current_volume is not None and previous_volume else None
+    expected_volume_fraction, volume_basis = _expected_volume_fraction(now)
+    relative_volume = (
+        daily_volume_fraction / expected_volume_fraction
+        if daily_volume_fraction is not None and expected_volume_fraction is not None
+        and expected_volume_fraction > 0
+        else daily_volume_fraction
+    )
     open_price, previous_close = _decimal(daily.get("o")), _decimal(previous.get("c"))
     last = _decimal(trade.get("p")) or _decimal(minute.get("c")) or _decimal(daily.get("c"))
     gap_pct = _percent(open_price - previous_close, previous_close) if open_price is not None and previous_close is not None else None
@@ -109,6 +173,15 @@ def _quality(
         ),
         "spread_bps": str(spread_bps.quantize(Decimal("0.01"))) if spread_bps is not None else None,
         "relative_volume": str(relative_volume.quantize(Decimal("0.001"))) if relative_volume is not None else None,
+        "daily_volume_fraction": (
+            str(daily_volume_fraction.quantize(Decimal("0.001")))
+            if daily_volume_fraction is not None else None
+        ),
+        "expected_volume_fraction": (
+            str(expected_volume_fraction.quantize(Decimal("0.001")))
+            if expected_volume_fraction is not None else None
+        ),
+        "relative_volume_basis": volume_basis,
         "gap_pct": str(gap_pct.quantize(Decimal("0.01"))) if gap_pct is not None else None,
         "intraday_pct": str(intraday_pct.quantize(Decimal("0.01"))) if intraday_pct is not None else None,
         "session_change_pct": (
@@ -258,6 +331,7 @@ def collect_market_monitoring(
         "market_is_open": clock.get("is_open") is True,
         "quality": quality,
         "benchmark": {"symbol": "SPY", **spy},
+        "macro_context": _macro_context(spy),
         "discovery": discovery,
         "corporate_actions": corporate_actions,
         "options_confirmation": option_confirmation,
