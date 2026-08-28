@@ -325,3 +325,10 @@ strategy evidence while historical records without captured directions remain ex
 The adaptive-news E2E session `01m128da83tm700q7kxa15s6pw` repeated that bounded read-only path with
 structured GLM scoring, SPY risk-off context, 2 bps slippage and train-only parameter selection. It returned
 `ACTION: PARK` for AAPL/MSFT/NVDA/SPY, made no sandbox-code call and attempted no broker write.
+
+On 28 August 2026 a full direct MCP E2E monitored the 19-symbol AI universe and bounded full research to
+CRM/BIDU/MSFT/AMZN/NVDA/IBM/TSM plus SPY. Every selected symbol returned eight strategy outputs,
+`execution_authority=false`, and the closed-market decision was `PARK`. TrueForge session
+`01m13mvc90zx3qg4tr6nxd4sb9` independently called only `get_mandate` and `evaluate_trajectory`, returned
+`ACTION: PARK`, used no sandbox code and attempted no broker write. The first wide run exposed wasted LLM
+work on stale headlines; the production path now applies its 24-hour cutoff before structured scoring.
