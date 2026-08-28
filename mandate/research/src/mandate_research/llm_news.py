@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections import OrderedDict
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -72,6 +73,7 @@ def _unavailable(reason: str) -> dict[str, Any]:
         "event_type": "other",
         "horizon": "intraday",
         "novelty_48h": "0",
+        "tickers_affected": [],
         "reason": reason[:240],
     }
 
@@ -95,6 +97,14 @@ def _validate_item(value: Any) -> dict[str, Any]:
     event_type = str(value.get("event_type", ""))
     horizon = str(value.get("horizon", ""))
     reason = clean_text(value.get("reason", ""))
+    raw_tickers = value.get("tickers_affected", [])
+    if not isinstance(raw_tickers, list):
+        raise ValueError("tickers_affected must be an array")
+    tickers = list(dict.fromkeys(
+        ticker
+        for raw in raw_tickers[:10]
+        if re.fullmatch(r"[A-Z][A-Z0-9.-]{0,9}", ticker := str(raw).strip().upper())
+    ))
     if event_type not in EVENT_TYPES or horizon not in HORIZONS or not reason:
         raise ValueError("invalid event_type, horizon, or empty reason")
     return {
@@ -104,6 +114,7 @@ def _validate_item(value: Any) -> dict[str, Any]:
         "event_type": event_type,
         "horizon": horizon,
         "novelty_48h": str(novelty),
+        "tickers_affected": tickers,
         "reason": reason[:240],
     }
 
@@ -144,6 +155,7 @@ def score_news_batch_llm(
         "\"event_type\":\"earnings|guidance|regulatory|product|m_and_a|analyst|capital_return|macro|legal|operations|other\","
         "\"horizon\":\"intraday|multiday|long_term\",\"novelty_48h\":0..1,\"reason\":\"brief factual reason\"}]}."
     )
+    system += " Each item must also include tickers_affected as an array of at most 10 uppercase US ticker symbols."
     try:
         payload = poster(
             _endpoint(),

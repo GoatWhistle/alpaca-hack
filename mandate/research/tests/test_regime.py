@@ -20,10 +20,10 @@ def test_regime_distinguishes_trend_and_range() -> None:
     ranged = classify_market_regime(_bars([Decimal("100") + Decimal(index % 2) for index in range(30)]))
     assert trend["regime"] == "trend"
     assert trend["direction"] == "up"
-    assert trend["strategy_weights"]["momentum"] == "0.45"
+    assert trend["strategy_weights"]["momentum"] == "0.25"
     assert trend["risk_off"] is False
     assert ranged["regime"] == "range"
-    assert ranged["strategy_weights"]["mean_reversion"] == "0.45"
+    assert ranged["strategy_weights"]["mean_reversion"] == "0.25"
 
 
 def test_weighted_ensemble_changes_with_regime_weights() -> None:

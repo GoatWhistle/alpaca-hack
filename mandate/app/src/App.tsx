@@ -365,7 +365,7 @@ export function App() {
                         <td>{String(item.adaptive_multiplier ?? "—")}×</td>
                       </tr>;
                     })}</tbody>
-                  </table> : <p className="muted">Appears after proposed signals receive a 60-minute outcome.</p>}
+                  </table> : <p className="muted">Appears after any evaluated signal receives a 60-minute counterfactual outcome.</p>}
                 </div>
                 <div className="alert-list">
                   <div className="subsection-title"><span>Latest news deliveries</span><b>{data?.autonomy.alerts.length ?? 0}</b></div>

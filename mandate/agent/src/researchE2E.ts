@@ -126,7 +126,10 @@ const symbols = object(evaluation.symbols, "evaluation.symbols");
 for (const symbol of ["AAPL", "MSFT", "NVDA", "SPY"]) {
   const result = object(symbols[symbol], `evaluation.symbols.${symbol}`);
   const strategies = object(result.strategies, `${symbol}.strategies`);
-  for (const strategy of ["momentum", "mean_reversion", "breakout_volume", "news_price_confirmation", "regime_ensemble"]) {
+  for (const strategy of [
+    "momentum", "mean_reversion", "breakout_volume", "news_price_confirmation",
+    "rsi_reversion", "macd_trend", "volatility_adjusted_momentum", "regime_ensemble",
+  ]) {
     if (!(strategy in strategies)) throw new Error(`${symbol} omitted strategy ${strategy}`);
   }
   object(result.direction_counts, `${symbol}.direction_counts`);

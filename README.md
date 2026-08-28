@@ -62,14 +62,18 @@ while other symbols receive neither feed unless an attributable source is added 
 
 The unprivileged `mandate-research` package is also a loadable TrueForge Skill. Its
 `evaluate_trajectory` tool replaces repeated agent-authored arithmetic with one Decimal-based decision
-matrix. It computes liquidity and stale-data gates, session movement, ATR14 sizing capped by live mandate
-headroom, SPY trend/range regime, and a regime-weighted ensemble over five explainable approaches:
+matrix. It monitors the full mandate, ranks an eight-symbol research funnel, and computes liquidity and
+stale-data gates, session movement, feature snapshots, ATR14 sizing capped by live mandate headroom and
+same-side correlation clusters, SPY trend/range regime, and an ensemble over eight explainable outputs:
 
 - price momentum;
 - mean reversion by rolling z-score;
 - price breakout confirmed by relative volume;
 - structured Z.AI news impact score (sentiment, confidence, event type, horizon and 48-hour novelty)
   confirmed by price momentum;
+- RSI mean reversion;
+- MACD trend;
+- volatility-adjusted momentum;
 - regime-weighted ensemble that favors momentum/breakout in trends and mean reversion in ranges.
 
 Signals receive only the history available at their decision timestamp. The harness reports return,
@@ -187,14 +191,16 @@ cd mandate/agent
 npm run autonomy
 ```
 
-The shared trajectory defaults to AAPL/MSFT/NVDA/SPY, realtime streams, a 60-second REST fallback and a
-15-minute full analysis. Every market poll adds Alpaca snapshots, spread/staleness/volume gates, SPY
+The shared trajectory defaults to 18 liquid AI-platform/infrastructure equities plus SPY: direct public
+companies and listed proxies for private labs such as Anthropic and DeepSeek. It uses realtime streams, a
+60-second REST fallback and a 15-minute full analysis. Every market poll adds Alpaca snapshots, spread/staleness/volume gates, SPY
 confirmation, observation-only movers/most-actives discovery and corporate-action risks. Optional option
 chain confirmation is disabled by default. Discovery never expands the mandate universe. A deterministic
 post-model gate converts `PROPOSE` to `PARK` when regular-hours, liquidity or SPY checks fail.
 The three strongest movers are exposed as an observation-only research watchlist. SPY's 20-bar regime
 changes ensemble weights and halves gross sizing below its 20-period moving average. Strategy multipliers
-learn only from completed 60-minute proposal outcomes, are evidence-shrunk and remain bounded.
+learn from completed 60-minute counterfactual outcomes for both PARK and PROPOSE cycles, are evidence-shrunk
+and remain bounded.
 In normal chat, ask the agent to explain `get_autonomy_state`, pause/resume monitoring, narrow the symbols,
 change cadence, risk posture or thesis. Persistent changes go through `update_trajectory`, require approval,
 and cannot add a symbol outside the hard mandate. Runtime heartbeat, next analysis and news deliveries are
@@ -221,7 +227,7 @@ execution argument. During regular hours it requires and allows the first approv
 checks that no broker write was attempted, reports `deferred: market_closed`, and exits successfully.
 
 `eval:research-e2e` is intentionally read-only. It requires TrueForge/Z.AI to call `get_mandate` and one
-`evaluate_trajectory` for the complete symbol set. The verifier requires five strategy outputs and a
+`evaluate_trajectory` for the complete symbol set. The verifier requires eight strategy outputs and a
 structured LLM score whenever live news is present, and rejects sandbox execution or broker-write calls.
 mandate-bounded whole-share quantity for every symbol, rejects sandbox `exec`, redundant low-level
 research calls and every execution tool, and requires a bounded `ACTION: PARK` or `ACTION: PROPOSE` conclusion.
@@ -291,7 +297,7 @@ artifact is [`docs/evidence/paper-e2e-2026-08-27.json`](docs/evidence/paper-e2e-
 requires durable submitted provenance before requesting cancellation, validates the persisted TrueForge
 call before approval, and can re-audit an existing session without replaying the cancel action.
 
-The current local suite has 91 guard tests, 56 research/Skill/MCP tests and 9 autonomy-runner tests. It covers hot-reloaded human
+The current local suite has 91 guard tests, 63 research/Skill/MCP tests and 9 autonomy-runner tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.
@@ -311,10 +317,10 @@ observed four passing quality gates, one MSFT corporate action and returned `ACT
 5-minute forward outcome was then measured without any broker write.
 
 The decision-math E2E session `01m1269wsz849mfa0hac88yqbg` subsequently called only `get_mandate` and
-`evaluate_trajectory` for AAPL/MSFT/NVDA/SPY. It returned five-strategy evidence and ready whole-share
+`evaluate_trajectory` for AAPL/MSFT/NVDA/SPY. It returned eight-strategy evidence and ready whole-share
 sizing, chose `PARK`, made no sandbox-code call and attempted no broker write. The dashboard now exposes a
-60-minute per-strategy/news-vs-price outcome scorecard; historical records without captured directions are
-excluded rather than guessed.
+60-minute per-strategy/news-vs-price outcome scorecard; PARK decisions now contribute counterfactual
+strategy evidence while historical records without captured directions remain excluded rather than guessed.
 
 The adaptive-news E2E session `01m128da83tm700q7kxa15s6pw` repeated that bounded read-only path with
 structured GLM scoring, SPY risk-off context, 2 bps slippage and train-only parameter selection. It returned

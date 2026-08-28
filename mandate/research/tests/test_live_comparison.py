@@ -18,7 +18,7 @@ APPLE = b"""<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>apple-1</id>
 def fake_fetch(url: str, headers: dict[str, str]) -> dict:
     assert headers["APCA-API-KEY-ID"] == "paper-key"
     if "/bars?" in url:
-        start = NOW - timedelta(hours=30)
+        start = NOW - timedelta(hours=60)
         return {
             "bars": [
                 {
@@ -29,7 +29,7 @@ def fake_fetch(url: str, headers: dict[str, str]) -> dict:
                     "c": 101 + index,
                     "v": 10_000 + index,
                 }
-                for index in range(30)
+                for index in range(60)
             ]
         }
     if "/news?" in url:
@@ -75,7 +75,7 @@ def test_live_comparison_uses_real_shape_and_all_strategies(
     )
 
     assert result["data"]["source"] == "alpaca-iex"
-    assert result["data"]["bars"] == 30
+    assert result["data"]["bars"] == 60
     assert result["data"]["news"] == 3
     assert result["data"]["requested_at"] == NOW.isoformat()
     assert set(result["data"]["news_sources"]) == {
@@ -87,10 +87,13 @@ def test_live_comparison_uses_real_shape_and_all_strategies(
     assert set(result["backtest"]) == {
         "momentum",
         "mean_reversion",
-            "breakout_volume",
-            "news_price_confirmation",
-            "regime_ensemble",
-        }
+        "breakout_volume",
+        "news_price_confirmation",
+        "rsi_reversion",
+        "macd_trend",
+        "volatility_adjusted_momentum",
+        "regime_ensemble",
+    }
 
 
 def test_live_comparison_follows_bounded_bar_pagination(
@@ -98,12 +101,12 @@ def test_live_comparison_follows_bounded_bar_pagination(
 ) -> None:
     monkeypatch.setenv("ALPACA_API_KEY", "paper-key")
     monkeypatch.setenv("ALPACA_SECRET_KEY", "paper-secret")
-    start = NOW - timedelta(hours=30)
+    start = NOW - timedelta(hours=60)
 
     def paged_fetch(url: str, headers: dict[str, str]) -> dict:
         if "/news?" in url:
             return {"news": []}
-        offset = 15 if "page_token=second" in url else 0
+        offset = 30 if "page_token=second" in url else 0
         result = {
             "bars": [
                 {
@@ -114,7 +117,7 @@ def test_live_comparison_follows_bounded_bar_pagination(
                     "c": 101 + index,
                     "v": 10_000 + index,
                 }
-                for index in range(offset, offset + 15)
+                for index in range(offset, offset + 30)
             ]
         }
         if offset == 0:
@@ -127,5 +130,5 @@ def test_live_comparison_follows_bounded_bar_pagination(
         source_fetcher=fake_source_fetch,
         news_scorer=fake_news_scorer,
     )
-    assert result["data"]["bars"] == 30
+    assert result["data"]["bars"] == 60
     assert result["as_of"] == (NOW - timedelta(hours=1)).isoformat()

@@ -21,7 +21,7 @@ def test_collect_monitoring_computes_quality_and_falls_back_to_iex(monkeypatch: 
         if "/snapshots" in url:
             return {
                     "AAPL": {
-                        "latestQuote": {"bp": 99.9, "ap": 100.1, "t": NOW.isoformat()},
+                        "latestQuote": {"bp": 99.9, "ap": 100.1, "bs": 300, "as": 100, "t": NOW.isoformat()},
                         "latestTrade": {"p": 101, "t": NOW.isoformat()},
                         "dailyBar": {"o": 100, "c": 101, "v": 500, "vw": 100.5},
                         "prevDailyBar": {"c": 98, "v": 1000},
@@ -46,6 +46,7 @@ def test_collect_monitoring_computes_quality_and_falls_back_to_iex(monkeypatch: 
     assert result["quality"]["AAPL"]["spread_bps"] == "20.00"
     assert result["quality"]["AAPL"]["relative_volume"] == "0.500"
     assert result["quality"]["AAPL"]["session_change_pct"] == "3.06"
+    assert result["quality"]["AAPL"]["top_of_book_imbalance"] == "0.5000"
     assert result["quality"]["AAPL"]["quality_pass"] is True
     assert result["benchmark"]["symbol"] == "SPY"
     assert result["discovery"]["observation_only"] is True

@@ -166,3 +166,62 @@ def test_summary_applies_spy_risk_off_and_adaptive_weights() -> None:
     assert result["spy_regime"]["risk_off"] is True
     assert item["sizing"]["headroom_notional"] == "2000.00"
     assert Decimal(item["effective_strategy_weights"]["news_price_confirmation"]) > Decimal("0.20")
+
+
+def test_research_funnel_prioritizes_alerts_and_bounds_expensive_comparisons() -> None:
+    compared: list[str] = []
+    symbols = ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "SPY"]
+
+    def monitor(**_: object) -> dict:
+        return {
+            "market_is_open": True,
+            "benchmark": {"quality_pass": True},
+            "quality": {
+                symbol: {
+                    "spread_bps": "1", "relative_volume": str(index + 1),
+                    "session_change_pct": "1", "quality_pass": True,
+                }
+                for index, symbol in enumerate(symbols)
+            },
+        }
+
+    def compare(**kwargs: object) -> dict:
+        symbol = str(kwargs["symbol"])
+        compared.append(symbol)
+        return _comparison(symbol)
+
+    result = evaluate_trajectory(
+        symbols=symbols, priority_symbols_csv="AAPL", research_limit=3,
+        monitor=monitor, compare=compare,
+    )
+    assert set(compared) == {"AAPL", "AMZN", "SPY"}
+    assert result["research_funnel"]["selected_symbols"] == ["AAPL", "AMZN", "SPY"]
+    assert result["symbols"]["MSFT"]["blocked_by"] == ["research_funnel"]
+
+
+def test_summary_scales_correlated_same_side_candidates() -> None:
+    monitoring = {
+        "market_is_open": True, "benchmark": {"quality_pass": True},
+        "quality": {
+            symbol: {
+                "last": "100", "spread_bps": "1", "relative_volume": "1",
+                "session_change_pct": "1", "quality_pass": True,
+            }
+            for symbol in ("AAPL", "MSFT")
+        },
+    }
+    returns = ["0.01", "0.02", "-0.01", "0.03", "0.02"]
+    comparisons = {symbol: _comparison(symbol) for symbol in ("AAPL", "MSFT")}
+    for comparison in comparisons.values():
+        comparison["features"] = {"returns_20": returns}
+    result = summarize_trajectory_math(
+        symbols=["AAPL", "MSFT"], monitoring=monitoring, comparisons=comparisons,
+        equity="100000", risk_budget_pct="1", atr_multiplier="2",
+        position_headroom_pct="10", gross_headroom_pct="4",
+    )
+    for symbol in ("AAPL", "MSFT"):
+        sizing = result["symbols"][symbol]["sizing"]
+        assert sizing["pre_correlation_qty"] == 40
+        assert sizing["qty"] == 28
+        assert sizing["correlation_cluster_size"] == 2
+        assert sizing["binding_constraint"] == "correlation_cluster"

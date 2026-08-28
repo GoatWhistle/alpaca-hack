@@ -103,10 +103,10 @@ test("forward outcomes settle each horizon once from durable baseline prices", (
   assert.deepEqual(records[0]?.forward_returns_pct, { "5m": { AAPL: "2.0000" } });
 });
 
-test("scorecard learns descriptive 60m accuracy from proposed strategy directions", () => {
+test("scorecard learns counterfactual 60m accuracy even when the final action parks", () => {
   const scorecard = buildOutcomeScorecard([{
     session_id: "session",
-    action: "PROPOSE",
+    action: "PARK",
     observed_at: "2026-08-27T10:00:00Z",
     prices: { AAPL: "100" },
     forward_returns_pct: { "60m": { AAPL: "2" } },
@@ -155,4 +155,5 @@ test("proposal safety fails closed on market hours and any missing quality evide
   assert.equal(enforceProposalSafety("PROPOSE", trajectory, { ...market, market_is_open: false }), "PARK");
   assert.equal(enforceProposalSafety("PROPOSE", trajectory, { ...market, quality: {} }), "PARK");
   assert.equal(enforceProposalSafety("PARK", trajectory, market), "PARK");
+  assert.equal(enforceProposalSafety("PROPOSE", trajectory, market, []), "PARK");
 });

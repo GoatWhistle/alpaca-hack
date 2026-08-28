@@ -21,7 +21,10 @@ class Trajectory(BaseModel):
 
     version: int = Field(default=1, ge=1)
     enabled: bool = True
-    symbols: list[str] = Field(default_factory=lambda: ["AAPL", "MSFT", "NVDA", "SPY"])
+    symbols: list[str] = Field(default_factory=lambda: [
+        "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AMD", "AVGO", "ORCL",
+        "IBM", "PLTR", "CRM", "ANET", "TSM", "ASML", "ARM", "BABA", "BIDU", "SPY",
+    ])
     news_poll_seconds: int = Field(default=60, ge=30, le=3600)
     analysis_interval_minutes: int = Field(default=15, ge=5, le=1440)
     monitoring_mode: Literal["realtime", "polling"] = "realtime"

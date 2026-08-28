@@ -8,10 +8,13 @@ from mandate_research.signals import (
     Direction,
     PriceBar,
     breakout_volume_signal,
+    macd_trend_signal,
     mean_reversion_signal,
     momentum_signal,
     news_price_confirmation_signal,
+    rsi_reversion_signal,
     score_news,
+    volatility_adjusted_momentum_signal,
 )
 
 
@@ -135,3 +138,12 @@ def test_invalid_signal_thresholds_are_rejected() -> None:
         breakout_volume_signal(history, lookback=3, min_volume_ratio=Decimal("0"))
     with pytest.raises(ValueError, match="threshold_pct"):
         momentum_signal(history, lookback=3, threshold_pct=Decimal("-1"))
+
+
+def test_extended_feature_signals_cover_distinct_behaviors() -> None:
+    rising = bars([str(100 + index) for index in range(45)])
+    falling = bars([str(150 - index) for index in range(45)])
+    assert rsi_reversion_signal(rising).direction is Direction.SELL
+    assert rsi_reversion_signal(falling).direction is Direction.BUY
+    assert macd_trend_signal(rising).direction in {Direction.BUY, Direction.FLAT}
+    assert volatility_adjusted_momentum_signal(rising).direction is Direction.BUY

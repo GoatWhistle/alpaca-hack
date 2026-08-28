@@ -11,10 +11,14 @@ from mandate_research.regime import classify_market_regime, weighted_ensemble
 from mandate_research.signals import (
     PriceBar,
     breakout_volume_signal,
+    macd_trend_signal,
     mean_reversion_signal,
     momentum_signal,
     news_price_confirmation_signal,
+    rsi_reversion_signal,
+    volatility_adjusted_momentum_signal,
 )
+from mandate_research.features import macd_histogram, realized_volatility, relative_strength_index
 from mandate_research.sizing import average_true_range
 
 
@@ -23,6 +27,9 @@ DEFAULT_PARAMETERS: dict[str, dict[str, Any]] = {
     "mean_reversion": {"lookback": 20, "z_threshold": Decimal("2")},
     "breakout_volume": {"lookback": 20, "min_volume_ratio": Decimal("1.5")},
     "news_price_confirmation": {"lookback": 3, "news_threshold": Decimal("0.25")},
+    "rsi_reversion": {"period": 14, "oversold": Decimal("30"), "overbought": Decimal("70")},
+    "macd_trend": {"fast": 12, "slow": 26, "signal": 9, "threshold_pct": Decimal("0.02")},
+    "volatility_adjusted_momentum": {"lookback": 20, "threshold": Decimal("0.25")},
 }
 PARAMETER_GRID: dict[str, list[dict[str, Any]]] = {
     "momentum": [
@@ -100,6 +107,9 @@ def _component_strategies(
     reversion = parameters["mean_reversion"]
     breakout = parameters["breakout_volume"]
     news = parameters["news_price_confirmation"]
+    rsi = parameters["rsi_reversion"]
+    macd = parameters["macd_trend"]
+    volatility_momentum = parameters["volatility_adjusted_momentum"]
     return {
         "momentum": (
             lambda window: momentum_signal(window, **momentum),
@@ -119,6 +129,18 @@ def _component_strategies(
             ),
             int(news["lookback"]) + 1,
         ),
+        "rsi_reversion": (
+            lambda window: rsi_reversion_signal(window, **rsi),
+            int(rsi["period"]) + 1,
+        ),
+        "macd_trend": (
+            lambda window: macd_trend_signal(window, **macd),
+            int(macd["slow"]) + int(macd["signal"]),
+        ),
+        "volatility_adjusted_momentum": (
+            lambda window: volatility_adjusted_momentum_signal(window, **volatility_momentum),
+            int(volatility_momentum["lookback"]) + 1,
+        ),
     }
 
 
@@ -134,7 +156,7 @@ def _with_ensemble(
         regime = classify_market_regime(window)
         return weighted_ensemble(component_signals, regime["strategy_weights"])
 
-    strategies["regime_ensemble"] = (regime_ensemble, 21)
+    strategies["regime_ensemble"] = (regime_ensemble, 35)
     return strategies
 
 
@@ -142,7 +164,9 @@ def _select_train_parameters(
     *, bars: list[PriceBar], symbol: str, events: list[NewsEvent], max_news_age: timedelta,
     fee_bps: Decimal, slippage_bps: Decimal,
 ) -> dict[str, dict[str, Any]]:
-    selected: dict[str, dict[str, Any]] = {}
+    selected: dict[str, dict[str, Any]] = {
+        name: dict(values) for name, values in DEFAULT_PARAMETERS.items()
+    }
     for name, candidates in PARAMETER_GRID.items():
         best: tuple[Decimal, dict[str, Any]] | None = None
         for candidate in candidates:
@@ -175,8 +199,8 @@ def analyze(payload: dict[str, Any]) -> dict[str, Any]:
     if not symbol:
         raise ValueError("symbol cannot be blank")
     bars = sorted((_bar(item) for item in payload["bars"]), key=lambda bar: bar.timestamp)
-    if len(bars) < 22:
-        raise ValueError("at least 22 chronological bars are required")
+    if len(bars) < 36:
+        raise ValueError("at least 36 chronological bars are required")
     cutoff = bars[-1].timestamp
     all_eligible_events = [
         event
@@ -203,7 +227,7 @@ def analyze(payload: dict[str, Any]) -> dict[str, Any]:
         bars, strategies, fee_bps=fee_bps, slippage_bps=slippage_bps,
         liquidate_at_end=True,
     )
-    split = max(22, int(len(bars) * 2 / 3))
+    split = max(36, int(len(bars) * 2 / 3))
     holdout: dict[str, Any] = {"status": "insufficient_history"}
     if split < len(bars):
         selected_parameters = _select_train_parameters(
@@ -241,6 +265,17 @@ def analyze(payload: dict[str, Any]) -> dict[str, Any]:
     current = {name: strategy(bars) for name, (strategy, _warmup) in strategies.items()}
     regime = classify_market_regime(bars)
     atr14 = average_true_range(bars)
+    feature_snapshot = {
+        "atr14": str(atr14),
+        "rsi14": str(relative_strength_index(bars).quantize(Decimal("0.01"))),
+        "macd_histogram": str(macd_histogram(bars).quantize(Decimal("0.0001"))),
+        "realized_volatility_20": str(realized_volatility(bars).quantize(Decimal("0.000001"))),
+        "return_20_pct": str(((bars[-1].close / bars[-21].close - Decimal("1")) * Decimal("100")).quantize(Decimal("0.0001"))),
+        "returns_20": [
+            str((current.close / previous.close - Decimal("1")).quantize(Decimal("0.00000001")))
+            for previous, current in zip(bars[-21:-1], bars[-20:])
+        ],
+    }
     return {
         "symbol": symbol,
         "as_of": cutoff.isoformat(),
@@ -255,6 +290,7 @@ def analyze(payload: dict[str, Any]) -> dict[str, Any]:
             "atr_pct": str((atr14 / bars[-1].close * Decimal("100")).quantize(Decimal("0.0001"))),
             "market_regime": regime,
         },
+        "features": feature_snapshot,
         "signals": {
             name: {
                 "direction": signal.direction.value,

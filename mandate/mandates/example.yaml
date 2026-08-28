@@ -1,5 +1,5 @@
-name: intraday-momentum-2026-08-28
-universe: [AAPL, MSFT, NVDA, SPY]
+name: ai-platforms-infrastructure-2026-08-28
+universe: [AAPL, MSFT, NVDA, GOOGL, AMZN, META, AMD, AVGO, ORCL, IBM, PLTR, CRM, ANET, TSM, ASML, ARM, BABA, BIDU, SPY]
 instruments: [equity]
 order_types: [limit]
 session: regular_hours_only

@@ -21,12 +21,13 @@ def test_llm_scorer_validates_bounded_structured_output(monkeypatch) -> None:
         assert url == "https://api.z.ai/api/coding/paas/v4/chat/completions"
         assert headers["Authorization"] == "Bearer test-token"
         assert "untrusted" in payload["messages"][0]["content"]
-        return {"choices": [{"message": {"content": '{"items":[{"id":0,"score":-0.7,"confidence":0.9,"event_type":"guidance","horizon":"multiday","novelty_48h":0.8,"reason":"Guidance cut dominates the earnings beat"}]}'}}]}
+        return {"choices": [{"message": {"content": '{"items":[{"id":0,"score":-0.7,"confidence":0.9,"event_type":"guidance","horizon":"multiday","novelty_48h":0.8,"tickers_affected":["aapl","AAPL","msft"],"reason":"Guidance cut dominates the earnings beat"}]}'}}]}
 
     result = score_news_batch_llm([_event()], symbol="AAPL", poster=post)[0]
     assert result["available"] is True
     assert result["score"] == "-0.7"
     assert result["confidence"] == "0.9"
+    assert result["tickers_affected"] == ["AAPL", "MSFT"]
 
 
 def test_llm_scorer_fails_closed_without_credentials(monkeypatch) -> None:

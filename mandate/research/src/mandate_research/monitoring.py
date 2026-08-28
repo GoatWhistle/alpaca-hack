@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 from urllib.parse import urlencode
 
+from mandate_research.features import top_of_book_imbalance
 from mandate_research.live_comparison import JsonFetcher, _fetch_json
 
 
@@ -55,6 +56,12 @@ def _quality(
     daily = snapshot.get("dailyBar") if isinstance(snapshot.get("dailyBar"), dict) else {}
     previous = snapshot.get("prevDailyBar") if isinstance(snapshot.get("prevDailyBar"), dict) else {}
     bid, ask = _decimal(quote.get("bp")), _decimal(quote.get("ap"))
+    bid_size, ask_size = _decimal(quote.get("bs")), _decimal(quote.get("as"))
+    quote_imbalance = (
+        top_of_book_imbalance(bid_size, ask_size)
+        if bid_size is not None and ask_size is not None
+        else None
+    )
     mid = (bid + ask) / 2 if bid is not None and ask is not None and bid > 0 and ask >= bid else None
     spread_bps = (ask - bid) / mid * Decimal("10000") if mid else None
     current_volume, previous_volume = _decimal(daily.get("v")), _decimal(previous.get("v"))
@@ -94,6 +101,12 @@ def _quality(
         "last": str(last) if last is not None else None,
         "bid": str(bid) if bid is not None else None,
         "ask": str(ask) if ask is not None else None,
+        "bid_size": str(bid_size) if bid_size is not None else None,
+        "ask_size": str(ask_size) if ask_size is not None else None,
+        "top_of_book_imbalance": (
+            str(quote_imbalance.quantize(Decimal("0.0001")))
+            if quote_imbalance is not None else None
+        ),
         "spread_bps": str(spread_bps.quantize(Decimal("0.01"))) if spread_bps is not None else None,
         "relative_volume": str(relative_volume.quantize(Decimal("0.001"))) if relative_volume is not None else None,
         "gap_pct": str(gap_pct.quantize(Decimal("0.01"))) if gap_pct is not None else None,

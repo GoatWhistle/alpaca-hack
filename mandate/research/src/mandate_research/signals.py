@@ -131,6 +131,67 @@ def breakout_volume_signal(
     return _flat(bars, f"no price breakout; volume ratio {volume_ratio:.3f}")
 
 
+def rsi_reversion_signal(
+    bars: Sequence[PriceBar], *, period: int = 14, oversold: Decimal = Decimal("30"),
+    overbought: Decimal = Decimal("70"),
+) -> TradeSignal:
+    from mandate_research.features import relative_strength_index
+
+    if not ZERO < oversold < overbought < Decimal("100"):
+        raise ValueError("RSI thresholds must satisfy 0 < oversold < overbought < 100")
+    if len(bars) <= period:
+        return _flat(bars, f"need {period + 1} bars")
+    value = relative_strength_index(bars, period=period)
+    if value <= oversold:
+        strength = min((oversold - value) / max(oversold, Decimal("0.0001")) + Decimal("0.25"), ONE)
+        return TradeSignal(Direction.BUY, strength, f"RSI{period} oversold at {value:.2f}", bars[-1].timestamp)
+    if value >= overbought:
+        strength = min((value - overbought) / max(Decimal("100") - overbought, Decimal("0.0001")) + Decimal("0.25"), ONE)
+        return TradeSignal(Direction.SELL, strength, f"RSI{period} overbought at {value:.2f}", bars[-1].timestamp)
+    return _flat(bars, f"RSI{period} {value:.2f} neutral")
+
+
+def macd_trend_signal(
+    bars: Sequence[PriceBar], *, fast: int = 12, slow: int = 26, signal: int = 9,
+    threshold_pct: Decimal = Decimal("0.02"),
+) -> TradeSignal:
+    from mandate_research.features import macd_histogram
+
+    if threshold_pct < ZERO:
+        raise ValueError("threshold_pct cannot be negative")
+    required = slow + signal - 1
+    if len(bars) < required:
+        return _flat(bars, f"need {required} bars")
+    histogram = macd_histogram(bars, fast=fast, slow=slow, signal=signal)
+    histogram_pct = histogram / bars[-1].close * Decimal("100")
+    if abs(histogram_pct) <= threshold_pct:
+        return _flat(bars, f"MACD histogram {histogram_pct:.4f}% inside threshold")
+    direction = Direction.BUY if histogram_pct > ZERO else Direction.SELL
+    strength = min(abs(histogram_pct) / max(threshold_pct * Decimal("5"), Decimal("0.0001")), ONE)
+    return TradeSignal(direction, strength, f"MACD histogram {histogram_pct:.4f}%", bars[-1].timestamp)
+
+
+def volatility_adjusted_momentum_signal(
+    bars: Sequence[PriceBar], *, lookback: int = 20, threshold: Decimal = Decimal("0.25"),
+) -> TradeSignal:
+    from mandate_research.features import realized_volatility
+
+    if threshold < ZERO:
+        raise ValueError("threshold cannot be negative")
+    if len(bars) <= lookback:
+        return _flat(bars, f"need {lookback + 1} bars")
+    change = bars[-1].close / bars[-1 - lookback].close - ONE
+    volatility = realized_volatility(bars, lookback=lookback)
+    if volatility == ZERO:
+        return _flat(bars, "zero realized volatility")
+    score = change / (volatility * Decimal(lookback).sqrt())
+    if abs(score) <= threshold:
+        return _flat(bars, f"vol-adjusted momentum {score:.3f} inside threshold")
+    direction = Direction.BUY if score > ZERO else Direction.SELL
+    strength = min(abs(score) / max(threshold * Decimal("4"), Decimal("0.0001")), ONE)
+    return TradeSignal(direction, strength, f"vol-adjusted momentum {score:.3f}", bars[-1].timestamp)
+
+
 def score_news(event: NewsEvent, *, symbol: str) -> Decimal:
     if event.symbols and symbol.upper() not in event.symbols:
         return ZERO

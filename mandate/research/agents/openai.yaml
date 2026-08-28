@@ -1,4 +1,4 @@
 interface:
   display_name: "MANDATE Decision Intelligence"
-  short_description: "LLM-scored adaptive trading research"
-  default_prompt: "Use $mandate-research to score news and evaluate the active trajectory without sandbox math."
+  short_description: "Bounded adaptive AI-equity research"
+  default_prompt: "Use $mandate-research to funnel the active AI-equity trajectory, score news, and return portfolio-aware research candidates without sandbox math."

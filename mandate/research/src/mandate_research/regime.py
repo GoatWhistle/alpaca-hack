@@ -8,7 +8,10 @@ from mandate_research.signals import Direction, PriceBar, TradeSignal
 
 ZERO = Decimal("0")
 ONE = Decimal("1")
-STRATEGIES = ("momentum", "mean_reversion", "breakout_volume", "news_price_confirmation")
+STRATEGIES = (
+    "momentum", "mean_reversion", "breakout_volume", "news_price_confirmation",
+    "rsi_reversion", "macd_trend", "volatility_adjusted_momentum",
+)
 
 
 def _linear_r_squared(values: Sequence[Decimal]) -> tuple[Decimal, Decimal]:
@@ -53,9 +56,17 @@ def classify_market_regime(bars: Sequence[PriceBar], *, lookback: int = 20) -> d
     direction = "up" if trending and slope > ZERO else "down" if trending else "flat"
     volatility = "high" if percentile >= Decimal("75") else "low" if percentile <= Decimal("25") else "normal"
     weights = (
-        {"momentum": "0.45", "mean_reversion": "0.10", "breakout_volume": "0.25", "news_price_confirmation": "0.20"}
+        {
+            "momentum": "0.25", "mean_reversion": "0.05", "breakout_volume": "0.15",
+            "news_price_confirmation": "0.15", "rsi_reversion": "0.05",
+            "macd_trend": "0.20", "volatility_adjusted_momentum": "0.15",
+        }
         if trending
-        else {"momentum": "0.15", "mean_reversion": "0.45", "breakout_volume": "0.15", "news_price_confirmation": "0.25"}
+        else {
+            "momentum": "0.08", "mean_reversion": "0.25", "breakout_volume": "0.08",
+            "news_price_confirmation": "0.15", "rsi_reversion": "0.25",
+            "macd_trend": "0.07", "volatility_adjusted_momentum": "0.12",
+        }
     )
     return {
         "regime": regime,

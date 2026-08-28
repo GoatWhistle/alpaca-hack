@@ -13,7 +13,7 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
-def _bars(count: int = 24) -> list[dict[str, str]]:
+def _bars(count: int = 60) -> list[dict[str, str]]:
     start = datetime(2026, 8, 1, tzinfo=timezone.utc)
     return [
         {
@@ -62,13 +62,17 @@ def test_analyze_compares_all_strategies_and_filters_future_news() -> None:
         "mean_reversion",
         "breakout_volume",
         "news_price_confirmation",
+        "rsi_reversion",
+        "macd_trend",
+        "volatility_adjusted_momentum",
         "regime_ensemble",
     }
     assert set(result["backtest"]) == set(result["signals"])
     assert result["slippage_bps"] == "2"
     assert result["chronological_holdout"]["parameters_frozen"] is True
     assert set(result["chronological_holdout"]["selected_parameters"]) == {
-        "momentum", "mean_reversion", "breakout_volume", "news_price_confirmation"
+        "momentum", "mean_reversion", "breakout_volume", "news_price_confirmation",
+        "rsi_reversion", "macd_trend", "volatility_adjusted_momentum",
     }
 
 
@@ -104,9 +108,9 @@ def test_analyze_keeps_last_eligible_revision_at_cutoff() -> None:
 
 
 def test_walk_forward_selection_cannot_see_holdout_prices() -> None:
-    original = _bars(45)
+    original = _bars(75)
     changed_tail = [dict(bar) for bar in original]
-    for index in range(30, 45):
+    for index in range(50, 75):
         close = Decimal("300") - Decimal(index * 3)
         changed_tail[index].update({
             "open": str(close + Decimal("1")),
