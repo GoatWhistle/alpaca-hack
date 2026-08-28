@@ -84,6 +84,7 @@ def create_server(
         adaptive_weights_json: str = "{}",
         priority_symbols_csv: str = "",
         research_limit: int = 8,
+        compact_output: bool = False,
     ) -> dict[str, Any]:
         """Compute one deterministic multi-symbol quality, signal, and backtest decision matrix."""
         normalized = [value.strip().upper() for value in symbols.split(",") if value.strip()]
@@ -102,6 +103,7 @@ def create_server(
             adaptive_weights_json=adaptive_weights_json,
             priority_symbols_csv=priority_symbols_csv,
             research_limit=research_limit,
+            compact_output=compact_output,
         )
 
     return mcp

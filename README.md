@@ -62,7 +62,7 @@ while other symbols receive neither feed unless an attributable source is added 
 
 The unprivileged `mandate-research` package is also a loadable TrueForge Skill. Its
 `evaluate_trajectory` tool replaces repeated agent-authored arithmetic with one Decimal-based decision
-matrix. It monitors the full mandate, ranks an eight-symbol research funnel, and computes liquidity and
+matrix. It monitors the full mandate, ranks a production funnel of three equities plus SPY, and computes liquidity and
 stale-data gates, session movement, feature snapshots, ATR14 sizing capped by live mandate headroom and
 same-side correlation clusters, SPY trend/range regime, and an ensemble over eight explainable outputs:
 
@@ -297,7 +297,7 @@ artifact is [`docs/evidence/paper-e2e-2026-08-27.json`](docs/evidence/paper-e2e-
 requires durable submitted provenance before requesting cancellation, validates the persisted TrueForge
 call before approval, and can re-audit an existing session without replaying the cancel action.
 
-The current local suite has 91 guard tests, 63 research/Skill/MCP tests and 9 autonomy-runner tests. It covers hot-reloaded human
+The current local suite has 91 guard tests, 64 research/Skill/MCP tests and 11 autonomy-runner tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.
@@ -332,3 +332,7 @@ CRM/BIDU/MSFT/AMZN/NVDA/IBM/TSM plus SPY. Every selected symbol returned eight s
 `01m13mvc90zx3qg4tr6nxd4sb9` independently called only `get_mandate` and `evaluate_trajectory`, returned
 `ACTION: PARK`, used no sandbox code and attempted no broker write. The first wide run exposed wasted LLM
 work on stale headlines; the production path now applies its 24-hour cutoff before structured scoring.
+The live 24/7 cycle `01m13p4d320fphtmwj6z4dcget` then monitored all 19 symbols, compacted model-facing
+research to three equities plus SPY, returned `PARK`, and scheduled the next 15-minute analysis. A persisted
+event watchdog now cancels any background turn that attempts sandbox `exec`, repeats the trajectory tool,
+or requests a write/approval path.

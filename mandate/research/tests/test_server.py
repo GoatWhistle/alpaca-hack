@@ -79,6 +79,7 @@ def test_research_mcp_delegates_with_bounded_arguments() -> None:
                 "adaptive_weights_json": "{}",
                 "priority_symbols_csv": "",
                 "research_limit": 8,
+                "compact_output": False,
             },
         ),
         ("score", {"headline": "Beat but guidance cut", "summary": "", "symbol": "AAPL"}),

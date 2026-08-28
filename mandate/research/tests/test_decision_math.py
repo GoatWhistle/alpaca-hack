@@ -199,6 +199,30 @@ def test_research_funnel_prioritizes_alerts_and_bounds_expensive_comparisons() -
     assert result["symbols"]["MSFT"]["blocked_by"] == ["research_funnel"]
 
 
+def test_compact_output_returns_only_fully_researched_symbols() -> None:
+    symbols = ["AAPL", "MSFT", "NVDA", "SPY"]
+
+    def monitor(**_: object) -> dict:
+        return {
+            "market_is_open": True, "benchmark": {"quality_pass": True},
+            "quality": {
+                symbol: {
+                    "spread_bps": "1", "relative_volume": "1",
+                    "session_change_pct": "1", "quality_pass": True,
+                }
+                for symbol in symbols
+            },
+        }
+
+    result = evaluate_trajectory(
+        symbols=symbols, research_limit=3, compact_output=True,
+        monitor=monitor, compare=lambda **kwargs: _comparison(str(kwargs["symbol"])),
+    )
+    assert result["research_funnel"]["input_symbols"] == symbols
+    assert set(result["symbols"]) == set(result["research_funnel"]["selected_symbols"])
+    assert len(result["symbols"]) == 3
+
+
 def test_summary_scales_correlated_same_side_candidates() -> None:
     monitoring = {
         "market_is_open": True, "benchmark": {"quality_pass": True},

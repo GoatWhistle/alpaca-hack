@@ -382,6 +382,7 @@ def evaluate_trajectory(
     adaptive_weights_json: str = "{}",
     priority_symbols_csv: str = "",
     research_limit: int = 8,
+    compact_output: bool = False,
     compare: Comparison = compare_live_signals,
     monitor: Monitoring = collect_market_monitoring,
 ) -> dict[str, Any]:
@@ -426,4 +427,9 @@ def evaluate_trajectory(
         "selected_symbols": comparison_symbols,
         "limit": research_limit,
     }
+    if compact_output:
+        result["symbols"] = {
+            symbol: result["symbols"][symbol]
+            for symbol in comparison_symbols
+        }
     return result
