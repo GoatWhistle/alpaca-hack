@@ -40,7 +40,13 @@ def fake_fetch(url: str, headers: dict[str, str]) -> dict:
                     "created_at": (NOW - timedelta(hours=2)).isoformat(),
                     "headline": "Apple raises outlook after profit growth",
                     "symbols": ["AAPL"],
-                }
+                },
+                {
+                    "id": 2,
+                    "created_at": (NOW - timedelta(days=2)).isoformat(),
+                    "headline": "Stale item must not consume LLM scoring",
+                    "symbols": ["AAPL"],
+                },
             ]
         }
     raise AssertionError(f"unexpected URL {url}")
@@ -55,6 +61,7 @@ def fake_source_fetch(url: str, headers: dict[str, str]) -> bytes:
 
 
 def fake_news_scorer(events, *, symbol: str) -> list[dict]:
+    assert all(NOW - timedelta(hours=24) <= event.published_at <= NOW for event in events)
     return [{
         "available": True, "score": "0.8", "confidence": "0.9", "reason": "material guidance",
         "event_type": "guidance", "horizon": "multiday", "novelty_48h": "0.8",

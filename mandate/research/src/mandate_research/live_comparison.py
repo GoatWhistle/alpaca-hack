@@ -102,7 +102,11 @@ def compare_live_signals(
         fetcher=source_fetcher,
         strict=False,
     )
-    events = deduplicate([*alpaca_events, *official_events])
+    news_cutoff = checked_at.astimezone(timezone.utc) - timedelta(hours=24)
+    events = [
+        event for event in deduplicate([*alpaca_events, *official_events])
+        if news_cutoff <= event.published_at <= checked_at
+    ]
     scored_events = []
     scoring_available = 0
     for start_index in range(0, len(events), MAX_LLM_BATCH_ITEMS):
