@@ -26,10 +26,6 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); }
 .app-shell { min-height: 100vh; }
 .topbar { height: 60px; width: 100%; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; background: rgba(31, 31, 34, .94); backdrop-filter: blur(18px); position: sticky; top: 0; z-index: 20; }
 .topbar-shell { position: sticky; top: 0; z-index: 20; border-bottom: 1px solid var(--line); background: rgba(31, 31, 34, .94); }
-.brand { display: flex; align-items: center; gap: 10px; }
-.brand-mark { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--line); color: var(--accent); background: var(--panel); }
-.brand-mark svg { width: 15px; }
-.brand strong { letter-spacing: .16em; font-size: 13px; }
 .kicker { color: var(--muted); font-family: "DM Mono", monospace; font-size: 9px; letter-spacing: .17em; }
 .workspace-nav-shell { border-bottom: 1px solid var(--line); background: var(--panel); }
 .workspace-tabs { width: 100%; padding: 0 24px; display: flex; gap: 24px; }
@@ -287,7 +283,6 @@ pre { overflow: auto; color: var(--muted); background: #101013; padding: 12px; f
 }
 @media (max-width: 720px) {
   .topbar { height: 58px; padding: 0 14px; gap: 10px; }
-  .brand strong { display: none; }
   .workspace-tabs { padding: 0 14px; gap: 16px; }
   .top-actions > .freshness { display: none; }
   .decision-card { grid-template-columns: 1fr; }

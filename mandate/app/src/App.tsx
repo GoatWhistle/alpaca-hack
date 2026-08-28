@@ -7,9 +7,8 @@ const REFRESH_MS = 5_000;
 type View = "overview" | "news" | "diagnostics" | "agent";
 type TimelineFilter = "all" | "submitted" | "denied" | "parked";
 
-function Icon({ name }: { name: "shield" | "refresh" | "external" | "pulse" | "settings" | "close" }) {
+function Icon({ name }: { name: "refresh" | "external" | "pulse" | "settings" | "close" }) {
   const paths = {
-    shield: <path d="M12 3 5 6v5c0 4.5 2.8 8 7 10 4.2-2 7-5.5 7-10V6l-7-3Zm-3 9 2 2 4-5" />,
     refresh: <path d="M20 12a8 8 0 1 1-2.3-5.7L20 8M20 4v4h-4" />,
     external: <path d="M14 4h6v6M20 4l-9 9M18 13v6H5V6h6" />,
     pulse: <path d="M3 12h4l2-6 4 12 2-6h6" />,
@@ -493,10 +492,6 @@ export function App() {
     <div className="app-shell">
       <div className="mandate-chrome topbar-shell">
         <header className="topbar">
-          <div className="brand">
-            <span className="brand-mark"><Icon name="shield" /></span>
-            <strong>MANDATE</strong>
-          </div>
           <div className="top-status">
             <span className={`market-pill ${isOpen ? "market-open" : "market-closed"}`}>{isOpen ? "MARKET OPEN" : "MARKET CLOSED"}</span>
             <span className="paper-badge">PAPER</span>
