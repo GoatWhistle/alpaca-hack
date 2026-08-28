@@ -688,10 +688,6 @@ export function App() {
         </main></div>
       ) : view === "diagnostics" ? (
         <div className="mandate-chrome diagnostics-view"><main>
-          <section className="news-page-heading">
-            <div><span className="kicker">OPERATIONS</span><h1>Diagnostics</h1></div>
-            <span>feeds, streams and measured outcomes</span>
-          </section>
           <section className="dashboard-grid">
             <article className="panel diag-panel">
               <div className="panel-heading"><div><h2>Services</h2></div><span className="count">{data?.services.length ?? 0}</span></div>
