@@ -50,7 +50,9 @@ that authority.
 News is normalized as untrusted data before it reaches any strategy:
 
 - Alpaca News JSON;
-- SEC EDGAR Atom feeds;
+- SEC EDGAR Atom feeds for every issuer in the trading universe;
+- official Microsoft, Google, AWS and Meta feeds;
+- Federal Reserve press releases for SPY / macro context;
 - Apple Newsroom Atom and NVIDIA investor-relations RSS feeds with fixed issuer mappings.
 
 The parsers cap input size, require timezone-aware timestamps, remove markup, normalize symbols and
@@ -297,7 +299,7 @@ artifact is [`docs/evidence/paper-e2e-2026-08-27.json`](docs/evidence/paper-e2e-
 requires durable submitted provenance before requesting cancellation, validates the persisted TrueForge
 call before approval, and can re-audit an existing session without replaying the cancel action.
 
-The current local suite has 91 guard tests, 64 research/Skill/MCP tests and 11 autonomy-runner tests. It covers hot-reloaded human
+The current local suite has 91 guard tests, 70 research/Skill/MCP tests and 13 autonomy-runner tests. It covers hot-reloaded human
 authority, fail-closed malformed edits, concurrent submissions,
 pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
 live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.

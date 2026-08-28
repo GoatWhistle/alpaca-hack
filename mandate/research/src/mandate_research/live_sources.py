@@ -40,6 +40,7 @@ ALLOWED_HOSTS = {
     "www.federalreserve.gov",
 }
 Fetcher = Callable[[str, dict[str, str]], bytes]
+MAX_EVENTS_PER_SOURCE = 20
 CIK_BY_SYMBOL = {
     "AAPL": "0000320193",
     "MSFT": "0000789019",
@@ -107,7 +108,7 @@ def _load_source(
     load: Callable[[], list[NewsEvent]],
 ) -> tuple[list[NewsEvent], dict[str, Any]]:
     try:
-        events = load()
+        events = deduplicate(load())[-MAX_EVENTS_PER_SOURCE:]
         summary = _source_summary(events)
         if summary["events"] == 0:
             raise RuntimeError("source returned no parseable events")

@@ -46,7 +46,7 @@ def create_server(
 
     @mcp.tool(annotations=READ_ONLY)
     def probe_news_sources(symbol: str = "AAPL") -> dict[str, Any]:
-        """Probe attributable Alpaca, SEC, and issuer news feeds independently."""
+        """Probe Alpaca, SEC, Fed, and attributable issuer feeds independently."""
         return probe(symbol=symbol, strict=False)
 
     @mcp.tool(annotations=READ_ONLY)

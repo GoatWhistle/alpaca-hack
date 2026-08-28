@@ -16,6 +16,7 @@ const defaultRuntimePath = resolve(mandateDir, "logs/autonomy-runtime.json");
 const defaultCursorPath = resolve(mandateDir, "logs/news-cursor.json");
 const defaultMarketPath = resolve(mandateDir, "logs/market-monitoring.json");
 const defaultOutcomesPath = resolve(mandateDir, "logs/forward-outcomes.json");
+const MAX_PENDING_NEWS = 20;
 const researchDir = resolve(mandateDir, "research");
 const newsScript = resolve(researchDir, "scripts/poll_news.py");
 const marketScript = resolve(researchDir, "scripts/poll_market.py");
@@ -161,11 +162,17 @@ export function detectNewEvents(events: NewsEvent[], cursor: Cursor | null): {
     };
   }
   const seen = new Set(cursor.seen);
-  const newlyDiscovered = events.filter((event) => !seen.has(event.key));
+  const knownSources = new Set(cursor.seen.map((key) => key.split(":", 1)[0]).filter(Boolean));
+  const seedUnknownSources = cursor.seen.length > 0;
+  const newlyDiscovered = events.filter((event) =>
+    !seen.has(event.key) && (!seedUnknownSources || knownSources.has(event.source))
+  );
   const pendingByKey = new Map(
     [...(cursor.pending ?? []), ...newlyDiscovered].map((event) => [event.key, event]),
   );
-  const fresh = [...pendingByKey.values()];
+  const fresh = [...pendingByKey.values()]
+    .sort((left, right) => Date.parse(left.published_at) - Date.parse(right.published_at))
+    .slice(-MAX_PENDING_NEWS);
   const merged = [...cursor.seen, ...keys];
   return {
     fresh,
