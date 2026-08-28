@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TrueForgeUI } from "@truefoundry/trueforge-ui";
 import { getSnapshot, updateTrajectory, type Journal, type Snapshot } from "./api";
-import { decimal, money, number, percent, shortId, timestamp } from "./format";
+import { decimal, money, number, percent, shortId } from "./format";
 
 const REFRESH_MS = 5_000;
 type View = "overview" | "agent";
@@ -79,7 +79,6 @@ function TimelineItem({ entry, last }: { entry: Journal; last: boolean }) {
       <div className="timeline-content">
         <div className="timeline-topline">
           <div><b>{title}</b><em>{outcomeLabels[entry.outcome] ?? entry.outcome}</em></div>
-          <time>{timestamp(entry.at)}</time>
         </div>
         <p>{entry.rationale}</p>
         {Boolean(entry.details.intent_id || entry.details.order_id || entry.details.intended_action) && (
@@ -252,10 +251,6 @@ export function App() {
             <span className="brand-mark"><Icon name="shield" /></span>
             <strong>MANDATE</strong>
           </div>
-          <nav className="view-tabs" aria-label="Workspace views">
-            <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>Overview</button>
-            <button className={view === "agent" ? "active" : ""} onClick={() => setView("agent")}>Agent workspace</button>
-          </nav>
           <div className="top-actions">
             <span className="paper-badge">PAPER</span>
             <button className="icon-button settings-button" aria-label="Monitoring settings" title="Monitoring settings" onClick={() => setSettingsOpen(true)}>
@@ -276,11 +271,15 @@ export function App() {
                 </button>
               </>
             )}
-            <button className="primary-button" onClick={() => setView(view === "agent" ? "overview" : "agent")}>
-              {view === "agent" ? "Overview" : "Agent"} <Icon name={view === "agent" ? "pulse" : "external"} />
-            </button>
           </div>
         </header>
+      </div>
+
+      <div className="mandate-chrome workspace-nav-shell">
+        <nav className="workspace-tabs" aria-label="MANDATE workspace">
+          <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>Dashboard</button>
+          <button className={view === "agent" ? "active" : ""} onClick={() => setView("agent")}>Agent chat</button>
+        </nav>
       </div>
 
       {view === "overview" ? <div className="mandate-chrome operator-view"><main>
@@ -290,7 +289,6 @@ export function App() {
           </div>
           <div className="market-state">
             <span className={isOpen ? "market-open" : "market-closed"}>{isOpen ? "MARKET OPEN" : "MARKET CLOSED"}</span>
-            <small>Updated {timestamp(data?.generated_at)}</small>
           </div>
         </section>
 
@@ -310,11 +308,11 @@ export function App() {
           <Metric label="Orders today" value={String(data?.session.orders_today ?? 0)} hint={`of ${limits.max_orders_per_day ?? "—"} authorized`} />
         </section>
 
-        <section className="content-grid">
+        <section className="dashboard-grid">
           <div className="main-column">
-            <article className="panel">
+            <article className="panel timeline-panel">
               <div className="panel-heading">
-                <div><span className="kicker">DURABLE AUDIT TRAIL</span><h2>Agent timeline</h2></div>
+                <div><h2>Agent decisions</h2></div>
                 <span className="count">{journal.length} events</span>
               </div>
               <div className="timeline">
@@ -326,20 +324,19 @@ export function App() {
           </div>
 
           <aside className="side-column">
-            <article className="panel autonomy-panel">
+            <article className="panel autonomy-panel monitor-panel">
               <div className="panel-heading">
-                <div><span className="kicker">AUTONOMOUS SUPERVISOR</span><h2>24/7 research runner</h2></div>
+                <div><h2>Live monitoring</h2></div>
                 <span className={`runner-status runner-status--${autonomyStatus}`}><i /> {autonomyStatus.replace("_", " ")}</span>
               </div>
               <div className="autonomy-body">
                 <div className="autonomy-facts">
-                  <span><small>Heartbeat</small><b>{timestamp(autonomyRuntime.heartbeat_at)}</b></span>
-                  <span><small>Last analysis</small><b>{timestamp(autonomyRuntime.last_analysis_at)}</b></span>
-                  <span><small>Next analysis</small><b>{timestamp(autonomyRuntime.next_analysis_at)}</b></span>
                   <span><small>Last action</small><b>{String(autonomyRuntime.last_action ?? "—")}</b></span>
+                  <span><small>Analysis cadence</small><b>Every {String(trajectory.analysis_interval_minutes ?? "—")} min</b></span>
+                  <span><small>News cadence</small><b>Every {String(trajectory.news_poll_seconds ?? "—")} sec</b></span>
                 </div>
                 <div className="trajectory-summary">
-                  <span>Trajectory v{String(trajectory.version ?? "—")} · {String(trajectory.risk_posture ?? "unconfigured")}</span>
+                  <span>{String(trajectory.risk_posture ?? "unconfigured")} trajectory</span>
                   <p>{String(trajectory.thesis ?? "Start the runner to initialize the shared trajectory.")}</p>
                   <div>{Array.isArray(trajectory.symbols) && trajectory.symbols.map((symbol) => <b key={String(symbol)}>{String(symbol)}</b>)}</div>
                 </div>
@@ -373,7 +370,6 @@ export function App() {
                     <div className="alert-item" key={`${String(alert.at ?? alert.published_at)}-${index}`}>
                       <span>{String(alert.status ?? alert.kind ?? "event")}</span>
                       <b>{String(alert.headline ?? `${alert.count ?? 0} alerts → ${alert.action ?? "analysis"}`)}</b>
-                      <small>{timestamp(alert.at ?? alert.published_at)}</small>
                     </div>
                   )) : <p className="muted">No new headline has crossed the durable alert cursor.</p>}
                 </div>
@@ -381,9 +377,9 @@ export function App() {
               </div>
             </article>
 
-            <article className="panel mandate-panel">
+            <article className="panel mandate-panel risk-panel">
               <div className="panel-heading">
-                <div><span className="kicker">HUMAN AUTHORITY</span><h2>Mandate limits</h2></div>
+                <div><h2>Risk limits</h2></div>
                 <span className="verified">✓ VALID</span>
               </div>
               <LimitBar label="Largest position" used={number(usage.max_position_pct)} limit={number(limits.max_position_pct)} />
@@ -396,9 +392,9 @@ export function App() {
               </div>
             </article>
 
-            <article className="panel">
+            <article className="panel broker-panel">
               <div className="panel-heading">
-                <div><span className="kicker">BROKER STATE</span><h2>Positions</h2></div>
+                <div><h2>Positions & orders</h2></div>
                 <span className="count">{positions.length}</span>
               </div>
               {positions.length ? (
@@ -423,7 +419,7 @@ export function App() {
 
             <article className="panel attention-panel">
               <div className="panel-heading">
-                <div><span className="kicker">OPERATOR ATTENTION</span><h2>Wake conditions</h2></div>
+                <div><h2>Operator attention</h2></div>
               </div>
               {data?.mandate.wake_triggers.length || data?.mandate.active_predecisions.length ? (
                 <div className="attention">Action required: a configured trigger or predecision is active.</div>
@@ -435,7 +431,7 @@ export function App() {
         </section>
       </main>
 
-      <footer><span>MANDATE · TrueForge operator surface</span><span>Paper trading only · Not investment advice</span></footer></div> : (
+      </div> : (
         <section className="agent-workspace" aria-label="MANDATE agent workspace">
           <TrueForgeUI
             server={{ type: "trueforge", baseUrl: "/" }}
