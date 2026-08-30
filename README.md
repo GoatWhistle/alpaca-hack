@@ -1,115 +1,180 @@
+<div align="center">
+  <img src="mandate/app/public/agent-mark.svg" width="72" alt="MANDATE logo" />
+
 # MANDATE
 
-MANDATE is a paper-trading agent that may act only inside a human-authored, versioned mandate. The model
-can propose a trade; deterministic code decides whether the action is authorized. Orders outside the
-mandate are denied and parked for a human decision.
+### An autonomous paper-trading agent with authority you can prove
 
-> Paper trading only. This project does not place live-money orders and is not investment advice.
-> Backtests and paper results do not predict future returns.
+**The model proposes. Deterministic code constrains. A human authorizes.**
 
-## Safety boundary
+[![TrueForge](https://img.shields.io/badge/TrueForge-agent_harness-E5B928?style=for-the-badge)](https://www.truefoundry.com/trueforge)
+[![Alpaca](https://img.shields.io/badge/Alpaca-paper_trading-111318?style=for-the-badge&logo=alpaca&logoColor=white)](https://alpaca.markets/)
+[![Python](https://img.shields.io/badge/Python-3.11+-111318?style=for-the-badge&logo=python&logoColor=E5B928)](https://www.python.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-111318?style=for-the-badge&logo=typescript&logoColor=E5B928)](https://www.typescriptlang.org/)
+[![MCP](https://img.shields.io/badge/MCP-least_privilege-111318?style=for-the-badge)](https://modelcontextprotocol.io/)
 
-The agent never receives a raw order-placement tool. Its only execution path is `mandate-guard`:
+[**Open live demo →**](https://harn.miposts.com) · [Architecture](#architecture) · [Run locally](#run-locally) · [Safety evidence](#verified-safety-evidence)
 
-1. Load and strictly validate the current mandate.
-2. Fetch a fresh paper-account snapshot and latest IEX trade.
-3. Calculate projected position and gross exposure with `Decimal` arithmetic.
-4. Reject every violated rule; violations cannot be overridden by the model or an approval click.
-5. Fetch state and run the checks again immediately before submission.
-6. Submit only to the exact host `https://paper-api.alpaca.markets` and append an audit event.
+</div>
 
-TrueForge requires human approval only for the three irreversible guard tools: submit, cancel and close.
-Approval does not bypass the mandate. Direct Alpaca execution tools are excluded with an explicit
-research-tool allowlist. Stable intent IDs make submission retries idempotent, and cancellation is allowed
-only when the order's client ID is backed by a submitted event in the persistent guard journal. Every
-prepared, denied and submitted decision records a SHA-256 fingerprint of the exact validated mandate, so
-auditors can distinguish decisions made before and after a human hot-reload. Retries recover their original
-broker client ID from durable provenance, so renaming a mandate cannot turn one intent into a second order;
-conflicting stored IDs fail closed.
+> [!NOTE]
+> **Public test profile** — URL: **[harn.miposts.com](https://harn.miposts.com)** · Login: `demo` · Password: `MandateDemo2026`
+>
+> This shared profile is an isolated, interactive safety rehearsal. It exposes no production account values, internal service URLs, secrets, or trajectory controls. It can respond only to the bounded rehearsal approvals shown in the UI.
 
-Human predecisions are executable YAML, not model guidance. A directive such as
-`daily_loss_pct >= 1 → park_new_orders` is evaluated from the fresh broker snapshot before every order.
-The initial grammar deliberately supports only metrics the guard can observe itself and one fail-closed
-action; unknown metrics or actions prevent the mandate from loading.
+![MANDATE operator approval dashboard](docs/assets/mandate-approval-dashboard.png)
 
-The human-owned YAML is reloaded and strictly validated at the start of every policy operation. This lets
-an operator tighten or revoke authority without restarting the guard. A missing, malformed or partially
-written file fails closed before broker state is fetched or an order can be submitted; use an atomic file
-replacement when editing it in production. The agent has no tool for writing or reloading this file.
+## Why MANDATE exists
 
-The server refuses live, HTTP, look-alike, credential-bearing, port-bearing, and path-bearing base URLs.
-Secrets are read from environment variables and must never be committed.
+Giving an LLM a broker API creates an authority problem, not merely a prediction problem. A persuasive model response is not proof that an order respects position limits, current exposure, market hours, loss budgets, or the operator's intent.
 
-Short selling is a separate, explicit mandate capability and defaults to disabled. The guard considers
-already-pending sell orders when evaluating a new sell, so individually valid orders cannot collectively
-cross a long position through zero. Buys that reduce an existing short remain possible without expanding
-that authority.
+MANDATE separates intelligence from authority:
 
-## Implemented research paths
+| The usual agent risk | MANDATE's answer |
+|---|---|
+| The model can reach a raw trading endpoint | The model receives no raw order-placement tool |
+| Natural-language rules are interpreted loosely | A strict, versioned YAML mandate is executable policy |
+| Approval can accidentally override risk controls | Approval resumes execution but never bypasses the guard |
+| Stale data produces confident actions | Freshness, spread, volume, session and benchmark gates fail closed |
+| Retries can duplicate an order | Stable intent IDs and broker provenance make retries idempotent |
+| A dashboard can display stale broker state as live | Degraded mode withholds unverifiable values visibly |
 
-News is normalized as untrusted data before it reaches any strategy:
+The result is a 24/7 research agent that can monitor markets, explain opportunities, ask for approval, and submit **paper orders only when deterministic code proves they are inside the mandate**.
 
-- Alpaca News JSON;
-- SEC EDGAR Atom feeds for every issuer in the trading universe;
-- official Microsoft, Google, AWS and Meta feeds;
-- Federal Reserve press releases for SPY / macro context;
-- Apple Newsroom Atom and NVIDIA investor-relations RSS feeds with fixed issuer mappings.
+## Product experience
 
-The parsers cap input size, require timezone-aware timestamps, remove markup, normalize symbols and
-deduplicate revisions. Text such as “ignore previous instructions” remains inert data; it is never used as
-an agent instruction. Company-specific feeds receive an explicit symbol binding before scoring, and the
-news strategy uses only revisions available at each historical cutoff within a bounded 24-hour window. An
-issuer feed is never rebound to another ticker: AAPL can use Apple Newsroom and NVDA can use NVIDIA IR,
-while other symbols receive neither feed unless an attributable source is added explicitly.
+### One decision at a time
 
-The unprivileged `mandate-research` package is also available as an opt-in TrueForge Git Skill. Its
-`evaluate_trajectory` tool replaces repeated agent-authored arithmetic with one Decimal-based decision
-matrix. It monitors the full mandate, ranks a production funnel of three equities plus SPY, and computes liquidity and
-stale-data gates, session movement, feature snapshots, ATR14 sizing capped by live mandate headroom and
-same-side correlation clusters, SPY trend/range regime, and an ensemble over eight explainable outputs:
+The operator sees a compact decision card, ready position size, order terms, rationale, and the exact safety checks that passed. Approve or deny; the completed card moves into the journal instead of taking over the screen.
 
-- price momentum;
-- mean reversion by rolling z-score;
-- price breakout confirmed by relative volume;
-- structured Z.AI news impact score (sentiment, confidence, event type, horizon and 48-hour novelty)
-  confirmed by price momentum;
-- RSI mean reversion;
-- MACD trend;
-- volatility-adjusted momentum;
-- regime-weighted ensemble that favors momentum/breakout in trends and mean reversion in ranges.
+### A live, legible portfolio
 
-Signals receive only the history available at their decision timestamp. The harness reports return,
-maximum drawdown, turnover and position changes, with configurable fees plus explicit spread-crossing
-slippage on entries, changes and final exit. It also emits a chronological frozen-parameter holdout. This is an
-engineering comparison, not a profitability claim.
+Equity, P&L, exposure, positions, orders, news, agent decisions and mandate headroom update on one full-width dashboard. News has a focused latest-story view and a separate feed; monitoring controls live in an IDE-style settings drawer.
 
-The same package exposes a separate read-only MCP boundary with five tools:
-`probe_news_sources`, `compare_live_signals`, `get_market_monitoring`, `score_news_llm`, and
-`evaluate_trajectory`. The scorer batches and caches bounded JSON results from Z.AI and fails closed when
-credentials, transport or the structured response are invalid. It has
-no trading client or write tool. This gives the
-TrueForge agent a server-side path to fixed-host news/data fetches without placing paper credentials in
-the turn sandbox; execution authority remains exclusively in `mandate-guard`.
-The default Coding Plan base and JSON response mode follow the official
-[Z.AI Quick Start](https://docs.z.ai/guides/overview/quick-start) and
-[Structured Output](https://docs.z.ai/guides/capabilities/struct-output) contracts.
+![MANDATE dynamic paper portfolio and audit journal](docs/assets/mandate-live-portfolio.png)
 
-Two read-only live probes are available when Alpaca data credentials are exported:
+### Chat as the control plane
 
-```bash
-cd mandate/research
-PYTHONPATH=src python scripts/probe_live_sources.py
-PYTHONPATH=src python scripts/compare_live_signals.py --symbol AAPL --fee-bps 1
+The agent keeps working outside chat. Chat remains available to explain a decision, inspect evidence, adjust the thesis, narrow the symbol pool, or propose a cadence/risk-posture change. Persistent trajectory changes require explicit confirmation and cannot expand the hard mandate universe.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    M[Market data<br/>Alpaca IEX / SIP] --> R[Research MCP<br/>read only]
+    N[News + filings<br/>fixed-host sources] --> R
+    R --> T[TrueForge agent<br/>Z.AI + subagents]
+    T -->|PARK| J[(Durable audit journal)]
+    T -->|PROPOSE| H{Human approval}
+    H -->|deny| J
+    H -->|approve| G[Mandate Guard<br/>deterministic MCP]
+    Y[Versioned mandate.yaml] --> G
+    G -->|deny| J
+    G -->|fresh re-check| A[Alpaca Paper API]
+    A --> J
+
+    classDef gold fill:#19150b,stroke:#e5b928,color:#fff;
+    classDef dark fill:#111318,stroke:#5f6368,color:#fff;
+    class T,H,G gold;
+    class M,N,R,Y,A,J dark;
 ```
 
-The source probe isolates upstream failures so one unavailable publisher cannot erase evidence from the
-others; `--strict` requires every source to succeed. Fetches use verified TLS, fixed HTTPS host allowlists,
-one-megabyte response bounds and explicit SEC identification. The comparison runner follows bounded Alpaca
-pagination and reports the data cutoff, fees, observations, return, drawdown, turnover and position changes.
+There are three deliberately unequal trust zones:
 
-## Local verification
+1. **Research plane — unprivileged.** Parses bounded market/news inputs, calculates features and produces evidence. It has no trading client.
+2. **Agent plane — creative but untrusted.** TrueForge and the model can research, challenge a thesis and propose an action. Tool allowlists prevent direct execution.
+3. **Execution plane — deterministic.** The guard owns paper broker credentials, reloads the human mandate, fetches fresh state, applies every limit with `Decimal`, and journals the result.
 
-Python 3.11 or newer is required.
+## What the agent understands
+
+The production funnel monitors 18 liquid AI/platform/infrastructure equities plus SPY:
+
+`AAPL` `MSFT` `NVDA` `GOOGL` `AMZN` `META` `AMD` `AVGO` `ORCL` `IBM` `PLTR` `CRM` `ANET` `TSM` `ASML` `ARM` `BABA` `BIDU` `SPY`
+
+It turns price, liquidity, market regime and attributable news into eight explainable strategy outputs:
+
+- price momentum and volatility-adjusted momentum;
+- rolling z-score and RSI mean reversion;
+- volume-confirmed breakout;
+- MACD trend;
+- structured LLM news impact confirmed by price;
+- regime-weighted ensemble.
+
+News is scored as structured data — `sentiment`, `confidence`, `event_type`, `horizon`, `novelty_vs_48h`, affected tickers and reason — rather than by a tiny positive/negative word list. The LLM enriches evidence; deterministic code still owns the decision boundary.
+
+ATR14 sizing converts risk budget and signal strength into a whole-share quantity, capped by mandate headroom and same-side correlation clusters. SPY trend/range state changes ensemble weights and scales gross risk. Completed 5/15/60-minute outcomes update bounded strategy multipliers, including counterfactual outcomes for parked ideas: adaptive behavior without letting a model rewrite policy.
+
+## Safety invariants
+
+| Invariant | Enforcement |
+|---|---|
+| **Paper only** | Exact host allowlist accepts `https://paper-api.alpaca.markets`; live, HTTP, credential-bearing and look-alike URLs are rejected |
+| **No hidden authority** | The agent cannot write the mandate and cannot access a direct broker execution tool |
+| **Fresh-state validation** | Account, broker clock, latest trade, pending orders and every limit are re-read immediately before submit |
+| **Fail closed** | Missing/malformed policy, transport errors, stale data, closed sessions and unknown rules deny execution |
+| **Approval is not an override** | Human approval resumes the tool call; the guard repeats policy checks independently |
+| **Bounded risk** | Position, gross exposure, daily loss, order count, session, universe, instrument and order type are deterministic |
+| **Safe retries** | Canonical intent fingerprints, stable client IDs and durable provenance prevent duplicate or mutated retries |
+| **Auditable changes** | Every prepared, denied and submitted event carries the SHA-256 fingerprint of the validated mandate |
+| **Protected exits** | Cancellation requires submitted provenance; closes are risk-reducing and explicitly opt-in |
+| **Untrusted news** | Input is size-bounded, normalized, timestamped and treated only as data—not as instructions |
+
+The guard supports human-authored predecisions such as `daily_loss_pct >= 1 → park_new_orders`. Unknown metrics or actions make the mandate invalid instead of being guessed.
+
+## TrueForge: the agent harness
+
+TrueForge provides the durable agent runtime around the safety kernel:
+
+- persistent sessions, tool-call traces and context compaction;
+- MCP tool isolation and explicit execution allowlists;
+- approval pauses for irreversible actions;
+- dynamic read-only subagents for price research, news research and risk challenge;
+- sandbox access for bounded experiments, watched by a persisted-event policy auditor;
+- one operator workspace for autonomous runs and conversational control.
+
+The background runner consumes Alpaca news and market WebSockets with a configurable REST fallback. Every cycle must end in `ACTION: PARK` or `ACTION: PROPOSE`; a mechanical post-model gate parks any proposal that violates session, liquidity, staleness, relative-volume, macro or mandate constraints.
+
+## Example mandate
+
+Human authority is small enough to read and strict enough to execute:
+
+```yaml
+universe: [AAPL, MSFT, NVDA, GOOGL, AMZN, META, AMD, AVGO, SPY]
+instruments: [equity]
+order_types: [limit]
+session: regular_hours_only
+limits:
+  max_position_pct: 10
+  max_gross_exposure_pct: 60
+  max_daily_loss_pct: 2
+  max_orders_per_day: 20
+predecided:
+  - when: daily_loss_pct >= 1
+    then: park_new_orders
+    reason: Protect the remaining daily loss budget before the hard stop.
+allow_short_positions: false
+allow_risk_reducing_market_close: true
+expires: 2099-08-28T20:00:00Z
+```
+
+See the complete [example mandate](mandate/mandates/example.yaml).
+
+## Run locally
+
+### Prerequisites
+
+- Python 3.11+
+- Node.js 22 or 24
+- Alpaca **paper** account
+- Z.AI API key for structured news scoring
+
+Copy the environment template and add local secrets. Never commit `.env`:
+
+```bash
+cp mandate/.env.example mandate/.env
+```
+
+Install and test the deterministic services:
 
 ```bash
 cd mandate/mcp-guard
@@ -117,233 +182,88 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[test]'
 python -m pytest
+
+cd ../../mandate/research
+python -m pip install -e '.[test]'
+python -m pytest
 ```
 
-To run the guard, copy `mandate/.env.example` to an ignored `.env`, add **paper-account** credentials,
-export the values in your shell, install the package, then run:
-
-```bash
-cd mandate
-python -m pip install -e mcp-guard
-mandate-guard
-```
-
-For TrueForge, run the official Alpaca MCP in paper mode on port 8000 and the guard in
-`streamable-http` mode on port 8010. Install the research package and run its read-only MCP on port 8020,
-then register or update the agent:
-
-```bash
-cd mandate/research
-python -m pip install -e .
-MANDATE_RESEARCH_TRANSPORT=streamable-http mandate-research-mcp
-
-cd mandate/agent
-npm install
-npm run typecheck
-npm run apply
-npm run eval:sandbox
-npm run eval:subagents
-npm run eval:approval
-npm run eval:research-e2e
-MANDATE_E2E_ALLOW=true npm run eval:paper-e2e
-```
-
-### Unified operator UI
-
-The TrueForge UI at `http://localhost:8790` is the single operator surface. **Overview** shows live
-paper-account equity, positions and pending orders; mandate usage and headroom; service health; wake
-conditions; and the durable prepared, submitted, denied, deduplicated and parked decision timeline.
-**Agent workspace** keeps the stock TrueForge agent library, chat history, tool-call details, composer and
-approval cards. Broker credentials never reach the browser: live overview data is read through the guard's
-read-only MCP tools. If the guard is restarting, Overview fails visibly into a degraded mode backed by the
-local mandate and journal instead of displaying stale values as live.
-
-Use Node 22 or 24, build the web assets, then start the companion overview API and TrueForge after the
-guard is running:
+Build the dashboard and validate the agent:
 
 ```bash
 cd mandate/app
 npm install
+npm run typecheck
 npm run build
 
-cd ../mcp-guard
-python -m pip install -e .
-mandate-dashboard
-
-# In another terminal, from the repository root:
-PORT=8790 FRONTEND_DIR=/absolute/path/to/harness/mandate/app/dist npx @truefoundry/trueforge@0.1.4
+cd ../agent
+npm install
+npm run typecheck
+npm run eval:autonomy
 ```
 
-Open only `http://localhost:8790` and switch between **Overview** and **Agent workspace**. Port `8030` is
-the local, read-only companion API consumed by Overview; it is not a second UI.
-
-### 24/7 autonomy and chat control plane
-
-The autonomy runner stays alive outside chat, subscribes to Alpaca news and IEX/SIP market WebSockets,
-keeps REST polling as a configurable fallback, and deduplicates events through a durable cursor. It starts
-a read-only TrueForge analysis immediately for new headlines or on the configured cadence. Each cycle is
-visible in Chat History and must finish with `ACTION: PARK` or `ACTION: PROPOSE`.
-Background turns are mechanically audited after completion and fail if they request an execution,
-trajectory-write or disallowed destructive tool. They may run read-only sandbox code at any point to
-validate data, test hypotheses, reproduce parser behavior, or run bounded experiments; proposal math
-still comes from the deterministic research and guard tools. The header execution switch selects either
-`ASK APPROVAL`, where a validated submission pauses in TrueForge, or `AUTO PAPER`, where a dedicated agent
-may submit without pausing. Both modes remain paper-only and use the same mandate guard; cancel, close and
-trajectory changes always require approval.
-
-Start it after TrueForge, guard and research MCP are healthy:
+Start the guard, research MCP, dashboard, TrueForge and autonomy runner as separate supervised processes:
 
 ```bash
+mandate-guard
+MANDATE_RESEARCH_TRANSPORT=streamable-http mandate-research-mcp
+mandate-dashboard
+
 cd mandate/agent
+npm run apply
 npm run autonomy
 ```
 
-The shared trajectory defaults to 18 liquid AI-platform/infrastructure equities plus SPY: direct public
-companies and listed proxies for private labs such as Anthropic and DeepSeek. It uses realtime streams, a
-60-second REST fallback and a 15-minute full analysis. Every market poll adds Alpaca snapshots, spread/staleness/time-adjusted
-intraday volume-pace gates, SPY macro-move context, observation-only movers/most-actives discovery and corporate-action risks. Optional option
-chain confirmation is disabled by default. Discovery never expands the mandate universe. A deterministic
-post-model gate converts `PROPOSE` to `PARK` when regular-hours, liquidity or SPY checks fail. A strong SPY
-session, gap, or intraday move can produce a macro-price candidate without company news, but only when the
-ensemble and at least two independent price strategies agree with the macro direction.
-The three strongest movers are exposed as an observation-only research watchlist. SPY's 20-bar regime
-changes ensemble weights and halves gross sizing below its 20-period moving average. Strategy multipliers
-learn from completed 60-minute counterfactual outcomes for both PARK and PROPOSE cycles, are evidence-shrunk
-and remain bounded.
-In normal chat, ask the agent to explain `get_autonomy_state`, pause/resume monitoring, narrow the symbols,
-change cadence, risk posture or thesis. Persistent changes go through `update_trajectory`, require approval,
-and cannot add a symbol outside the hard mandate. Runtime heartbeat, next analysis and news deliveries are
-shown on Overview, where Monitoring settings require a separate review and confirmation click. State lives
-in ignored `mandate/logs/trajectory.json`, `autonomy-runtime.json`, `market-monitoring.json`,
-`forward-outcomes.json`, `news-cursor.json` and `news-alerts.jsonl` files. Forward returns are measured at
-5, 15 and 60 minutes as evaluation evidence, never as a claim of profitability.
+The default local ports are guard `8010`, research `8020`, dashboard API `8030`, and TrueForge/UI `8790`. Deployment should keep MCP and dashboard services on loopback and expose only the authenticated HTTPS operator UI.
 
-For unattended operation across terminal disconnects or machine restarts, run `npm run autonomy` under the
-host process manager. The runner is restart-safe and immediately reports `degraded` plus the last error when
-news, TrueForge or the model is unavailable; it never silently converts an infrastructure failure into a
-proposal.
+## Verified safety evidence
 
-`eval:approval` is a fail-safe live conformance probe. It creates a dedicated TrueForge session, asks
-the configured model to request `cancel_order` for a nonexistent probe ID, verifies the exact tool pauses
-at `tool.approval_required`, sends a denial, and asserts the guard journal remains byte-for-byte unchanged.
-It never sends an allow decision. Run it from `mandate/agent` while TrueForge and the guard are available.
+The repository contains executable probes, not just architecture claims:
 
-`eval:paper-e2e` is the supervised paper execution acceptance runner. Its opt-in environment flag permits
-only the exact `AAPL buy 1, limit $1` intent after it validates the persisted TrueForge tool call and every
-execution argument. During regular hours it requires and allows the first approval, verifies durable
-`prepared`/`submitted` evidence, repeats the same intent through a second approval, and requires
-`deduplicated=true` without another submission. Outside regular hours it proves the guard's session breach,
-checks that no broker write was attempted, reports `deferred: market_closed`, and exits successfully.
+| Probe | What it proves |
+|---|---|
+| `npm run eval:sandbox` | Deterministic Code Mode works without touching MCP or approval |
+| `npm run eval:subagents` | Two isolated read-only subagents delegate without execution authority |
+| `npm run eval:approval` | An irreversible tool pauses; denial leaves the guard journal byte-identical |
+| `npm run eval:research-e2e` | TrueForge + Z.AI use bounded research tools and produce no broker write |
+| `MANDATE_E2E_ALLOW=true npm run eval:paper-e2e` | Supervised paper submit, durable provenance and idempotent retry |
+| `npm run eval:cancel-e2e` | Exact-ID cancellation requires submitted guard provenance |
 
-`eval:research-e2e` is intentionally read-only. It requires TrueForge/Z.AI to call `get_mandate` and one
-`evaluate_trajectory` for the complete symbol set. The verifier requires eight strategy outputs and a
-structured LLM score whenever live news is present, and rejects sandbox execution or broker-write calls.
-mandate-bounded whole-share quantity for every symbol, rejects sandbox `exec`, redundant low-level
-research calls and every execution tool, and requires a bounded `ACTION: PARK` or `ACTION: PROPOSE` conclusion.
+The sanitized [paper E2E artifact](docs/evidence/paper-e2e-2026-08-27.json) records a real Alpaca paper flow: `prepared → submitted`, official broker readback, an unchanged retry producing `deduplicated`, and an approval-gated cancellation. The [verification report](docs/MANDATE_VERIFICATION.md) documents the wider integration evidence.
 
-`eval:patterns` audits the latest persisted agent sessions without mutating them. The extraction baseline
-found 77 sandbox `exec` calls in 25 sessions, dominated by basis-point/spread, return, ratio, drawdown,
-exposure and VWAP calculations. This is the regression baseline for the decision-math tool.
+> [!IMPORTANT]
+> Backtests use point-in-time inputs, configurable fees, spread-crossing slippage and a frozen-parameter holdout. Their output is engineering evidence—not a profitability claim or forecast.
 
-`eval:sandbox` proves deterministic Code Mode execution with one persisted `exec` call and no MCP or
-approval event. `eval:subagents` requires exactly two `create_sub_agent` delegations, distinct isolated
-threads, no approval and no direct or nested execution tool.
+## Qodo review discipline
 
-`MANDATE_GUARD_HOST` and `MANDATE_GUARD_PORT` control the server bind address. Set the separate
-`MANDATE_GUARD_URL` to the HTTP(S) address reachable from TrueForge; it is validated and may not contain
-embedded credentials. `MANDATE_RESEARCH_URL` independently configures the read-only research endpoint.
+Qodo Code Review was installed before the first product code. Milestones M1–M12 were reviewed through PRs [#1](https://github.com/GoatWhistle/harness-hack/pull/1) and [#2](https://github.com/GoatWhistle/harness-hack/pull/2). Findings included pending-exposure undercounting, concurrent submissions, mandate bypass on close, retry provenance and point-in-time news errors; each was fixed with a regression test. Recorded repeat reviews report **0 bugs and 0 rule violations** for the reviewed milestone commits.
 
-The registered `mandate-paper-agent` uses `zai/glm-5-3-flash`, sandbox execution, dynamic subagents,
-generative UI, context compaction and three MCP servers. Alpaca exposes only
-calendar, clock and stock-data research tools to the model; all execution flows through `mandate-guard`.
-The `mandate-research` Git Skill is disabled by default so sandbox startup never depends on cloning a
-private GitHub repository. Enable it explicitly with `MANDATE_ENABLE_RESEARCH_SKILL=true` only when
-TrueForge has repository credentials. The read-only research MCP remains enabled independently and
-provides the same decision tools without a Git clone.
+The full, commit-linked history and project-specific review rules are in the [Qodo review log](docs/QODO_REVIEW_LOG.md). New commits are not represented as Qodo-reviewed until their review is added to that log.
 
-The example mandate is [`mandate/mandates/example.yaml`](mandate/mandates/example.yaml). An expired or
-invalid mandate prevents startup and blocks subsequent policy operations if introduced while running.
+## Repository map
 
-## Qodo Code Review Evidence
+```text
+mandate/
+├── agent/          # TrueForge spec, 24/7 runner and executable E2E probes
+├── app/            # React operator dashboard and agent workspace
+├── mandates/       # Human-owned, versioned authority
+├── mcp-guard/      # Deterministic execution boundary and audit journal
+└── research/       # Read-only signals, news, monitoring, sizing and backtests
+docs/
+├── assets/         # Product screenshots
+├── evidence/       # Sanitized machine-readable E2E artifacts
+├── MANDATE_VERIFICATION.md
+└── QODO_REVIEW_LOG.md
+```
 
-Qodo Code Review was installed for `GoatWhistle/harness-hack` before product code was added. Every
-milestone is developed on a branch, reviewed in a pull request and merged by a human. High-severity
-findings must be fixed or explicitly rejected with a written reason.
+## Scope and disclaimer
 
-The running evidence table and project-specific review rules live in
-[`docs/QODO_REVIEW_LOG.md`](docs/QODO_REVIEW_LOG.md). PRs use the repository template to require test,
-paper-endpoint and secret checks.
+MANDATE is a safety-focused hackathon project for **paper trading only**. It does not place live-money orders, provide investment advice, promise profit, or imply that backtest/paper performance will transfer to live markets. Production use would require independent security review, regulatory analysis, operational controls and extensive validation beyond this repository.
 
-## Verified integration
+<div align="center">
 
-On 27 August 2026 an end-to-end read-only run completed through TrueForge, Z.AI, both MCP servers and the
-real Alpaca paper API. The agent read a live `$100,000` paper account, cross-checked the Alpaca and guard
-market clocks, obtained an AAPL IEX quote, and asked the guard to evaluate TSLA. The guard denied it for two
-independent reasons: TSLA was outside the mandate universe and the exchange was closed. No write tool was
-called, and the agent's Alpaca tool discovery contained no order-placement tool.
+**Built to make agent authority visible, bounded and auditable.**
 
-A separate restart test parked a hypothetical out-of-mandate action, stopped the guard process, created a
-fresh guard process and a new TrueForge session, then recovered the exact rationale and intended action from
-the fsynced JSONL journal. No broker write tool was involved.
+[Try the safety rehearsal](https://harn.miposts.com) · [Read the verification report](docs/MANDATE_VERIFICATION.md) · [Inspect the Qodo log](docs/QODO_REVIEW_LOG.md)
 
-A live approval conformance probe then requested a fake cancellation through Z.AI and TrueForge. The
-harness emitted `tool.approval_required`, accepted an automated denial, completed the resumed turn and left
-the guard journal byte-for-byte unchanged. This proves the irreversible tool was stopped before reaching
-the execution boundary even while the market was closed.
-
-The supervised paper E2E runner was also executed while the exchange was closed. Z.AI called the real
-guard, the deterministic session rule stopped the order before an approval event, the runner observed no
-new submission provenance and reported `brokerWriteAttempted: false`. The same runner contains the exact
-allow, broker-evidence and retry-dedup assertions used by the subsequent regular-session run.
-
-At the 27 August regular-session open, that supervised runner completed through the real paper endpoint.
-The first persisted approval produced one AAPL buy-1 limit-$1 order and durable `prepared → submitted`
-events. An unchanged retry paused for a second approval and produced only `deduplicated`, with the same
-client-order ID and mandate fingerprint. Official Alpaca MCP readback independently matched every order
-term and showed status `new`. A separate exact-ID cleanup then paused at `cancel_order`, was approved,
-wrote `cancel_order/submitted`, and official readback showed the same order as `canceled`. The sanitized
-artifact is [`docs/evidence/paper-e2e-2026-08-27.json`](docs/evidence/paper-e2e-2026-08-27.json).
-
-`eval:cancel-e2e` is a cleanup verifier for an exact broker order ID and mandate client-order ID. It
-requires durable submitted provenance before requesting cancellation, validates the persisted TrueForge
-call before approval, and can re-audit an existing session without replaying the cancel action.
-
-The current local suite has 91 guard tests, 70 research/Skill/MCP tests and 13 autonomy-runner tests. It covers hot-reloaded human
-authority, fail-closed malformed edits, concurrent submissions,
-pending-order risk reservations, broker-clock fail-closed behavior, stable retry IDs, journal restoration,
-live mandate headroom and wake triggers, risk-reducing closes, and rejection of foreign order cancellation.
-
-On 27 August 2026 the live source probe parsed 20 Alpaca JSON events, 20 Apple Newsroom Atom events and
-20 NVIDIA investor-relations RSS events with unique content hashes and explicit symbol scope. SEC EDGAR's
-Atom endpoint returned HTTP 403 from this environment and is reported as an upstream failure rather than a
-successful parse. A live AAPL comparison then consumed 269 paginated IEX hourly bars and 50 Alpaca news
-items. With a 24-hour news window and 1 bp transaction cost, momentum returned 6.62% with 5.06% maximum
-drawdown while news-plus-price confirmation returned 1.37% with 0.95% maximum drawdown; mean reversion and
-breakout-with-volume were negative. These are engineering observations over this sample, not forecasts.
-
-A subsequent live read-only decision E2E ran through TrueForge, Z.AI, `mandate-research` and
-`mandate-guard`. Persisted events proved two healthy attributable news sources, all four strategy outputs,
-IEX market monitoring, current paper-account mandate headroom and no write call. The live autonomy cycle
-observed four passing quality gates, one MSFT corporate action and returned `ACTION: PARK`; its first durable
-5-minute forward outcome was then measured without any broker write.
-
-The decision-math E2E session `01m1269wsz849mfa0hac88yqbg` subsequently called only `get_mandate` and
-`evaluate_trajectory` for AAPL/MSFT/NVDA/SPY. It returned eight-strategy evidence and ready whole-share
-sizing, chose `PARK`, made no sandbox-code call and attempted no broker write. The dashboard now exposes a
-60-minute per-strategy/news-vs-price outcome scorecard; PARK decisions now contribute counterfactual
-strategy evidence while historical records without captured directions remain excluded rather than guessed.
-
-The adaptive-news E2E session `01m128da83tm700q7kxa15s6pw` repeated that bounded read-only path with
-structured GLM scoring, SPY risk-off context, 2 bps slippage and train-only parameter selection. It returned
-`ACTION: PARK` for AAPL/MSFT/NVDA/SPY, made no sandbox-code call and attempted no broker write.
-
-On 28 August 2026 a full direct MCP E2E monitored the 19-symbol AI universe and bounded full research to
-CRM/BIDU/MSFT/AMZN/NVDA/IBM/TSM plus SPY. Every selected symbol returned eight strategy outputs,
-`execution_authority=false`, and the closed-market decision was `PARK`. TrueForge session
-`01m13mvc90zx3qg4tr6nxd4sb9` independently called only `get_mandate` and `evaluate_trajectory`, returned
-`ACTION: PARK`, used no sandbox code and attempted no broker write. The first wide run exposed wasted LLM
-work on stale headlines; the production path now applies its 24-hour cutoff before structured scoring.
-The live 24/7 cycle `01m13p4d320fphtmwj6z4dcget` then monitored all 19 symbols, compacted model-facing
-research to three equities plus SPY, returned `PARK`, and scheduled the next 15-minute analysis. A persisted
-event watchdog now cancels any background turn that attempts sandbox `exec`, repeats the trajectory tool,
-or requests a write/approval path.
+</div>
