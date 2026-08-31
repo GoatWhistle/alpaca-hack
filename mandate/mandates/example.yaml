@@ -1,24 +1,24 @@
-name: ai-platforms-infrastructure-2026-08-28
+name: ai-platforms-infrastructure-aggressive-short-2026-08-28
 universe: [AAPL, MSFT, NVDA, GOOGL, AMZN, META, AMD, AVGO, ORCL, IBM, PLTR, CRM, ANET, TSM, ASML, ARM, BABA, BIDU, SPY]
 instruments: [equity]
 order_types: [limit]
 session: regular_hours_only
 limits:
-  max_position_pct: 10
-  max_gross_exposure_pct: 60
-  max_daily_loss_pct: 2
-  max_orders_per_day: 20
+  max_position_pct: 15
+  max_gross_exposure_pct: 80
+  max_daily_loss_pct: 3
+  max_orders_per_day: 40
 wake_me_if:
-  - daily_loss_pct > 1.2
-  - single_symbol_move_pct > 5
+  - daily_loss_pct > 1.5
+  - single_symbol_move_pct > 4
   - any_breach_requiring_override > 0
 predecided:
-  - when: daily_loss_pct >= 1
+  - when: daily_loss_pct >= 2
     then: park_new_orders
-    reason: Protect the remaining daily loss budget before the hard stop.
-  - when: single_symbol_move_pct >= 5
+    reason: "Aggressive short: hard stop at 2% before 3% daily loss."
+  - when: single_symbol_move_pct >= 4
     then: park_new_orders
-    reason: Reassess event risk after an exceptional single-name move.
-allow_short_positions: false
+    reason: "Short squeeze risk: 4% single-name move parks new shorts."
+allow_short_positions: true
 allow_risk_reducing_market_close: true
 expires: 2099-08-28T20:00:00Z

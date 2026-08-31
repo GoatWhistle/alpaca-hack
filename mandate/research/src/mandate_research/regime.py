@@ -55,19 +55,25 @@ def classify_market_regime(bars: Sequence[PriceBar], *, lookback: int = 20) -> d
     regime = "trend" if trending else "range"
     direction = "up" if trending and slope > ZERO else "down" if trending else "flat"
     volatility = "high" if percentile >= Decimal("75") else "low" if percentile <= Decimal("25") else "normal"
-    weights = (
-        {
+    # Aggressive short: in down-trend boost mean_reversion/RSI/vol and news for faster SELL
+    if trending and direction == "down":
+        weights = {
+            "momentum": "0.18", "mean_reversion": "0.18", "breakout_volume": "0.12",
+            "news_price_confirmation": "0.20", "rsi_reversion": "0.12",
+            "macd_trend": "0.10", "volatility_adjusted_momentum": "0.10",
+        }
+    elif trending:
+        weights = {
             "momentum": "0.25", "mean_reversion": "0.05", "breakout_volume": "0.15",
             "news_price_confirmation": "0.15", "rsi_reversion": "0.05",
             "macd_trend": "0.20", "volatility_adjusted_momentum": "0.15",
         }
-        if trending
-        else {
+    else:
+        weights = {
             "momentum": "0.08", "mean_reversion": "0.25", "breakout_volume": "0.08",
             "news_price_confirmation": "0.15", "rsi_reversion": "0.25",
             "macd_trend": "0.07", "volatility_adjusted_momentum": "0.12",
         }
-    )
     return {
         "regime": regime,
         "direction": direction,
@@ -88,7 +94,7 @@ def weighted_ensemble(
     signals: Mapping[str, TradeSignal],
     weights: Mapping[str, str],
     *,
-    threshold: Decimal = Decimal("0.15"),
+    threshold: Decimal = Decimal("0.10"),
 ) -> TradeSignal:
     if not signals:
         raise ValueError("ensemble requires signals")

@@ -160,11 +160,11 @@ def summarize_trajectory_math(
     comparisons: dict[str, dict[str, Any]],
     max_spread_bps: str = "35",
     min_relative_volume: str = "0.25",
-    single_symbol_move_pct: str = "5",
+    single_symbol_move_pct: str = "4",
     regular_hours_only: bool = True,
     equity: str = "",
-    risk_budget_pct: str = "0.25",
-    atr_multiplier: str = "2",
+    risk_budget_pct: str = "0.35",
+    atr_multiplier: str = "1.5",
     position_headroom_pct: str = "",
     gross_headroom_pct: str = "",
     adaptive_weights_json: str = "{}",
@@ -295,6 +295,10 @@ def summarize_trajectory_math(
                 .quantize(Decimal("0.0001"))
             )
         if sizing_enabled and item.get("last") is not None and risk.get("atr14") is not None:
+            is_short = ensemble_direction == "sell"
+            # Aggressive short: 1.4x risk budget and tighter stop for larger qty, but still capped by headroom
+            effective_risk = _decimal(risk_budget_pct, "risk_budget_pct") * (Decimal("1.4") if is_short else Decimal("1"))
+            effective_atr = _decimal(atr_multiplier, "atr_multiplier") * (Decimal("0.8") if is_short else Decimal("1"))
             sizing = {
                 "available": True,
                 **calculate_position_size(
@@ -302,12 +306,13 @@ def summarize_trajectory_math(
                     price=_decimal(item["last"], "last"),
                     atr14=_decimal(risk["atr14"], "atr14"),
                     signal_strength=_decimal(ensemble.get("strength", "0"), "ensemble strength"),
-                    risk_budget_pct=_decimal(risk_budget_pct, "risk_budget_pct"),
-                    atr_multiplier=_decimal(atr_multiplier, "atr_multiplier"),
+                    risk_budget_pct=effective_risk,
+                    atr_multiplier=effective_atr,
                     position_headroom_pct=_decimal(position_headroom_pct, "position_headroom_pct"),
                     gross_headroom_pct=(
                         _decimal(gross_headroom_pct, "gross_headroom_pct")
-                        * (Decimal("0.5") if risk_off else Decimal("1"))
+                        * (Decimal("0.5") if risk_off and not is_short else Decimal("1"))
+                        * (Decimal("0.9") if is_short and risk_off else Decimal("1"))
                     ),
                 ),
             }
@@ -391,11 +396,11 @@ def evaluate_trajectory(
     fee_bps: str = "1",
     max_spread_bps: str = "35",
     min_relative_volume: str = "0.25",
-    single_symbol_move_pct: str = "5",
+    single_symbol_move_pct: str = "4",
     regular_hours_only: bool = True,
     equity: str = "",
-    risk_budget_pct: str = "0.25",
-    atr_multiplier: str = "2",
+    risk_budget_pct: str = "0.35",
+    atr_multiplier: str = "1.5",
     position_headroom_pct: str = "",
     gross_headroom_pct: str = "",
     adaptive_weights_json: str = "{}",

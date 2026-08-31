@@ -23,13 +23,13 @@ from mandate_research.sizing import average_true_range
 
 
 DEFAULT_PARAMETERS: dict[str, dict[str, Any]] = {
-    "momentum": {"lookback": 5, "threshold_pct": Decimal("0.5")},
-    "mean_reversion": {"lookback": 20, "z_threshold": Decimal("2")},
-    "breakout_volume": {"lookback": 20, "min_volume_ratio": Decimal("1.5")},
-    "news_price_confirmation": {"lookback": 3, "news_threshold": Decimal("0.25")},
-    "rsi_reversion": {"period": 14, "oversold": Decimal("30"), "overbought": Decimal("70")},
-    "macd_trend": {"fast": 12, "slow": 26, "signal": 9, "threshold_pct": Decimal("0.02")},
-    "volatility_adjusted_momentum": {"lookback": 20, "threshold": Decimal("0.25")},
+    "momentum": {"lookback": 5, "threshold_pct": Decimal("0.35")},
+    "mean_reversion": {"lookback": 20, "z_threshold": Decimal("1.6")},
+    "breakout_volume": {"lookback": 20, "min_volume_ratio": Decimal("1.3")},
+    "news_price_confirmation": {"lookback": 3, "news_threshold": Decimal("0.18")},
+    "rsi_reversion": {"period": 14, "oversold": Decimal("32"), "overbought": Decimal("68")},
+    "macd_trend": {"fast": 12, "slow": 26, "signal": 9, "threshold_pct": Decimal("0.015")},
+    "volatility_adjusted_momentum": {"lookback": 20, "threshold": Decimal("0.18")},
 }
 PARAMETER_GRID: dict[str, list[dict[str, Any]]] = {
     "momentum": [
