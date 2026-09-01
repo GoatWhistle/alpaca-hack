@@ -1,0 +1,24 @@
+[Unit]
+Description=Alpaca Hack read-only research MCP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=alpaca-hack
+Group=alpaca-hack
+WorkingDirectory=/opt/alpaca-hack/mandate/research
+EnvironmentFile=/etc/alpaca-hack/alpaca-hack.env
+Environment=HOME=/opt/alpaca-hack
+Environment=MANDATE_RESEARCH_TRANSPORT=streamable-http
+Environment=MANDATE_RESEARCH_HOST=127.0.0.1
+Environment=MANDATE_RESEARCH_PORT=8120
+Environment=MANDATE_USE_ALPACA_PROXY=false
+ExecStart=/opt/alpaca-hack/venv/bin/python -m mandate_research.server
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

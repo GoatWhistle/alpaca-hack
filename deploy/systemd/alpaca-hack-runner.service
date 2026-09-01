@@ -1,0 +1,33 @@
+[Unit]
+Description=Alpaca Hack autonomous paper-trading runner
+After=network-online.target alpaca-hack-research.service
+Wants=network-online.target alpaca-hack-research.service
+
+[Service]
+Type=simple
+User=alpaca-hack
+Group=alpaca-hack
+WorkingDirectory=/opt/alpaca-hack/mandate/agent
+EnvironmentFile=/etc/alpaca-hack/alpaca-hack.env
+Environment=HOME=/opt/alpaca-hack
+Environment=NODE_ENV=production
+Environment=MANDATE_PATH=/opt/alpaca-hack/mandate/mandates/example.yaml
+Environment=MANDATE_JOURNAL_PATH=/opt/alpaca-hack/mandate/logs/session.jsonl
+Environment=MANDATE_TRAJECTORY_PATH=/opt/alpaca-hack/mandate/logs/trajectory.json
+Environment=MANDATE_ALERTS_PATH=/opt/alpaca-hack/mandate/logs/news-alerts.jsonl
+Environment=MANDATE_AUTONOMY_RUNTIME_PATH=/opt/alpaca-hack/mandate/logs/autonomy-runtime.json
+Environment=MANDATE_NEWS_CURSOR_PATH=/opt/alpaca-hack/mandate/logs/news-cursor.json
+Environment=MANDATE_MARKET_MONITORING_PATH=/opt/alpaca-hack/mandate/logs/market-monitoring.json
+Environment=MANDATE_FORWARD_OUTCOMES_PATH=/opt/alpaca-hack/mandate/logs/forward-outcomes.json
+Environment=MANDATE_PYTHON=/opt/alpaca-hack/venv/bin/python
+Environment=MANDATE_RESEARCH_URL=http://127.0.0.1:8120/mcp
+Environment=MANDATE_USE_ALPACA_PROXY=false
+ExecStart=/usr/bin/npm run autonomy
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
