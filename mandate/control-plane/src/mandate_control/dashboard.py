@@ -75,8 +75,17 @@ class AlpacaPaperReader:
             "APCA-API-SECRET-KEY": secret,
             "Accept": "application/json",
         }
+        proxy = None
+        if os.environ.get("MANDATE_USE_ALPACA_PROXY", "false").lower() == "true":
+            proxy = os.environ.get("ALPACA_PROXY_URL") or None
+            if proxy is None:
+                raise ValueError("ALPACA_PROXY_URL is required when the Alpaca proxy is enabled")
         async with httpx.AsyncClient(
-            base_url=self.base_url, headers=headers, timeout=self.timeout
+            base_url=self.base_url,
+            headers=headers,
+            timeout=self.timeout,
+            proxy=proxy,
+            trust_env=False,
         ) as client:
             responses = await asyncio.gather(
                 client.get("/v2/account"),

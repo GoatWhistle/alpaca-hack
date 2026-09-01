@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { request as httpsRequest } from "node:https";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import { TrueForge } from "@truefoundry/trueforge-sdk";
+import { HttpsProxyAgent } from "https-proxy-agent";
 import { AlpacaRealtimeMonitor, type StreamState } from "./realtimeMonitor.js";
 import { loadWorkspaceEnv } from "./workspaceEnv.js";
 
@@ -593,16 +595,71 @@ function alpacaPaperBaseUrl(): string {
   return "https://paper-api.alpaca.markets";
 }
 
+function alpacaProxyUrl(): string | undefined {
+  if (process.env.MANDATE_USE_ALPACA_PROXY?.toLowerCase() !== "true") return undefined;
+  const raw = process.env.ALPACA_PROXY_URL?.trim();
+  if (!raw) throw new Error("ALPACA_PROXY_URL is required when the Alpaca proxy is enabled");
+  const url = new URL(raw);
+  if (!new Set(["http:", "https:"]).has(url.protocol)) {
+    throw new Error("ALPACA_PROXY_URL must use HTTP or HTTPS");
+  }
+  return raw;
+}
+
+async function alpacaPaperGetViaProxy(
+  url: string,
+  headers: Record<string, string>,
+  proxyUrl: string,
+): Promise<unknown> {
+  return new Promise((resolveRequest, rejectRequest) => {
+    const request = httpsRequest(url, {
+      method: "GET",
+      headers,
+      agent: new HttpsProxyAgent(proxyUrl),
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      response.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > 4 * 1024 * 1024) {
+          request.destroy(new Error("Alpaca paper response exceeded 4 MiB"));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on("end", () => {
+        const status = response.statusCode ?? 0;
+        if (status < 200 || status >= 300) {
+          rejectRequest(new Error(`Alpaca paper request returned ${status}`));
+          return;
+        }
+        try {
+          resolveRequest(JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown);
+        } catch {
+          rejectRequest(new Error("Alpaca paper response was not valid JSON"));
+        }
+      });
+    });
+    request.setTimeout(15_000, () => request.destroy(new Error("Alpaca paper request timed out")));
+    request.on("error", rejectRequest);
+    request.end();
+  });
+}
+
 async function alpacaPaperGet(path: string): Promise<unknown> {
   const key = process.env.ALPACA_API_KEY ?? "";
   const secret = process.env.ALPACA_SECRET_KEY ?? "";
   if (!key || !secret) throw new Error("Alpaca paper credentials are required");
-  const response = await fetch(`${alpacaPaperBaseUrl()}${path}`, {
-    headers: {
-      "APCA-API-KEY-ID": key,
-      "APCA-API-SECRET-KEY": secret,
-      Accept: "application/json",
-    },
+  const url = `${alpacaPaperBaseUrl()}${path}`;
+  const headers = {
+    "APCA-API-KEY-ID": key,
+    "APCA-API-SECRET-KEY": secret,
+    Accept: "application/json",
+  };
+  const proxyUrl = alpacaProxyUrl();
+  if (proxyUrl) return alpacaPaperGetViaProxy(url, headers, proxyUrl);
+  const response = await fetch(url, {
+    headers,
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`Alpaca paper request returned ${response.status}`);
