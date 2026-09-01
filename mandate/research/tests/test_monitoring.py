@@ -136,6 +136,102 @@ def test_optional_surfaces_degrade_without_losing_snapshots(monkeypatch: Any) ->
     assert result["sources"]["corporate_actions"]["status"] == "error"
 
 
+def test_liquid_tradable_mover_is_admitted_to_the_live_cycle(monkeypatch: Any) -> None:
+    monkeypatch.setenv("ALPACA_API_KEY", "key")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "secret")
+
+    def snapshot(symbol: str, price: float) -> dict[str, Any]:
+        return {
+            "latestQuote": {"bp": price - 0.05, "ap": price + 0.05, "t": NOW.isoformat()},
+            "latestTrade": {"p": price, "t": NOW.isoformat()},
+            "dailyBar": {"o": price - 1, "c": price, "v": 800},
+            "prevDailyBar": {"c": price - 1, "v": 1000},
+        }
+
+    def fetch(url: str, _headers: dict[str, str]) -> dict[str, Any]:
+        if "symbols=TSLA" in url:
+            return {"snapshots": {"TSLA": snapshot("TSLA", 250)}}
+        if "/stocks/snapshots" in url:
+            return {"snapshots": {"AAPL": snapshot("AAPL", 100), "SPY": snapshot("SPY", 500)}}
+        if "movers" in url:
+            return {"gainers": [{"symbol": "TSLA"}], "losers": []}
+        if "most-actives" in url:
+            return {"most_actives": [{"symbol": "TSLA"}]}
+        if "/v2/assets/TSLA" in url:
+            return {
+                "symbol": "TSLA", "status": "active", "tradable": True,
+                "shortable": True, "easy_to_borrow": True, "fractionable": True,
+            }
+        return {}
+
+    result = collect_market_monitoring(
+        symbols=["AAPL"], ipo_discovery_enabled=False, monitor_corporate_actions=False,
+        now=NOW, fetcher=fetch,
+    )
+    assert result["discovery"]["auto_admitted"] == ["TSLA"]
+    assert result["discovery"]["observation_only"] is False
+    assert result["quality"]["TSLA"]["quality_pass"] is True
+    assert result["discovery"]["auto_admitted_access"]["TSLA"]["easy_to_borrow"] is True
+
+
+def test_ipo_discovery_filters_spacs_and_ranks_tradable_price_confirmed_listings(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv("ALPACA_API_KEY", "key")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "secret")
+
+    def fetch(url: str, headers: dict[str, str]) -> dict[str, Any]:
+        if "api.nasdaq.com/api/ipo/calendar" in url:
+            assert "APCA-API-KEY-ID" not in headers
+            return {"data": {"priced": {"rows": [
+                {
+                    "proposedTickerSymbol": "NEWC", "companyName": "New Company, Inc.",
+                    "pricedDate": "08/26/2026", "proposedExchange": "NASDAQ",
+                    "proposedSharePrice": "$12.00", "sharesOffered": "5,000,000",
+                },
+                {
+                    "proposedTickerSymbol": "SPACU", "companyName": "Example Acquisition Corp",
+                    "pricedDate": "08/26/2026", "proposedExchange": "NASDAQ",
+                },
+            ]}}}
+        if "/v2/assets/NEWC" in url:
+            return {
+                "symbol": "NEWC", "status": "active", "tradable": True,
+                "fractionable": False, "shortable": False, "easy_to_borrow": False,
+            }
+        if "/stocks/snapshots" in url and "NEWC" in url:
+            return {"snapshots": {"NEWC": {
+                "latestQuote": {"t": NOW.isoformat()},
+                "latestTrade": {"p": 14, "t": NOW.isoformat()},
+                "dailyBar": {"o": 13, "c": 14, "v": 900},
+                "prevDailyBar": {"c": 12.5, "v": 1000},
+            }}}
+        if "/stocks/snapshots" in url:
+            return {"snapshots": {}}
+        if "movers" in url:
+            return {"gainers": [], "losers": []}
+        if "most-actives" in url:
+            return {"most_actives": []}
+        return {}
+
+    result = collect_market_monitoring(
+        symbols=["AAPL"], monitor_corporate_actions=False, now=NOW, fetcher=fetch
+    )
+    ipo = result["discovery"]["ipos"]
+    assert ipo["status"] == "ok"
+    assert [item["symbol"] for item in ipo["candidates"]] == ["NEWC"]
+    candidate = ipo["candidates"][0]
+    assert candidate["research_ready"] is True
+    assert candidate["execution_ready"] is False
+    assert candidate["research_warnings"] == ["missing_spread"]
+    assert candidate["quality"]["session_change_pct"] == "12.00"
+    assert candidate["alpaca"] == {
+        "tradable": True, "fractionable": False, "shortable": False, "easy_to_borrow": False,
+    }
+    assert ipo["observation_only"] is True
+    assert ipo["policy"] == "research_only_until_added_to_trajectory_and_mandate"
+
+
 def test_optional_option_confirmation_is_summarized_without_exposing_contract_payloads(monkeypatch: Any) -> None:
     monkeypatch.setenv("ALPACA_API_KEY", "key")
     monkeypatch.setenv("ALPACA_SECRET_KEY", "secret")

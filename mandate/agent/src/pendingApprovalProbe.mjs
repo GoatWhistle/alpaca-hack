@@ -12,8 +12,8 @@ const stream = await client.sessions.createTurnStream(sessionId, {
     {
       type: "user.message",
       content:
-        "Run one approval-gate conformance probe. Request mandate-guard cancel_order " +
-        "for order_id approval-probe-nonexistent with rationale 'approval wiring probe'. " +
+        "Run one approval-gate conformance probe. Request Alpaca cancel_order_by_id " +
+        "for order_id approval-probe-nonexistent. " +
         "Do not call any other tool and do not substitute another action. The harness will deny it.",
     },
   ],

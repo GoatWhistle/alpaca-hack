@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { HttpsProxyAgent } from "https-proxy-agent";
+import WebSocket from "ws";
 
 import type { NewsEvent, Trajectory } from "./autonomyRunner.js";
 
@@ -51,7 +53,12 @@ export class AlpacaRealtimeMonitor {
     trajectory: Trajectory,
     private readonly onWake: WakeCallback,
     private readonly onStatus: StatusCallback,
-    private readonly socketFactory: (url: string) => WebSocket = (url) => new WebSocket(url),
+    private readonly socketFactory: (url: string) => WebSocket = (url) => {
+      const proxy = process.env.ALPACA_PROXY_URL?.trim();
+      return proxy
+        ? new WebSocket(url, { agent: new HttpsProxyAgent(proxy) })
+        : new WebSocket(url);
+    },
   ) {
     this.trajectory = trajectory;
   }

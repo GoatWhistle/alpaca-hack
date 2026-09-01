@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 from typing import Any, Callable
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 
@@ -62,6 +62,17 @@ CIK_BY_SYMBOL = {
     "BABA": "0001577552",
     "BIDU": "0001329099",
 }
+
+
+def _alpaca_proxy(url: str) -> str | None:
+    """Return the dedicated proxy only for Alpaca-owned HTTPS endpoints."""
+    hostname = (urlparse(url).hostname or "").lower()
+    if (
+        os.environ.get("MANDATE_USE_ALPACA_PROXY", "false").lower() == "true"
+        and (hostname == "alpaca.markets" or hostname.endswith(".alpaca.markets"))
+    ):
+        return os.environ.get("ALPACA_PROXY_URL") or None
+    return None
 ISSUER_RSS_BY_SYMBOL = {
     "MSFT": ("microsoft_official_rss", MICROSOFT_RSS_ENDPOINT, "microsoft-official"),
     "GOOG": ("google_official_rss", GOOGLE_RSS_ENDPOINT, "google-official"),
@@ -72,7 +83,14 @@ ISSUER_RSS_BY_SYMBOL = {
 
 
 def _fetch(url: str, headers: dict[str, str]) -> bytes:
-    response = httpx.get(url, headers=headers, timeout=20, follow_redirects=True)
+    timeout = max(2.0, min(20.0, float(os.environ.get("MANDATE_DATA_TIMEOUT_SECONDS", "8"))))
+    response = httpx.get(
+        url,
+        headers=headers,
+        timeout=timeout,
+        follow_redirects=True,
+        proxy=_alpaca_proxy(url),
+    )
     response.raise_for_status()
     if response.url.scheme != "https" or response.url.host not in ALLOWED_HOSTS:
         raise ValueError("live source redirected outside the fixed HTTPS allowlist")

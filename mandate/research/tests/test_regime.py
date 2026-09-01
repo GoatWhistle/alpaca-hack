@@ -38,3 +38,18 @@ def test_weighted_ensemble_changes_with_regime_weights() -> None:
     ranged = weighted_ensemble(signals, {"momentum": "0.1", "mean_reversion": "0.7"})
     assert trend.direction is Direction.BUY
     assert ranged.direction is Direction.SELL
+
+
+def test_down_trend_weights_favor_trend_following_strategies() -> None:
+    down = classify_market_regime(_bars([Decimal(100 - index) for index in range(30)]))
+    assert down["regime"] == "trend"
+    assert down["direction"] == "down"
+    weights = {name: Decimal(value) for name, value in down["strategy_weights"].items()}
+    assert sum(weights.values(), Decimal("0")) == Decimal("1")
+    # Counter-trend strategies vote BUY in a falling market; they must not carry
+    # the ensemble exactly when the regime wants to short.
+    assert weights["momentum"] + weights["macd_trend"] + weights["volatility_adjusted_momentum"] > (
+        weights["mean_reversion"] + weights["rsi_reversion"]
+    ) * Decimal("3")
+    assert weights["mean_reversion"] <= Decimal("0.05")
+    assert weights["rsi_reversion"] <= Decimal("0.05")

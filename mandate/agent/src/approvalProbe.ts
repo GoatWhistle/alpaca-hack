@@ -1,29 +1,11 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-
 import { TrueForge } from "@truefoundry/trueforge-sdk";
 
 const baseUrl = process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790";
 const agentName = process.env.MANDATE_AGENT_NAME ?? "mandate-paper-agent";
-const journalPath = resolve(
-  process.env.MANDATE_JOURNAL_PATH ?? "../logs/session.jsonl",
-);
-const expectedTool = "cancel_order";
-
-async function journalSnapshot(): Promise<string> {
-  try {
-    return await readFile(journalPath, "utf8");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return "";
-    }
-    throw error;
-  }
-}
+const expectedTool = "cancel_order_by_id";
 
 const client = new TrueForge({ baseUrl });
 const session = await client.sessions.create({ agent: { name: agentName } });
-const journalBefore = await journalSnapshot();
 const requestedTools = new Map<string, string>();
 let approval:
   | { threadId: string; toolCallId: string; sourceEventId: string }
@@ -34,10 +16,10 @@ const firstTurn = await client.sessions.createTurnStream(session.data.id, {
     {
       type: "user.message",
       content:
-        "Run one approval-gate conformance probe. Request mandate-guard cancel_order " +
-        "for order_id approval-probe-nonexistent with rationale 'approval wiring probe'. " +
+        "Run one approval-gate conformance probe. Request Alpaca cancel_order_by_id " +
+        "for order_id approval-probe-nonexistent. " +
         "Do not call any other tool and do not substitute another action. The harness will deny it, " +
-        "so the guard and broker must never receive the call.",
+        "so Alpaca must never receive the call.",
     },
   ],
 });
@@ -105,11 +87,6 @@ if (!denialObserved) {
   throw new Error("approval denial did not produce a terminal turn event");
 }
 
-const journalAfter = await journalSnapshot();
-if (journalAfter !== journalBefore) {
-  throw new Error("guard journal changed even though TrueForge denied the tool call");
-}
-
 console.log(
   JSON.stringify(
     {
@@ -117,7 +94,7 @@ console.log(
       sessionId: session.data.id,
       tool: requestedTool,
       approval: "denied",
-      guardJournalUnchanged: true,
+      brokerCallDeniedBeforeExecution: true,
     },
     null,
     2,

@@ -1,13 +1,13 @@
-name: ai-platforms-infrastructure-aggressive-short-2026-08-28
+name: hackathon-aggressive-portfolio-2026-08-28
 universe: [AAPL, MSFT, NVDA, GOOGL, AMZN, META, AMD, AVGO, ORCL, IBM, PLTR, CRM, ANET, TSM, ASML, ARM, BABA, BIDU, SPY]
-instruments: [equity]
+instruments: [equity, option]
 order_types: [limit]
 session: regular_hours_only
 limits:
-  max_position_pct: 50
-  max_gross_exposure_pct: 95
+  max_position_pct: 40
+  max_gross_exposure_pct: 200
   max_daily_loss_pct: 10
-  max_orders_per_day: 5000
+  max_orders_per_day: 200
 wake_me_if:
   - daily_loss_pct > 8
   - single_symbol_move_pct > 8
@@ -22,7 +22,7 @@ predecided:
 allow_short_positions: true
 allow_risk_reducing_market_close: true
 short_limits:
-  max_short_position_pct: 40       # was 10, now near long cap
-  max_short_gross_exposure_pct: 80 # was 40, now 80% short book allowed
-  min_net_exposure_pct: -70        # was -30, now deep net-short allowed
+  max_short_position_pct: 40
+  max_short_gross_exposure_pct: 100
+  min_net_exposure_pct: -100
 expires: 2099-08-28T20:00:00Z

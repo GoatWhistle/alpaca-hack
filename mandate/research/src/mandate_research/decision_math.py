@@ -14,6 +14,7 @@ from mandate_research.sizing import calculate_position_size
 
 Comparison = Callable[..., dict[str, Any]]
 Monitoring = Callable[..., dict[str, Any]]
+INTRADAY_ENSEMBLE_THRESHOLD = Decimal("0.07")
 
 
 def _decimal(value: Any, label: str) -> Decimal:
@@ -143,7 +144,11 @@ def _weighted_payload_ensemble(
         score += contribution
         contributions.append(f"{name}={contribution:.3f}")
     direction = "flat"
-    if abs(score) >= Decimal("0.15"):
+    # Intraday signals are deliberately lower-amplitude than daily swings. The
+    # surrounding quality, benchmark, vote, macro-conflict and volume gates do
+    # the safety work; requiring 0.15 here made an otherwise healthy session
+    # permanently flat and effectively turned the strategy into buy-and-hold.
+    if abs(score) >= INTRADAY_ENSEMBLE_THRESHOLD:
         direction = "buy" if score > 0 else "sell"
     return ({
         "direction": direction,
@@ -270,6 +275,24 @@ def summarize_trajectory_math(
             and ensemble_direction == macro_signal_direction
             and sum(direction == macro_signal_direction for direction in price_directions) >= 2
         )
+        price_vote_count = sum(direction == ensemble_direction for direction in price_directions)
+        ensemble_strength = _decimal(ensemble.get("strength") or "0", "ensemble strength")
+        macro_conflict = (
+            macro_active
+            and macro_signal_direction is not None
+            and ensemble_direction != macro_signal_direction
+        )
+        price_confirmation_aligned = (
+            ensemble_direction in {"buy", "sell"}
+            and price_vote_count >= 2
+            and ensemble_strength >= INTRADAY_ENSEMBLE_THRESHOLD
+            and relative_volume is not None
+            and relative_volume >= max(volume_floor, Decimal("0.50"))
+            and not macro_conflict
+        )
+        risk = comparison.get("risk", {}) if isinstance(comparison.get("risk"), dict) else {}
+        data = comparison.get("data", {}) if isinstance(comparison.get("data"), dict) else {}
+        features = comparison.get("features", {}) if isinstance(comparison.get("features"), dict) else {}
         reasons: list[str] = []
         if regular_hours_only and not market_is_open:
             reasons.append("outside_regular_hours")
@@ -279,15 +302,23 @@ def summarize_trajectory_math(
             reasons.append("spy_quality_gate")
         if move_breach:
             reasons.append("single_symbol_move_gate" if session_move is not None else "missing_session_move")
-        if not (price_news_aligned or macro_price_aligned):
-            reasons.append("news_or_macro_price_not_aligned")
+        if not (price_news_aligned or macro_price_aligned or price_confirmation_aligned):
+            reasons.append("news_macro_or_price_not_aligned")
+        # Bounce gate: never initiate a short against a fresh 20-bar low. A short
+        # entry in a down-trend requires a realized pullback of at least 0.25 ATR
+        # above that low, so entries sell strength instead of chasing weakness.
+        market_regime = risk.get("market_regime") if isinstance(risk.get("market_regime"), dict) else {}
+        if ensemble_direction == "sell" and market_regime.get("direction") == "down":
+            last_price = item.get("last")
+            low_20 = features.get("low_20")
+            if last_price is None or low_20 is None or risk.get("atr14") is None:
+                reasons.append("short_entry_missing_references")
+            elif _decimal(last_price, "last") - _decimal(low_20, "low_20") < _decimal(risk["atr14"], "atr14") * Decimal("0.25"):
+                reasons.append("short_entry_chasing_low")
         candidate = not reasons
         if candidate:
             candidates.append(symbol)
         sizing: dict[str, Any] = {"available": False, "reason": "mandate_inputs_required"}
-        risk = comparison.get("risk", {}) if isinstance(comparison.get("risk"), dict) else {}
-        data = comparison.get("data", {}) if isinstance(comparison.get("data"), dict) else {}
-        features = comparison.get("features", {}) if isinstance(comparison.get("features"), dict) else {}
         relative_strength_vs_spy = None
         if symbol != "SPY" and features.get("return_20_pct") is not None and spy_return is not None:
             relative_strength_vs_spy = str(
@@ -339,8 +370,13 @@ def summarize_trajectory_math(
             "sizing": sizing,
             "news_price_aligned": price_news_aligned,
             "macro_price_aligned": macro_price_aligned,
+            "price_confirmation_aligned": price_confirmation_aligned,
+            "price_confirmation_votes": price_vote_count,
             "signal_path": (
-                "news_price" if price_news_aligned else "macro_price" if macro_price_aligned else None
+                "news_price" if price_news_aligned
+                else "macro_price" if macro_price_aligned
+                else "price_confirmation" if price_confirmation_aligned
+                else None
             ),
             "single_symbol_move_breach": move_breach,
             "research_candidate": candidate,
@@ -369,6 +405,17 @@ def summarize_trajectory_math(
         sizing["correlation_cluster_size"] = cluster_size
         if final_qty < initial_qty:
             sizing["binding_constraint"] = "correlation_cluster"
+
+    candidates.sort(
+        key=lambda symbol: (
+            _decimal(
+                results[symbol]["strategies"]["regime_ensemble"].get("strength") or "0",
+                f"{symbol} ensemble strength",
+            ),
+            _decimal(results[symbol]["market"].get("relative_volume") or "0", f"{symbol} relative volume"),
+        ),
+        reverse=True,
+    )
 
     return {
         "checked_at": monitoring.get("checked_at"),

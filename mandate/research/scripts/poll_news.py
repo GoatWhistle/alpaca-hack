@@ -39,7 +39,10 @@ def main() -> None:
 
     events: dict[str, dict[str, Any]] = {}
     source_health: dict[str, Any] = {}
-    with ThreadPoolExecutor(max_workers=min(4, len(symbols))) as executor:
+    # Each symbol is isolated and upstream requests are I/O-bound. Running the
+    # full bounded universe concurrently keeps a 30-second monitoring cadence
+    # from turning into several serial timeout windows.
+    with ThreadPoolExecutor(max_workers=min(20, len(symbols))) as executor:
         loaded_by_symbol = list(
             executor.map(lambda symbol: collect_live_news(symbol=symbol, strict=False), symbols)
         )

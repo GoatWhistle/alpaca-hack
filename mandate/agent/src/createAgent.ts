@@ -4,21 +4,29 @@ import { fileURLToPath } from "node:url";
 import { TrueForge } from "@truefoundry/trueforge-sdk";
 
 import { buildAgentSpec, parseOptionalBoolean } from "./agentSpec.js";
+import { loadWorkspaceEnv } from "./workspaceEnv.js";
+
+loadWorkspaceEnv();
 
 const AGENT_NAME = "mandate-paper-agent";
 const AUTO_AGENT_NAME = "mandate-paper-agent-auto";
 const baseUrl = process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790";
-const guardUrl = process.env.MANDATE_GUARD_URL ?? "http://127.0.0.1:8010/mcp";
+const alpacaUrl = process.env.MANDATE_ALPACA_MCP_URL ?? "http://127.0.0.1:8000/mcp";
 const researchUrl = process.env.MANDATE_RESEARCH_URL ?? "http://127.0.0.1:8020/mcp";
 const skillRef = process.env.MANDATE_GIT_REF ?? "feat/mandate-integration";
 const enableResearchSkill = parseOptionalBoolean(
   process.env.MANDATE_ENABLE_RESEARCH_SKILL,
   "MANDATE_ENABLE_RESEARCH_SKILL",
 );
-const parsedGuardUrl = new URL(guardUrl);
+const sandboxSetting = process.env.MANDATE_ENABLE_SANDBOX;
+if (sandboxSetting !== undefined && sandboxSetting !== "true" && sandboxSetting !== "false") {
+  throw new Error("MANDATE_ENABLE_SANDBOX must be true or false");
+}
+const enableSandbox = sandboxSetting !== "false";
+const parsedAlpacaUrl = new URL(alpacaUrl);
 const parsedResearchUrl = new URL(researchUrl);
 for (const [name, url] of [
-  ["MANDATE_GUARD_URL", parsedGuardUrl],
+  ["MANDATE_ALPACA_MCP_URL", parsedAlpacaUrl],
   ["MANDATE_RESEARCH_URL", parsedResearchUrl],
 ] as const) {
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
@@ -35,9 +43,10 @@ const client = new TrueForge({
 await client.settings.mcpServers.createOrUpdate({
   manifest: {
     type: "remote",
-    name: "mandate-guard",
-    url: parsedGuardUrl.toString(),
-    description: "Deterministic paper-only mandate enforcement and auditable execution boundary.",
+    name: "alpaca",
+    url: parsedAlpacaUrl.toString(),
+    description:
+      "Official Alpaca MCP v2 with direct paper-account research and trading tools.",
   },
 });
 
@@ -66,7 +75,12 @@ if (enableResearchSkill) {
 
 const agents = (await client.agents.list()).data;
 const applyAgent = async (name: string, requireSubmitApproval: boolean) => {
-  const manifest = buildAgentSpec(instructions, enableResearchSkill, requireSubmitApproval);
+  const manifest = buildAgentSpec(
+    instructions,
+    enableResearchSkill,
+    requireSubmitApproval,
+    enableSandbox,
+  );
   const existing = agents.find((agent) => agent.name === name);
   return existing
     ? client.agents.update(existing.id, { manifest })

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
@@ -16,8 +18,12 @@ MOVERS_ENDPOINT = "https://data.alpaca.markets/v1beta1/screener/stocks/movers"
 ACTIVES_ENDPOINT = "https://data.alpaca.markets/v1beta1/screener/stocks/most-actives"
 CORPORATE_ACTIONS_ENDPOINT = "https://data.alpaca.markets/v1/corporate-actions"
 OPTION_CHAIN_ENDPOINT = "https://data.alpaca.markets/v1beta1/options/snapshots"
+NASDAQ_IPO_CALENDAR_ENDPOINT = "https://api.nasdaq.com/api/ipo/calendar"
 NEW_YORK = ZoneInfo("America/New_York")
 MACRO_MOVE_THRESHOLD_PCT = Decimal("0.60")
+IPO_LOOKBACK_DAYS = 45
+MAX_IPO_CANDIDATES = 10
+TICKER_PATTERN = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
 VOLUME_CURVE = (
     (0, Decimal("0.010")),
     (5, Decimal("0.040")),
@@ -147,6 +153,7 @@ def _quality(
         ) if age is not None
     ]
     stale_seconds = max(ages) if ages else None
+    freshest_seconds = min(ages) if ages else None
     failures: list[str] = []
     if spread_bps is None:
         failures.append("missing_spread")
@@ -191,6 +198,7 @@ def _quality(
         ),
         "vwap": str(_decimal(daily.get("vw"))) if _decimal(daily.get("vw")) is not None else None,
         "stale_seconds": stale_seconds,
+        "freshest_seconds": freshest_seconds,
         "quality_pass": not failures,
         "quality_failures": failures,
     }
@@ -203,12 +211,179 @@ def _safe_fetch(fetcher: JsonFetcher, url: str, headers: dict[str, str]) -> tupl
         return {}, {"status": "error", "error_type": type(exc).__name__}
 
 
+def _looks_like_spac(symbol: str, company: str) -> bool:
+    """Reject obvious blank-check vehicles while retaining ordinary companies with 'Capital' names."""
+    lowered = company.casefold()
+    return (
+        symbol.endswith(("U", "W"))
+        or "acquisition corp" in lowered
+        or "acquisition company" in lowered
+        or "blank check" in lowered
+    )
+
+
+def _parse_priced_ipos(
+    payloads: list[dict[str, Any]], *, now: datetime, lookback_days: int
+) -> list[dict[str, Any]]:
+    cutoff = now.date() - timedelta(days=lookback_days)
+    candidates: dict[str, dict[str, Any]] = {}
+    for payload in payloads:
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        priced = data.get("priced") if isinstance(data.get("priced"), dict) else {}
+        rows = priced.get("rows") if isinstance(priced.get("rows"), list) else []
+        for raw in rows:
+            if not isinstance(raw, dict):
+                continue
+            symbol = str(raw.get("proposedTickerSymbol") or "").strip().upper()
+            company = str(raw.get("companyName") or "").strip()
+            priced_date = str(raw.get("pricedDate") or "").strip()
+            if not TICKER_PATTERN.fullmatch(symbol) or not company or _looks_like_spac(symbol, company):
+                continue
+            try:
+                listing_date = datetime.strptime(priced_date, "%m/%d/%Y").date()
+            except ValueError:
+                continue
+            if listing_date < cutoff or listing_date > now.date():
+                continue
+            candidates[symbol] = {
+                "symbol": symbol,
+                "company": company,
+                "listing_date": listing_date.isoformat(),
+                "days_since_listing": (now.date() - listing_date).days,
+                "exchange": str(raw.get("proposedExchange") or "").strip() or None,
+                "offer_price": str(raw.get("proposedSharePrice") or "").strip() or None,
+                "shares_offered": str(raw.get("sharesOffered") or "").strip() or None,
+            }
+    return sorted(candidates.values(), key=lambda item: (item["listing_date"], item["symbol"]), reverse=True)
+
+
+def _ipo_research(
+    *,
+    checked_at: datetime,
+    lookback_days: int,
+    trading_base: str,
+    selected_feed: str,
+    alpaca_headers: dict[str, str],
+    max_spread_bps: Decimal,
+    min_relative_volume: Decimal,
+    fetcher: JsonFetcher,
+) -> dict[str, Any]:
+    months = sorted({
+        checked_at.strftime("%Y-%m"),
+        (checked_at - timedelta(days=lookback_days)).strftime("%Y-%m"),
+    }, reverse=True)
+    nasdaq_headers = {
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0 (compatible; MandateIPOResearch/1.0)",
+    }
+    calendar_payloads: list[dict[str, Any]] = []
+    calendar_statuses: list[dict[str, Any]] = []
+    for month in months:
+        payload, status = _safe_fetch(
+            fetcher,
+            NASDAQ_IPO_CALENDAR_ENDPOINT + "?" + urlencode({"date": month}),
+            nasdaq_headers,
+        )
+        calendar_payloads.append(payload)
+        calendar_statuses.append(status)
+
+    priced = _parse_priced_ipos(calendar_payloads, now=checked_at, lookback_days=lookback_days)
+    tradable: list[dict[str, Any]] = []
+    asset_errors = 0
+    checked_candidates = priced[: MAX_IPO_CANDIDATES * 2]
+
+    def fetch_asset(candidate: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        asset, status = _safe_fetch(
+            fetcher, f"{trading_base}/v2/assets/{candidate['symbol']}", alpaca_headers
+        )
+        return candidate, asset, status
+
+    with ThreadPoolExecutor(max_workers=min(10, max(1, len(checked_candidates)))) as executor:
+        asset_results = list(executor.map(fetch_asset, checked_candidates))
+    for candidate, asset, status in asset_results:
+        if status["status"] != "ok":
+            asset_errors += 1
+            continue
+        if asset.get("status") != "active" or asset.get("tradable") is not True:
+            continue
+        tradable.append({
+            **candidate,
+            "alpaca": {
+                "tradable": True,
+                "fractionable": asset.get("fractionable") is True,
+                "shortable": asset.get("shortable") is True,
+                "easy_to_borrow": asset.get("easy_to_borrow") is True,
+            },
+        })
+        if len(tradable) >= MAX_IPO_CANDIDATES:
+            break
+
+    snapshot_status: dict[str, Any] = {"status": "disabled"}
+    if tradable:
+        symbols = [item["symbol"] for item in tradable]
+        url = SNAPSHOTS_ENDPOINT + "?" + urlencode({"symbols": ",".join(symbols), "feed": selected_feed})
+        payload, snapshot_status = _safe_fetch(fetcher, url, alpaca_headers)
+        snapshots = payload.get("snapshots", payload)
+        snapshots = snapshots if isinstance(snapshots, dict) else {}
+        for candidate in tradable:
+            quality = _quality(
+                candidate["symbol"],
+                snapshots.get(candidate["symbol"], {}) if isinstance(snapshots.get(candidate["symbol"]), dict) else {},
+                now=checked_at,
+                max_spread_bps=max_spread_bps,
+                min_relative_volume=min_relative_volume,
+            )
+            change = _decimal(quality.get("session_change_pct"))
+            relative_volume = _decimal(quality.get("relative_volume"))
+            freshest_seconds = quality.get("freshest_seconds")
+            candidate["quality"] = quality
+            candidate["execution_ready"] = quality["quality_pass"]
+            candidate["research_ready"] = bool(
+                change is not None and change > 0
+                and relative_volume is not None and relative_volume >= Decimal("1")
+                and isinstance(freshest_seconds, int) and freshest_seconds <= 1800
+            )
+            candidate["research_warnings"] = quality["quality_failures"]
+
+    def rank(item: dict[str, Any]) -> tuple[int, Decimal, Decimal, int]:
+        quality = item.get("quality") if isinstance(item.get("quality"), dict) else {}
+        return (
+            int(item.get("research_ready") is True),
+            _decimal(quality.get("session_change_pct")) or Decimal("-999"),
+            _decimal(quality.get("relative_volume")) or Decimal("-1"),
+            -int(item["days_since_listing"]),
+        )
+
+    tradable.sort(key=rank, reverse=True)
+    calendar_ok = all(status["status"] == "ok" for status in calendar_statuses)
+    fully_ok = calendar_ok and asset_errors == 0 and snapshot_status.get("status") in {"ok", "disabled"}
+    return {
+        "enabled": True,
+        "status": "ok" if fully_ok else "degraded",
+        "observation_only": True,
+        "policy": "research_only_until_added_to_trajectory_and_mandate",
+        "lookback_days": lookback_days,
+        "candidates": tradable,
+        "sources": {
+            "nasdaq_calendar": {"status": "ok" if calendar_ok else "degraded", "months": months},
+            "alpaca_assets": {
+                "status": "ok" if asset_errors == 0 else "degraded",
+                "checked": len(checked_candidates),
+                "tradable": len(tradable),
+            },
+            "alpaca_snapshots": snapshot_status,
+        },
+    }
+
+
 def collect_market_monitoring(
     *,
     symbols: list[str],
     feed: str = "auto",
     discovery_enabled: bool = True,
     discovery_top: int = 10,
+    ipo_discovery_enabled: bool = True,
+    ipo_lookback_days: int = IPO_LOOKBACK_DAYS,
     monitor_corporate_actions: bool = True,
     options_confirmation: bool = False,
     max_spread_bps: str = "35",
@@ -244,6 +419,8 @@ def collect_market_monitoring(
         raise ValueError("max_spread_bps must be a positive finite decimal")
     if minimum_volume is None or not minimum_volume.is_finite() or minimum_volume < 0:
         raise ValueError("min_relative_volume must be a non-negative finite decimal")
+    if not 1 <= ipo_lookback_days <= 180:
+        raise ValueError("ipo_lookback_days must be between 1 and 180")
     quality = {
         symbol: _quality(
             symbol,
@@ -274,6 +451,97 @@ def collect_market_monitoring(
             "sources": {"movers": movers_status, "most_active": active_status},
             "observation_only": True,
         }
+        discovery["ipos"] = (
+            _ipo_research(
+                checked_at=checked_at,
+                lookback_days=ipo_lookback_days,
+                trading_base=trading_base,
+                selected_feed=selected_feed,
+                alpaca_headers=headers,
+                max_spread_bps=spread_limit,
+                min_relative_volume=minimum_volume,
+                fetcher=fetcher,
+            )
+            if ipo_discovery_enabled
+            else {"enabled": False, "status": "disabled", "candidates": []}
+        )
+        if discovery["ipos"].get("status") == "degraded":
+            discovery["status"] = "degraded"
+
+        # Promote only liquid, fresh, broker-tradable movers into this session's
+        # execution universe. The configured trajectory remains the stable seed.
+        raw_discovered = [
+            item
+            for value in (
+                movers.get("gainers", []) if isinstance(movers, dict) else [],
+                movers.get("losers", []) if isinstance(movers, dict) else [],
+                active.get("most_actives", []) if isinstance(active, dict) else [],
+            )
+            for item in (value if isinstance(value, list) else [])
+        ]
+        discovered_symbols = list(dict.fromkeys(
+            str(item.get("symbol", "")).strip().upper()
+            for item in raw_discovered
+            if isinstance(item, dict) and str(item.get("symbol", "")).strip()
+        ))
+        discovered_symbols = [
+            symbol for symbol in discovered_symbols
+            if symbol not in normalized and symbol != "SPY"
+        ][: min(discovery_top, 12)]
+        discovered_quality: dict[str, Any] = {}
+        if discovered_symbols:
+            extra_url = SNAPSHOTS_ENDPOINT + "?" + urlencode(
+                {"symbols": ",".join(discovered_symbols), "feed": selected_feed}
+            )
+            extra_payload, extra_status = _safe_fetch(fetcher, extra_url, headers)
+            extra_snapshots = extra_payload.get("snapshots", extra_payload)
+            if isinstance(extra_snapshots, dict):
+                discovered_quality = {
+                    symbol: _quality(
+                        symbol,
+                        extra_snapshots.get(symbol, {})
+                        if isinstance(extra_snapshots.get(symbol), dict) else {},
+                        now=checked_at,
+                        max_spread_bps=spread_limit,
+                        min_relative_volume=max(minimum_volume, Decimal("1.5")),
+                    )
+                    for symbol in discovered_symbols
+                }
+                quality.update(discovered_quality)
+            discovery.setdefault("sources", {})["candidate_snapshots"] = extra_status
+        admitted: list[str] = []
+        access: dict[str, Any] = {}
+        qualified_symbols = [
+            symbol for symbol in discovered_symbols
+            if discovered_quality.get(symbol, {}).get("quality_pass") is True
+        ]
+
+        def fetch_discovered_asset(symbol: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
+            asset, asset_status = _safe_fetch(
+                fetcher, f"{trading_base}/v2/assets/{symbol}", headers
+            )
+            return symbol, asset, asset_status
+
+        with ThreadPoolExecutor(max_workers=min(10, max(1, len(qualified_symbols)))) as executor:
+            discovered_assets = list(executor.map(fetch_discovered_asset, qualified_symbols))
+        for symbol, asset, asset_status in discovered_assets:
+            if (
+                asset_status.get("status") != "ok"
+                or asset.get("status") != "active"
+                or asset.get("tradable") is not True
+            ):
+                continue
+            admitted.append(symbol)
+            access[symbol] = {
+                "shortable": asset.get("shortable") is True,
+                "easy_to_borrow": asset.get("easy_to_borrow") is True,
+                "fractionable": asset.get("fractionable") is True,
+            }
+            if len(admitted) >= 6:
+                break
+        discovery["observation_only"] = not admitted
+        discovery["auto_admitted"] = admitted
+        discovery["auto_admitted_access"] = access
 
     corporate_actions: list[dict[str, Any]] = []
     corporate_status: dict[str, Any] = {"status": "disabled"}
@@ -304,20 +572,25 @@ def collect_market_monitoring(
     option_confirmation: dict[str, Any] = {"enabled": options_confirmation, "status": "disabled"}
     if options_confirmation:
         option_confirmation = {"enabled": True, "status": "ok", "symbols": {}}
-        for symbol in normalized:
+
+        def confirm_options(symbol: str) -> tuple[str, dict[str, Any]]:
             option_url = f"{OPTION_CHAIN_ENDPOINT}/{symbol}?" + urlencode(
                 {"feed": "indicative", "limit": 100}
             )
             payload, status = _safe_fetch(fetcher, option_url, headers)
             snapshots_map = payload.get("snapshots", {})
             contracts = list(snapshots_map.values()) if isinstance(snapshots_map, dict) else []
-            option_confirmation["symbols"][symbol] = {
+            return symbol, {
                 **status,
                 "contract_count": len(contracts),
                 "with_greeks": sum(
                     1 for item in contracts if isinstance(item, dict) and isinstance(item.get("greeks"), dict)
                 ),
             }
+
+        with ThreadPoolExecutor(max_workers=min(10, len(normalized))) as executor:
+            option_results = list(executor.map(confirm_options, normalized))
+        option_confirmation["symbols"] = dict(option_results)
         if any(item.get("status") != "ok" for item in option_confirmation["symbols"].values()):
             option_confirmation["status"] = "degraded"
 

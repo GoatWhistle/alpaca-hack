@@ -12,6 +12,7 @@ from mandate_research.comparison import analyze
 from mandate_research.live_sources import (
     ALPACA_NEWS_ENDPOINT,
     Fetcher,
+    _alpaca_proxy,
     _fetch,
     collect_official_news,
 )
@@ -25,7 +26,14 @@ NewsScorer = Callable[..., list[dict[str, Any]]]
 
 
 def _fetch_json(url: str, headers: dict[str, str]) -> dict[str, Any]:
-    response = httpx.get(url, headers=headers, timeout=20, follow_redirects=False)
+    timeout = max(2.0, min(20.0, float(os.environ.get("MANDATE_DATA_TIMEOUT_SECONDS", "8"))))
+    response = httpx.get(
+        url,
+        headers=headers,
+        timeout=timeout,
+        follow_redirects=False,
+        proxy=_alpaca_proxy(url),
+    )
     response.raise_for_status()
     if len(response.content) > MAX_FEED_BYTES:
         raise ValueError(f"payload exceeds {MAX_FEED_BYTES} bytes")

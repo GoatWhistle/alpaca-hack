@@ -55,12 +55,16 @@ def classify_market_regime(bars: Sequence[PriceBar], *, lookback: int = 20) -> d
     regime = "trend" if trending else "range"
     direction = "up" if trending and slope > ZERO else "down" if trending else "flat"
     volatility = "high" if percentile >= Decimal("75") else "low" if percentile <= Decimal("25") else "normal"
-    # Aggressive short: in down-trend boost mean_reversion/RSI/vol and news for faster SELL
+    # Aggressive short: in a down-trend the ensemble must lean on trend-following
+    # strategies. Counter-trend signals (mean_reversion, rsi_reversion) vote BUY in a
+    # falling market, so boosting them here damped exactly the shorts this regime is
+    # meant to take. They stay at entry-timer weight only; the bounce gate in
+    # decision_math keeps shorts from chasing fresh lows.
     if trending and direction == "down":
         weights = {
-            "momentum": "0.18", "mean_reversion": "0.18", "breakout_volume": "0.12",
-            "news_price_confirmation": "0.20", "rsi_reversion": "0.12",
-            "macd_trend": "0.10", "volatility_adjusted_momentum": "0.10",
+            "momentum": "0.22", "mean_reversion": "0.05", "breakout_volume": "0.15",
+            "news_price_confirmation": "0.20", "rsi_reversion": "0.05",
+            "macd_trend": "0.20", "volatility_adjusted_momentum": "0.13",
         }
     elif trending:
         weights = {

@@ -8,7 +8,7 @@ from mandate_research.server import create_server
 def test_research_mcp_has_only_bounded_read_only_tools() -> None:
     server = create_server(
         compare=lambda **_: {}, probe=lambda **_: {}, monitor=lambda **_: {}, evaluate=lambda **_: {},
-        score=lambda **_: {},
+        score=lambda **_: {}, run_exits=lambda _positions: {},
     )
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
 
@@ -18,6 +18,7 @@ def test_research_mcp_has_only_bounded_read_only_tools() -> None:
         "compare_live_signals",
         "get_market_monitoring",
         "evaluate_trajectory",
+        "evaluate_position_exits",
     }
     assert all(tool.annotations is not None for tool in tools.values())
     assert all(tool.annotations.readOnlyHint is True for tool in tools.values())
@@ -84,3 +85,23 @@ def test_research_mcp_delegates_with_bounded_arguments() -> None:
         ),
         ("score", {"headline": "Beat but guidance cut", "summary": "", "symbol": "AAPL"}),
     ]
+
+
+def test_position_exits_tool_parses_json_and_delegates() -> None:
+    def run_exits(positions: list[dict]) -> dict[str, object]:
+        return {"received": positions}
+
+    server = create_server(run_exits=run_exits)
+    result = asyncio.run(server.call_tool(
+        "evaluate_position_exits",
+        {"positions_json": '[{"symbol": "NVDA", "qty": "-10", "avg_entry_price": "100"}]'},
+    ))
+    assert result[1] == {
+        "received": [{"symbol": "NVDA", "qty": "-10", "avg_entry_price": "100"}]
+    }
+
+    import pytest
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    with pytest.raises(ToolError):
+        asyncio.run(server.call_tool("evaluate_position_exits", {"positions_json": "{not json"}))

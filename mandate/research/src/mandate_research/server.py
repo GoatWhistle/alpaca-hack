@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Callable
 from typing import Any
@@ -12,6 +13,8 @@ from mandate_research.live_sources import probe_live_sources as probe_live
 from mandate_research.llm_news import score_news_llm as score_llm
 from mandate_research.monitoring import collect_market_monitoring as collect_monitoring
 from mandate_research.decision_math import evaluate_trajectory as evaluate_math
+from mandate_research.exits import run_exit_evaluation as run_exits_default
+from mandate_research.env import load_workspace_env
 
 
 READ_ONLY = ToolAnnotations(
@@ -29,6 +32,7 @@ def create_server(
     monitor: Callable[..., dict[str, Any]] = collect_monitoring,
     evaluate: Callable[..., dict[str, Any]] = evaluate_math,
     score: Callable[..., dict[str, Any]] = score_llm,
+    run_exits: Callable[..., dict[str, Any]] = run_exits_default,
     host: str = "127.0.0.1",
     port: int = 8020,
 ) -> FastMCP:
@@ -106,10 +110,27 @@ def create_server(
             compact_output=compact_output,
         )
 
+    @mcp.tool(annotations=READ_ONLY)
+    def evaluate_position_exits(positions_json: str = "[]") -> dict[str, Any]:
+        """Evaluate deterministic stop/target/time exits for open positions.
+
+        Accepts the agent-supplied broker positions (symbol, qty, avg_entry_price);
+        market data is fetched read-only. Returns proposals only — never execution
+        authority. Positions must come from Alpaca get_all_positions or the direct runner.
+        """
+        try:
+            positions = json.loads(positions_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("positions_json must be a JSON array") from exc
+        if not isinstance(positions, list):
+            raise ValueError("positions_json must be a JSON array")
+        return run_exits(positions)
+
     return mcp
 
 
 def main() -> None:
+    load_workspace_env()
     transport = os.environ.get("MANDATE_RESEARCH_TRANSPORT", "stdio")
     if transport not in {"stdio", "sse", "streamable-http"}:
         raise ValueError("MANDATE_RESEARCH_TRANSPORT must be stdio, sse, or streamable-http")

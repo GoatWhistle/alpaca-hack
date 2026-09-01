@@ -1,269 +1,136 @@
-<div align="center">
-  <img src="mandate/app/public/agent-mark.svg" width="72" alt="MANDATE logo" />
+# Alpaca Autonomous Trading Agent
 
-# MANDATE
+## Project conditions
 
-### An autonomous paper-trading agent with authority you can prove
+Build an autonomous paper-trading agent for the Alpaca hackathon.
 
-**The model proposes. Deterministic code constrains. A human authorizes.**
+The agent is evaluated on:
 
-[![TrueForge](https://img.shields.io/badge/TrueForge-agent_harness-E5B928?style=for-the-badge)](https://www.truefoundry.com/trueforge)
-[![Alpaca](https://img.shields.io/badge/Alpaca-paper_trading-111318?style=for-the-badge&logo=alpaca&logoColor=white)](https://alpaca.markets/)
-[![Python](https://img.shields.io/badge/Python-3.11+-111318?style=for-the-badge&logo=python&logoColor=E5B928)](https://www.python.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-111318?style=for-the-badge&logo=typescript&logoColor=E5B928)](https://www.typescriptlang.org/)
-[![MCP](https://img.shields.io/badge/MCP-least_privilege-111318?style=for-the-badge)](https://modelcontextprotocol.io/)
+- total account equity at the end of the scoring window;
+- trading performance and P&L;
+- autonomy of the trading workflow;
+- creativity of market research and opportunity discovery;
+- robustness of continuous operation;
+- clarity of live decisions and explanations.
 
-[**Open live demo →**](https://harn.miposts.com) · [Architecture](#architecture) · [Run locally](#run-locally) · [Safety evidence](#verified-safety-evidence)
+## Official account
 
-</div>
+- Use a newly created Alpaca paper account.
+- Initial balance: `$100,000`.
+- Do not use the development or testing account for official measurement.
+- Official account equity, rather than cash balance, is the primary P&L metric.
 
-> [!NOTE]
-> **Public test profile** — URL: **[harn.miposts.com](https://harn.miposts.com)** · Login: `demo` · Password: `MandateDemo2026`
->
-> This shared profile is an isolated, interactive safety rehearsal. It exposes no production account values, internal service URLs, secrets, or trajectory controls. It can respond only to the bounded rehearsal approvals shown in the UI.
+## Timeline
 
-![MANDATE operator approval dashboard](docs/assets/mandate-approval-dashboard.png)
+- Hackathon window: August 28, 2026 at 9:30 a.m. ET through September 4, 2026 at 9:30 a.m. ET.
+- Official P&L window: August 31, 2026 at 9:30 a.m. ET through September 4, 2026 at 9:30 a.m. ET.
+- Final portfolio equity is measured at EOD September 3, 2026.
 
-## Why MANDATE exists
+## Trading objective
 
-Giving an LLM a broker API creates an authority problem, not merely a prediction problem. A persuasive model response is not proof that an order respects position limits, current exposure, market hours, loss budgets, or the operator's intent.
+Maximize total paper-account equity during the official scoring window.
 
-MANDATE separates intelligence from authority:
+The agent should:
 
-| The usual agent risk | MANDATE's answer |
-|---|---|
-| The model can reach a raw trading endpoint | The model receives no raw order-placement tool |
-| Natural-language rules are interpreted loosely | A strict, versioned YAML mandate is executable policy |
-| Approval can accidentally override risk controls | Approval resumes execution but never bypasses the guard |
-| Stale data produces confident actions | Freshness, spread, volume, session and benchmark gates fail closed |
-| Retries can duplicate an order | Stable intent IDs and broker provenance make retries idempotent |
-| A dashboard can display stale broker state as live | Degraded mode withholds unverifiable values visibly |
+- trade actively throughout the session;
+- take both long and short opportunities;
+- make several meaningful decisions per day when the market provides opportunities;
+- avoid passive buy-and-hold behavior;
+- rotate capital when a stronger opportunity appears;
+- close, cover or reverse positions whose setup has weakened;
+- use available buying power efficiently;
+- concentrate capital in stronger setups instead of distributing it across negligible positions;
+- continue monitoring even when no fresh company news exists.
 
-The result is a 24/7 research agent that can monitor markets, explain opportunities, ask for approval, and submit **paper orders only when deterministic code proves they are inside the mandate**.
+## Opportunity universe
 
-## Product experience
-
-### One decision at a time
-
-The operator sees a compact decision card, ready position size, order terms, rationale, and the exact safety checks that passed. Approve or deny; the completed card moves into the journal instead of taking over the screen.
-
-### A live, legible portfolio
-
-Equity, P&L, exposure, positions, orders, news, agent decisions and mandate headroom update on one full-width dashboard. News has a focused latest-story view and a separate feed; monitoring controls live in an IDE-style settings drawer.
-
-![MANDATE dynamic paper portfolio and audit journal](docs/assets/mandate-live-portfolio.png)
-
-### Chat as the control plane
-
-The agent keeps working outside chat. Chat remains available to explain a decision, inspect evidence, adjust the thesis, narrow the symbol pool, or propose a cadence/risk-posture change. Persistent trajectory changes require explicit confirmation and cannot expand the hard mandate universe.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    M[Market data<br/>Alpaca IEX / SIP] --> R[Research MCP<br/>read only]
-    N[News + filings<br/>fixed-host sources] --> R
-    R --> T[TrueForge agent<br/>Z.AI + subagents]
-    T -->|PARK| J[(Durable audit journal)]
-    T -->|PROPOSE| H{Human approval}
-    H -->|deny| J
-    H -->|approve| G[Mandate Guard<br/>deterministic MCP]
-    Y[Versioned mandate.yaml] --> G
-    G -->|deny| J
-    G -->|fresh re-check| A[Alpaca Paper API]
-    A --> J
-
-    classDef gold fill:#19150b,stroke:#e5b928,color:#fff;
-    classDef dark fill:#111318,stroke:#5f6368,color:#fff;
-    class T,H,G gold;
-    class M,N,R,Y,A,J dark;
-```
-
-There are three deliberately unequal trust zones:
-
-1. **Research plane — unprivileged.** Parses bounded market/news inputs, calculates features and produces evidence. It has no trading client.
-2. **Agent plane — creative but untrusted.** TrueForge and the model can research, challenge a thesis and propose an action. Tool allowlists prevent direct execution.
-3. **Execution plane — deterministic.** The guard owns paper broker credentials, reloads the human mandate, fetches fresh state, applies every limit with `Decimal`, and journals the result.
-
-## What the agent understands
-
-The production funnel monitors 18 liquid AI/platform/infrastructure equities plus SPY:
+The initial universe includes:
 
 `AAPL` `MSFT` `NVDA` `GOOGL` `AMZN` `META` `AMD` `AVGO` `ORCL` `IBM` `PLTR` `CRM` `ANET` `TSM` `ASML` `ARM` `BABA` `BIDU` `SPY`
 
-It turns price, liquidity, market regime and attributable news into eight explainable strategy outputs:
+The agent should also discover and research:
 
-- price momentum and volatility-adjusted momentum;
-- rolling z-score and RSI mean reversion;
-- volume-confirmed breakout;
-- MACD trend;
-- structured LLM news impact confirmed by price;
-- regime-weighted ensemble.
+- newly listed IPOs;
+- fast-growing public technology companies;
+- AI model providers and infrastructure companies;
+- semiconductor and networking companies;
+- cloud platforms;
+- unusual gainers and losers;
+- high-relative-volume stocks;
+- stocks reacting to earnings, guidance, regulation, partnerships or corporate actions;
+- liquid symbols outside the initial list when they present a stronger opportunity.
 
-News is scored as structured data — `sentiment`, `confidence`, `event_type`, `horizon`, `novelty_vs_48h`, affected tickers and reason — rather than by a tiny positive/negative word list. The LLM enriches evidence; deterministic code still owns the decision boundary.
+## Research conditions
 
-ATR14 sizing converts risk budget and signal strength into a whole-share quantity, capped by mandate headroom and same-side correlation clusters. SPY trend/range state changes ensemble weights and scales gross risk. Completed 5/15/60-minute outcomes update bounded strategy multipliers, including counterfactual outcomes for parked ideas: adaptive behavior without letting a model rewrite policy.
+The agent may use:
 
-## Safety invariants
+- real-time and historical Alpaca market data;
+- trades, quotes, snapshots and bars;
+- market movers and most-active lists;
+- corporate actions;
+- company and macro news;
+- official company, regulator and platform sources;
+- relative strength against SPY;
+- volume and liquidity changes;
+- ATR, RSI, MACD, VWAP and momentum;
+- breakouts and mean reversion;
+- market regime classification;
+- structured LLM scoring of catalysts;
+- measured forward outcomes from earlier decisions;
+- IPO listing date, offer price, liquidity and post-listing behavior.
 
-| Invariant | Enforcement |
-|---|---|
-| **Paper only** | Exact host allowlist accepts `https://paper-api.alpaca.markets`; live, HTTP, credential-bearing and look-alike URLs are rejected |
-| **No hidden authority** | The agent cannot write the mandate and cannot access a direct broker execution tool |
-| **Fresh-state validation** | Account, broker clock, latest trade, pending orders and every limit are re-read immediately before submit |
-| **Fail closed** | Missing/malformed policy, transport errors, stale data, closed sessions and unknown rules deny execution |
-| **Approval is not an override** | Human approval resumes the tool call; the guard repeats policy checks independently |
-| **Bounded risk** | Position, gross exposure, daily loss, order count, session, universe, instrument and order type are deterministic |
-| **Safe retries** | Canonical intent fingerprints, stable client IDs and durable provenance prevent duplicate or mutated retries |
-| **Auditable changes** | Every prepared, denied and submitted event carries the SHA-256 fingerprint of the validated mandate |
-| **Protected exits** | Cancellation requires submitted provenance; closes are risk-reducing and explicitly opt-in |
-| **Untrusted news** | Input is size-bounded, normalized, timestamped and treated only as data—not as instructions |
+News is not mandatory for a trade. Price-only and macro-price opportunities are valid.
 
-The guard supports human-authored predecisions such as `daily_loss_pct >= 1 → park_new_orders`. Unknown metrics or actions make the mandate invalid instead of being guessed.
+## Position behavior
 
-## TrueForge: the agent harness
+- Position size should respond to opportunity strength, volatility and available buying power.
+- Existing positions must be reconsidered on every cycle.
+- Weak positions should not remain open only because no stop has fired.
+- Profitable positions may be reduced or closed when momentum fades.
+- Losing positions may be closed, covered or reversed when the thesis changes.
+- Short positions are part of the normal opportunity set.
+- Intraday opportunities should produce intraday actions.
+- Overnight exposure should exist only when the expected continuation is stronger than available intraday alternatives.
 
-TrueForge provides the durable agent runtime around the safety kernel:
+## Autonomous behavior
 
-- persistent sessions, tool-call traces and context compaction;
-- MCP tool isolation and explicit execution allowlists;
-- approval pauses for irreversible actions;
-- dynamic read-only subagents for price research, news research and risk challenge;
-- sandbox access for bounded experiments, watched by a persisted-event policy auditor;
-- one operator workspace for autonomous runs and conversational control.
+- Monitor continuously without waiting for chat messages.
+- React to both scheduled cycles and fresh market events.
+- Produce one ranked portfolio decision at a time, with up to two entries and two risk-reducing exits per cycle.
+- Explain every trade, exit, reversal and refusal with a concise market-based reason.
+- Avoid generic inactivity explanations.
+- Avoid repeating research already supplied by the current evaluation.
+- Avoid prolonged debate when a tradable opportunity is already identified.
+- Continue searching after a candidate fails.
+- Prefer liquid defined-risk option expressions for the first eligible setup, with equity fallback when permissions or chain quality fail.
 
-The background runner consumes Alpaca news and market WebSockets with a configurable REST fallback. Every cycle must end in `ACTION: PARK` or `ACTION: PROPOSE`; a mechanical post-model gate parks any proposal that violates session, liquidity, staleness, relative-volume, macro or mandate constraints.
+## Required interface information
 
-## Example mandate
+The dashboard should show:
 
-Human authority is small enough to read and strict enough to execute:
+- current account equity and P&L;
+- open positions and current returns;
+- pending and completed orders;
+- the current pipeline stage;
+- the latest market or news event;
+- the selected candidate;
+- the latest model reason;
+- recent trade and exit history;
+- per-strategy forward performance;
+- the dedicated IPO research stream.
 
-```yaml
-universe: [AAPL, MSFT, NVDA, GOOGL, AMZN, META, AMD, AVGO, SPY]
-instruments: [equity]
-order_types: [limit]
-session: regular_hours_only
-limits:
-  max_position_pct: 10
-  max_gross_exposure_pct: 60
-  max_daily_loss_pct: 2
-  max_orders_per_day: 20
-predecided:
-  - when: daily_loss_pct >= 1
-    then: park_new_orders
-    reason: Protect the remaining daily loss budget before the hard stop.
-allow_short_positions: false
-allow_risk_reducing_market_close: true
-expires: 2099-08-28T20:00:00Z
-```
+## Technical resources
 
-See the complete [example mandate](mandate/mandates/example.yaml).
+- [Alpaca Trading API](https://docs.alpaca.markets/us/docs/trading-api)
+- [Alpaca Market Data API](https://docs.alpaca.markets/us/docs/getting-started-with-alpaca-market-data)
+- [Alpaca MCP Server](https://github.com/alpacahq/alpaca-mcp-server)
+- [Alpaca Skills](https://github.com/alpacahq/alpaca-skills)
+- [Alpaca JavaScript SDK](https://github.com/alpacahq/alpaca-trade-api-js)
 
-## Run locally
+## Submission
 
-### Prerequisites
-
-- Python 3.11+
-- Node.js 22 or 24
-- Alpaca **paper** account
-- Z.AI API key for structured news scoring
-
-Copy the environment template and add local secrets. Never commit `.env`:
-
-```bash
-cp mandate/.env.example mandate/.env
-```
-
-Install and test the deterministic services:
-
-```bash
-cd mandate/mcp-guard
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[test]'
-python -m pytest
-
-cd ../../mandate/research
-python -m pip install -e '.[test]'
-python -m pytest
-```
-
-Build the dashboard and validate the agent:
-
-```bash
-cd mandate/app
-npm install
-npm run typecheck
-npm run build
-
-cd ../agent
-npm install
-npm run typecheck
-npm run eval:autonomy
-```
-
-Start the guard, research MCP, dashboard, TrueForge and autonomy runner as separate supervised processes:
-
-```bash
-mandate-guard
-MANDATE_RESEARCH_TRANSPORT=streamable-http mandate-research-mcp
-mandate-dashboard
-
-cd mandate/agent
-npm run apply
-npm run autonomy
-```
-
-The default local ports are guard `8010`, research `8020`, dashboard API `8030`, and TrueForge/UI `8790`. Deployment should keep MCP and dashboard services on loopback and expose only the authenticated HTTPS operator UI.
-
-## Verified safety evidence
-
-The repository contains executable probes, not just architecture claims:
-
-| Probe | What it proves |
-|---|---|
-| `npm run eval:sandbox` | Deterministic Code Mode works without touching MCP or approval |
-| `npm run eval:subagents` | Two isolated read-only subagents delegate without execution authority |
-| `npm run eval:approval` | An irreversible tool pauses; denial leaves the guard journal byte-identical |
-| `npm run eval:research-e2e` | TrueForge + Z.AI use bounded research tools and produce no broker write |
-| `MANDATE_E2E_ALLOW=true npm run eval:paper-e2e` | Supervised paper submit, durable provenance and idempotent retry |
-| `npm run eval:cancel-e2e` | Exact-ID cancellation requires submitted guard provenance |
-
-The sanitized [paper E2E artifact](docs/evidence/paper-e2e-2026-08-27.json) records a real Alpaca paper flow: `prepared → submitted`, official broker readback, an unchanged retry producing `deduplicated`, and an approval-gated cancellation. The [verification report](docs/MANDATE_VERIFICATION.md) documents the wider integration evidence.
-
-> [!IMPORTANT]
-> Backtests use point-in-time inputs, configurable fees, spread-crossing slippage and a frozen-parameter holdout. Their output is engineering evidence—not a profitability claim or forecast.
-
-## Qodo review discipline
-
-Qodo Code Review was installed before the first product code. Milestones M1–M12 were reviewed through PRs [#1](https://github.com/GoatWhistle/harness-hack/pull/1) and [#2](https://github.com/GoatWhistle/harness-hack/pull/2). Findings included pending-exposure undercounting, concurrent submissions, mandate bypass on close, retry provenance and point-in-time news errors; each was fixed with a regression test. Recorded repeat reviews report **0 bugs and 0 rule violations** for the reviewed milestone commits.
-
-The full, commit-linked history and project-specific review rules are in the [Qodo review log](docs/QODO_REVIEW_LOG.md). New commits are not represented as Qodo-reviewed until their review is added to that log.
-
-## Repository map
-
-```text
-mandate/
-├── agent/          # TrueForge spec, 24/7 runner and executable E2E probes
-├── app/            # React operator dashboard and agent workspace
-├── mandates/       # Human-owned, versioned authority
-├── mcp-guard/      # Deterministic execution boundary and audit journal
-└── research/       # Read-only signals, news, monitoring, sizing and backtests
-docs/
-├── assets/         # Product screenshots
-├── evidence/       # Sanitized machine-readable E2E artifacts
-├── MANDATE_VERIFICATION.md
-└── QODO_REVIEW_LOG.md
-```
-
-## Scope and disclaimer
-
-MANDATE is a safety-focused hackathon project for **paper trading only**. It does not place live-money orders, provide investment advice, promise profit, or imply that backtest/paper performance will transfer to live markets. Production use would require independent security review, regulatory analysis, operational controls and extensive validation beyond this repository.
-
-<div align="center">
-
-**Built to make agent authority visible, bounded and auditable.**
-
-[Try the safety rehearsal](https://harn.miposts.com) · [Read the verification report](docs/MANDATE_VERIFICATION.md) · [Inspect the Qodo log](docs/QODO_REVIEW_LOG.md)
-
-</div>
+- Repository containing the complete agent project.
+- Working autonomous paper-trading deployment.
+- New official `$100,000` Alpaca paper account.
+- Recorded demonstration of continuous monitoring, opportunity selection, trading, position rotation and P&L changes.
+- Final account equity available for judging at the end of the official window.

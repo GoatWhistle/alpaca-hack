@@ -267,6 +267,7 @@ def analyze(payload: dict[str, Any]) -> dict[str, Any]:
     atr14 = average_true_range(bars)
     feature_snapshot = {
         "atr14": str(atr14),
+        "low_20": str(min(bar.low for bar in bars[-20:])),
         "rsi14": str(relative_strength_index(bars).quantize(Decimal("0.01"))),
         "macd_histogram": str(macd_histogram(bars).quantize(Decimal("0.0001"))),
         "realized_volatility_20": str(realized_volatility(bars).quantize(Decimal("0.000001"))),

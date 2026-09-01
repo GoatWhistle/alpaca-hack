@@ -1,0 +1,37 @@
+.panel-heading > .filter-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.filter-chips button {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-muted);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+  font: 500 var(--text-2xs) var(--font-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.filter-chips button em { color: var(--ink-muted); font-style: normal; }
+
+.filter-chips button:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.filter-chips button.active {
+  color: var(--ink);
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
+}
+
+.filter-chips button.active em { color: var(--ink-muted); }

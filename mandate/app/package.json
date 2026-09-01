@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 8031",
+    "mock": "node mock/server.mjs",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false"
   },

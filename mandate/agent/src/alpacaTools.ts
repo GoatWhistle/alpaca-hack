@@ -1,6 +1,9 @@
 // Explicit allow/deny lists from alpaca-mcp-server's live tools/list response.
 // Never replace these with @all or a broad tag: most generated tools lack annotations.
-export const ALPACA_RESEARCH_TOOLS = [
+export const ALPACA_READ_TOOLS = [
+  "get_account_info",
+  "get_all_positions",
+  "get_orders",
   "get_calendar",
   "get_clock",
   "get_stock_bars",
@@ -11,6 +14,9 @@ export const ALPACA_RESEARCH_TOOLS = [
   "get_stock_snapshot",
   "get_stock_trades",
 ] as const;
+
+// Backwards-compatible alias for the read-only E2E helpers.
+export const ALPACA_RESEARCH_TOOLS = ALPACA_READ_TOOLS;
 
 export const ALPACA_WRITE_TOOLS = [
   "add_asset_to_watchlist_by_id",

@@ -3,13 +3,13 @@ import { TrueForge } from "@truefoundry/trueforge-sdk";
 const baseUrl = process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790";
 const agentName = process.env.MANDATE_AGENT_NAME ?? "mandate-paper-agent";
 const trajectorySymbols = ["AAPL", "MSFT", "NVDA", "SPY"];
-const requiredTools = new Set(["evaluate_trajectory", "get_mandate"]);
+const requiredTools = new Set(["evaluate_trajectory", "get_account_info"]);
 const forbiddenTools = new Set([
   "exec",
   "compare_live_signals",
   "get_market_monitoring",
-  "submit_order_under_mandate",
-  "cancel_order",
+  "place_stock_order",
+  "cancel_order_by_id",
   "close_position",
   "park",
 ]);
@@ -48,10 +48,10 @@ const stream = await client.sessions.createTurnStream(sessionId, {
   input: [{
     type: "user.message",
     content:
-      `Run one read-only trajectory evaluation for ${trajectorySymbols.join(",")}. Call get_mandate and ` +
+      `Run one read-only trajectory evaluation for ${trajectorySymbols.join(",")}. Call Alpaca get_account_info and ` +
       "call mandate-research evaluate_trajectory exactly once with fee_bps 1, research_limit 8, max_spread_bps 35, " +
-      "min_relative_volume 0.25 and single_symbol_move_pct 5. Pass account.equity plus both position " +
-      "and gross-exposure percentage headrooms from get_mandate so sizing is ready. Use the returned arithmetic directly. " +
+      "min_relative_volume 0.25 and single_symbol_move_pct 5. Pass account.equity, position headroom 100, " +
+      "and buying_power/equity*100 as gross-exposure headroom so sizing is ready. Use the returned arithmetic directly. " +
       "Do not create subagents. Do not call exec, compare_live_signals, get_market_monitoring, or write calculation code. " +
       "Do not call any broker-write tool. End with exactly one line ACTION: PARK or ACTION: PROPOSE. " +
       "PROPOSE means research discussion only and never execution.",

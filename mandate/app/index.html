@@ -3,12 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#07110f" />
-    <meta name="description" content="MANDATE paper-trading operator dashboard" />
+    <meta name="theme-color" content="#08090d" />
+    <meta name="color-scheme" content="dark" />
     <title>MANDATE · Operator Console</title>
+    <meta name="description" content="A paper-trading agent that may act only inside a human-authored mandate. Deterministic code decides what the model is allowed to do; irreversible actions stop for a person." />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="MANDATE · Operator Console" />
+    <meta property="og:site_name" content="MANDATE" />
+    <meta property="og:description" content="Who has the right to press the button right now, when you are not at the desk. Paper trading only; not investment advice." />
+    <meta property="og:image" content="/og-image.svg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="MANDATE — who has the right to press the button" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="/og-image.svg" />
+    <meta name="twitter:title" content="MANDATE · Operator Console" />
+    <meta name="twitter:description" content="A paper-trading agent bounded by a human-authored mandate, running on the TrueForge agent harness." />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="root"></div>
+    <noscript>MANDATE requires JavaScript. The operator console streams live paper-account and approval state.</noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

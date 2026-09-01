@@ -117,6 +117,89 @@ def test_macro_price_alignment_can_produce_candidate_without_company_news() -> N
     assert result["symbols"]["AAPL"]["signal_path"] == "macro_price"
 
 
+def test_price_confirmation_can_trade_a_normal_day_without_news_or_macro_shock() -> None:
+    monitoring = {
+        "market_is_open": True,
+        "benchmark": {"quality_pass": True},
+        "macro_context": {"active": False, "direction": "neutral", "move_pct": "-0.30"},
+        "quality": {"AAPL": {
+            "last": "101", "spread_bps": "2", "relative_volume": "1.35",
+            "session_change_pct": "1.10", "quality_pass": True,
+        }},
+    }
+    comparison = _comparison("AAPL", news="flat", momentum="buy")
+    for name in ("breakout_volume", "macd_trend", "volatility_adjusted_momentum"):
+        comparison["signals"][name] = {
+            "direction": "buy", "strength": "0.7", "rationale": "price confirmation",
+        }
+    result = summarize_trajectory_math(
+        symbols=["AAPL"], monitoring=monitoring, comparisons={"AAPL": comparison}
+    )
+    item = result["symbols"]["AAPL"]
+    assert result["research_candidates"] == ["AAPL"]
+    assert item["price_confirmation_aligned"] is True
+    assert item["price_confirmation_votes"] >= 3
+    assert item["signal_path"] == "price_confirmation"
+
+
+def test_intraday_consensus_accepts_a_bounded_low_amplitude_move() -> None:
+    monitoring = {
+        "market_is_open": True,
+        "benchmark": {"quality_pass": True},
+        "macro_context": {"active": False, "direction": "neutral"},
+        "quality": {"AAPL": {
+            "last": "101", "spread_bps": "2", "relative_volume": "0.9",
+            "session_change_pct": "0.45", "quality_pass": True,
+        }},
+    }
+    comparison = _comparison("AAPL", news="flat", momentum="buy")
+    for name in ("momentum", "macd_trend", "volatility_adjusted_momentum"):
+        comparison["signals"][name] = {
+            "direction": "buy", "strength": "0.18", "rationale": "bounded intraday move",
+        }
+    for name in ("mean_reversion", "breakout_volume", "rsi_reversion"):
+        comparison["signals"][name] = {
+            "direction": "flat", "strength": "0", "rationale": "no contradiction",
+        }
+    result = summarize_trajectory_math(
+        symbols=["AAPL"], monitoring=monitoring, comparisons={"AAPL": comparison}
+    )
+    assert result["research_candidates"] == ["AAPL"]
+    assert Decimal(result["symbols"]["AAPL"]["strategies"]["regime_ensemble"]["strength"]) >= Decimal("0.07")
+
+
+def test_price_confirmation_rejects_thin_volume_and_active_spy_conflict() -> None:
+    comparison = _comparison("AAPL", news="flat", momentum="buy")
+    for name in ("breakout_volume", "macd_trend", "volatility_adjusted_momentum"):
+        comparison["signals"][name] = {
+            "direction": "buy", "strength": "0.7", "rationale": "price confirmation",
+        }
+    base_quality = {
+        "last": "101", "spread_bps": "2", "relative_volume": "0.49",
+        "session_change_pct": "1.10", "quality_pass": True,
+    }
+    thin = summarize_trajectory_math(
+        symbols=["AAPL"],
+        monitoring={
+            "market_is_open": True, "benchmark": {"quality_pass": True},
+            "macro_context": {"active": False, "direction": "neutral"},
+            "quality": {"AAPL": base_quality},
+        },
+        comparisons={"AAPL": comparison},
+    )
+    conflict = summarize_trajectory_math(
+        symbols=["AAPL"],
+        monitoring={
+            "market_is_open": True, "benchmark": {"quality_pass": True},
+            "macro_context": {"active": True, "direction": "risk_off"},
+            "quality": {"AAPL": {**base_quality, "relative_volume": "1.20"}},
+        },
+        comparisons={"AAPL": comparison},
+    )
+    assert thin["research_candidates"] == []
+    assert conflict["research_candidates"] == []
+
+
 def test_live_wrapper_fetches_monitoring_once_and_each_symbol_once() -> None:
     calls: list[tuple[str, object]] = []
 
@@ -276,3 +359,73 @@ def test_summary_scales_correlated_same_side_candidates() -> None:
         assert sizing["qty"] == 28
         assert sizing["correlation_cluster_size"] == 2
         assert sizing["binding_constraint"] == "correlation_cluster"
+
+
+def _short_comparison(symbol: str, *, low_20: str, direction: str = "down") -> dict:
+    base = _comparison(symbol, news="sell", momentum="sell")
+    base["signals"]["regime_ensemble"] = {"direction": "sell", "strength": "0.6", "rationale": "ensemble"}
+    base["risk"] = {"atr14": "2", "market_regime": {"regime": "trend", "direction": direction}}
+    base["features"] = {"low_20": low_20, "atr14": "2"}
+    return base
+
+
+def _sell_monitoring(last: str) -> dict:
+    return {
+        "checked_at": "2026-08-27T17:01:00+00:00",
+        "market_is_open": True,
+        "feed": "iex",
+        "benchmark": {"symbol": "SPY", "quality_pass": True},
+        "quality": {
+            "AAPL": {
+                "last": last,
+                "spread_bps": "2.5",
+                "relative_volume": "0.8",
+                "session_change_pct": "-1.25",
+                "stale_seconds": 4,
+                "quality_pass": True,
+            }
+        },
+    }
+
+
+def test_short_entry_blocked_when_chasing_fresh_low() -> None:
+    comparison = _short_comparison("AAPL", low_20="100.4")
+    result = summarize_trajectory_math(
+        symbols=["AAPL"],
+        monitoring=_sell_monitoring(last="100.5"),
+        comparisons={"AAPL": comparison},
+    )
+    assert "short_entry_chasing_low" in result["symbols"]["AAPL"]["blocked_by"]
+    assert result["research_candidates"] == []
+
+
+def test_short_entry_allowed_after_realized_bounce() -> None:
+    comparison = _short_comparison("AAPL", low_20="99.0")
+    result = summarize_trajectory_math(
+        symbols=["AAPL"],
+        monitoring=_sell_monitoring(last="100.5"),
+        comparisons={"AAPL": comparison},
+    )
+    assert "short_entry_chasing_low" not in result["symbols"]["AAPL"]["blocked_by"]
+    assert result["research_candidates"] == ["AAPL"]
+
+
+def test_short_entry_fails_closed_without_reference_prices() -> None:
+    comparison = _short_comparison("AAPL", low_20="99.0")
+    comparison["features"] = {}
+    result = summarize_trajectory_math(
+        symbols=["AAPL"],
+        monitoring=_sell_monitoring(last="100.5"),
+        comparisons={"AAPL": comparison},
+    )
+    assert "short_entry_missing_references" in result["symbols"]["AAPL"]["blocked_by"]
+
+
+def test_bounce_gate_inactive_outside_down_trend() -> None:
+    comparison = _short_comparison("AAPL", low_20="100.4", direction="up")
+    result = summarize_trajectory_math(
+        symbols=["AAPL"],
+        monitoring=_sell_monitoring(last="100.5"),
+        comparisons={"AAPL": comparison},
+    )
+    assert "short_entry_chasing_low" not in result["symbols"]["AAPL"]["blocked_by"]

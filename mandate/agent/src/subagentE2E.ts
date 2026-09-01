@@ -2,7 +2,7 @@ import { TrueForge } from "@truefoundry/trueforge-sdk";
 
 const baseUrl = process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790";
 const agentName = process.env.MANDATE_AGENT_NAME ?? "mandate-paper-agent";
-const forbidden = ["submit_order_under_mandate", "cancel_order", "close_position", "park"];
+const forbidden = ["place_stock_order", "cancel_order_by_id", "close_position", "park"];
 
 const client = new TrueForge({ baseUrl });
 const session = await client.sessions.create({ agent: { name: agentName } });
@@ -14,8 +14,8 @@ const stream = await client.sessions.createTurnStream(session.data.id, {
         "Run a read-only dynamic-subagent conformance probe. Delegate exactly two independent " +
         "tasks with create_sub_agent: (1) verify AAPL news-source health using only " +
         "probe_news_sources; (2) compare AAPL live signals and current mandate headroom using only " +
-        "compare_live_signals and get_mandate. Run them in parallel if supported, then synthesize " +
-        "their final answers. Do not call check_order, park, submit, cancel, close, or request approval.",
+        "compare_live_signals and get_account_info. Run them in parallel if supported, then synthesize " +
+        "their final answers. Do not park, submit, cancel, close, or request approval.",
     },
   ],
 });

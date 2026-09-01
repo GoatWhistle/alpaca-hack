@@ -1,0 +1,99 @@
+.app-shell { min-height: 100vh; }
+
+.operator-view main,
+.news-view main,
+.ipo-view main,
+.diagnostics-view main {
+  width: 100%;
+  max-width: 1720px;
+  margin-inline: auto;
+  padding: var(--space-5);
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.main-column,
+.side-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.diagnostics-view .dashboard-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  align-content: start;
+}
+
+@media (max-width: 860px) {
+  .diagnostics-view .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.diagnostics-view .diag-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.diagnostics-view .diag-panel > :last-child { flex: 1; }
+
+.diagnostics-view .diag-panel--wide { grid-column: 1 / -1; }
+
+.diagnostics-view .diag-panel--wide + .diag-panel:last-child { grid-column: 1 / -1; }
+
+.diagnostics-view .main-column,
+.diagnostics-view .side-column { display: contents; }
+
+.agent-workspace {
+  height: calc(100dvh - 97px);
+  min-height: 560px;
+  background: var(--ground);
+  overflow: hidden;
+}
+
+.agent-workspace > .aui-theme-root { height: 100%; }
+
+@media (max-width: 1050px) {
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .top-status .market-pill { display: none; }
+}
+
+@media (max-width: 720px) {
+  .operator-view main,
+  .news-view main,
+  .ipo-view main,
+  .diagnostics-view main {
+    padding: var(--space-4) 14px var(--space-8);
+  }
+  .agent-workspace {
+    height: calc(100dvh - 95px);
+    min-height: 480px;
+  }
+}
+
+.workspace-body { view-transition-name: workspace; }
+
+::view-transition-old(workspace) {
+  animation: vt-out 120ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+::view-transition-new(workspace) {
+  animation: vt-in var(--dur-view) var(--ease) both;
+}
+
+@keyframes vt-out { to { opacity: 0; } }
+@keyframes vt-in { from { opacity: 0; transform: translateY(6px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(workspace),
+  ::view-transition-new(workspace) {
+    animation-name: vt-fade !important;
+    animation-duration: 80ms !important;
+  }
+  @keyframes vt-fade { from { opacity: 0; } }
+}
