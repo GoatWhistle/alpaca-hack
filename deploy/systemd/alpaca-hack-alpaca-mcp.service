@@ -12,6 +12,7 @@ WorkingDirectory=/opt/alpaca-hack
 EnvironmentFile=/etc/alpaca-hack/alpaca-hack.env
 Environment=HOME=/opt/alpaca-hack
 Environment=ALPACA_PAPER_TRADE=true
+Environment=ALPACA_TOOLSETS=assets,stock-data
 # The MCP server talks to Alpaca itself; honour the same outbound proxy as the
 # runner when MANDATE_USE_ALPACA_PROXY=true. Install once with
 # /opt/alpaca-hack/venv/bin/pip install alpaca-mcp-server

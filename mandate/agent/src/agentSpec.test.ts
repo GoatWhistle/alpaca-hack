@@ -14,6 +14,8 @@ test("the automatic trader has planning authority but no tools", () => {
   const spec = buildTraderSpec("instructions", "zai/trader-model");
   assert.equal("skills" in spec, false);
   assert.equal(spec.model.name, "zai/trader-model");
+  assert.equal(spec.model.params?.maxTokens, 4_096);
+  assert.deepEqual(spec.model.params?.thinking, { type: "disabled" });
   assert.deepEqual(spec.mcpServers, []);
   assert.equal(spec.config?.sandbox?.enabled, false);
   assert.equal(spec.config?.dynamicSubAgents?.enabled, false);
@@ -22,6 +24,8 @@ test("the automatic trader has planning authority but no tools", () => {
 test("critics use their configured model and have no execution authority", () => {
   const spec = buildCriticSpec("risk only", "zai/risk-model");
   assert.equal(spec.model.name, "zai/risk-model");
+  assert.equal(spec.model.params?.maxTokens, 512);
+  assert.deepEqual(spec.model.params?.thinking, { type: "disabled" });
   assert.deepEqual(spec.mcpServers, []);
   assert.equal(spec.config?.iterationLimit, 2);
   assert.equal(spec.config?.sandbox?.enabled, false);

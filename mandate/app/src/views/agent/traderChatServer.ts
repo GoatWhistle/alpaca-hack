@@ -180,15 +180,22 @@ export function timelineEventToTurnEvents(event: TraderTimelineEvent): NativeTur
     if (source !== "trader_model" && source !== "deterministic_gate") {
       return [modelTextEvent(event, "Reasoning summary omitted: provenance was not explicit.", "reasoning-omitted")];
     }
-    return [{
-      type: "model.message",
-      id: eventId(event, "reasoning"),
-      threadId: ROOT_THREAD_ID,
-      content: null,
-      // This is the model's explicit bounded rationale, never hidden scratchpad/CoT.
-      reasoningContent: event.summary,
-      createdAt: event.at,
-    }];
+    return [
+      {
+        type: "model.message",
+        id: eventId(event, "reasoning"),
+        threadId: ROOT_THREAD_ID,
+        content: null,
+        // This is the model's explicit bounded rationale, never hidden scratchpad/CoT.
+        reasoningContent: event.summary,
+        createdAt: event.at,
+      },
+      modelTextEvent(
+        event,
+        `**${source === "trader_model" ? "Trader rationale" : "Gate rationale"}**\n\n${event.summary}`,
+        "reasoning-summary",
+      ),
+    ];
   }
   if (event.kind === "plan") {
     const plan = record(event.details.plan);
@@ -560,14 +567,29 @@ export function createTraderChatServer(
         .find((item) => item.turn.id === requestedTurnId);
       if (!selected) throw new Error("Unknown trader turn");
       let activeCycleKey = selected.group.key;
-      let streamSequence = (hydratedCursor.get(requestedTurnId) ?? 0) * 4;
+      let streamSequence = 0;
+      const hydratedThrough = hydratedCursor.get(requestedTurnId) ?? 0;
+      // Some TrueForge UI paths subscribe to a running turn without first
+      // calling listTurnEvents. Hydrate only this turn's missing events once,
+      // then start SSE at the journal tip. Streaming from sequence zero would
+      // fold every earlier daily cycle into the open turn on each connection.
+      for (const timelineEvent of selected.group.events) {
+        if (timelineEvent.kind === "trigger" || timelineEvent.sequence <= hydratedThrough) continue;
+        for (const projected of timelineEventToTurnEvents(timelineEvent)) {
+          streamSequence += 1;
+          yield { sequenceNumber: streamSequence, event: projected as TurnStreamingEvent };
+        }
+      }
+      let cursor = Math.max(hydratedThrough, initial.at(-1)?.sequence ?? 0);
+      hydratedCursor.set(requestedTurnId, cursor);
       for await (const event of readTimelineStream(
         tradingDate,
-        hydratedCursor.get(requestedTurnId) ?? 0,
+        cursor,
         abortSignal,
         { onHealthChange },
       )) {
-        hydratedCursor.set(requestedTurnId, event.sequence);
+        cursor = event.sequence;
+        hydratedCursor.set(requestedTurnId, cursor);
         const incomingCycle = cycleId(event);
         if (event.kind === "trigger") {
           activeCycleKey = incomingCycle ?? `trigger-${event.sequence}`;

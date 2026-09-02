@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   appendTraderMemory,
   buildAutonomyPrompt,
+  criticTimeoutSeconds,
   detectNewEvents,
   enforcePlanSafety,
   isStaleTraderSessionError,
@@ -15,11 +16,27 @@ import {
   newYorkTradingDate,
   publicRunnerError,
   readActiveTraderMemory,
+  traderTimeoutSeconds,
   tradeCandidates,
   type MarketResult,
   type NewsEvent,
   type Trajectory,
 } from "./autonomyRunner.js";
+
+test("trader timeout is configurable and bounded", () => {
+  assert.equal(traderTimeoutSeconds({}), 90);
+  assert.equal(traderTimeoutSeconds({ MANDATE_TRADER_TIMEOUT_SECONDS: "60" }), 60);
+  assert.equal(traderTimeoutSeconds({ MANDATE_TRADER_TIMEOUT_SECONDS: "2" }), 30);
+  assert.equal(traderTimeoutSeconds({ MANDATE_TRADER_TIMEOUT_SECONDS: "900" }), 180);
+  assert.equal(traderTimeoutSeconds({ MANDATE_TRADER_TIMEOUT_SECONDS: "bad" }), 90);
+});
+
+test("critic timeout allows parallel advisors enough time and stays bounded", () => {
+  assert.equal(criticTimeoutSeconds({}), 20);
+  assert.equal(criticTimeoutSeconds({ MANDATE_CRITIC_TIMEOUT_SECONDS: "45" }), 45);
+  assert.equal(criticTimeoutSeconds({ MANDATE_CRITIC_TIMEOUT_SECONDS: "120" }), 60);
+  assert.equal(criticTimeoutSeconds({ MANDATE_CRITIC_TIMEOUT_SECONDS: "bad" }), 20);
+});
 
 const trajectory: Trajectory = {
   version: 3,
@@ -133,6 +150,10 @@ test("an explicit empty candidate catalog does not fall back to research symbols
 
 test("final safety gate preserves only executable regular-hours quality plans", () => {
   assert.equal(enforcePlanSafety("EXECUTE_PLAN", trajectory, market, ["AAPL"]), "EXECUTE_PLAN");
+  assert.equal(enforcePlanSafety("EXECUTE_PLAN", trajectory, {
+    ...market,
+    quality: { ...market.quality, NVDA: { quality_pass: true } },
+  }, ["NVDA"]), "EXECUTE_PLAN");
   assert.equal(enforcePlanSafety("EXECUTE_PLAN", trajectory, { ...market, market_is_open: false }, ["AAPL"]), "PARK");
   assert.equal(enforcePlanSafety("EXECUTE_PLAN", trajectory, { ...market, quality: {} }, ["AAPL"]), "PARK");
   assert.equal(enforcePlanSafety("PARK", trajectory, market, ["AAPL"]), "PARK");
@@ -159,6 +180,22 @@ test("memory is append-only and only unexpired hypotheses are loaded", async () 
   }], now);
   assert.equal((await readActiveTraderMemory(path, now + 60 * 60 * 1_000)).length, 1);
   assert.equal((await readActiveTraderMemory(path, now + 3 * 60 * 60 * 1_000)).length, 0);
+});
+
+test("concurrent journal appends preserve invocation order", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "mandate-concurrent-journal-"));
+  const path = join(directory, "memory.jsonl");
+  const eventFor = (cycle: string) => ({
+    hypothesis: `hypothesis ${cycle}`,
+    evidence_refs: [`evaluation.${cycle}`],
+    ttl_hours: 1,
+  });
+  await Promise.all(["cycle-1", "cycle-2", "cycle-3"].map((cycle, index) =>
+    appendTraderMemory(path, cycle, [eventFor(cycle)], Date.parse("2026-09-02T12:00:00Z") + index),
+  ));
+  const cycles = (await readFile(path, "utf8")).trim().split("\n")
+    .map((line) => String((JSON.parse(line) as Record<string, unknown>).cycle_id));
+  assert.deepEqual(cycles, ["cycle-1", "cycle-2", "cycle-3"]);
 });
 
 test("executor failures are compact and do not expose local paths", () => {

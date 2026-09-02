@@ -94,7 +94,7 @@ const operatorInstructions = [
   "Use list_trader_memory to inspect unexpired hypotheses.",
   "Only when the operator explicitly asks to change persistent memory, call append_trader_memory with a stable memory_key, concrete evidence refs, and ttl_hours no greater than 168.",
   "append_trader_memory always pauses for human approval. Never claim the change was applied before its tool response.",
-  "When the alpaca MCP server is available, answer questions about the live paper account with its read tools such as get_account_info, get_all_positions, get_orders, get_portfolio_history, get_clock and market-data tools. You have no order, cancel, close or exercise tools.",
+  "When the alpaca MCP server is available, use it only for read-only market and reference data such as get_clock, get_stock_snapshot, get_option_contracts and search_alpaca_docs. Its private account, position, order, cancel, close and exercise toolsets are disabled. Do not claim access to live paper-account state unless it is present in get_trader_context.",
 ].join(" ");
 const critics = [
   {

@@ -1,16 +1,20 @@
 import type { TrueForgeApi } from "@truefoundry/trueforge-sdk";
 
 /**
- * Read-only tools of the official Alpaca MCP server (alpacahq/alpaca-mcp-server v2)
- * that the operator assistant may call. Every order, cancel, close, exercise or
- * configuration tool is listed in the deny list so a prompt can never trade.
+ * Public market/reference tools allowed from the official Alpaca MCP server.
+ * Deployment also pins ALPACA_TOOLSETS=assets,stock-data; private account and
+ * order tools remain absent from this defense-in-depth allowlist.
  */
 export const ALPACA_MCP_READ_TOOLS = [
-  "get_account_info", "get_account_config", "get_portfolio_history", "get_account_activities",
-  "get_all_positions", "get_open_position", "get_orders", "get_order_by_id",
-  "get_clock", "get_calendar", "get_asset", "get_option_contracts", "get_option_contract",
-  "get_corporate_action_announcements", "get_stock_snapshot", "get_stock_latest_quote",
-  "get_stock_latest_trade", "get_stock_bars", "get_market_movers", "get_most_active_stocks",
+  "get_stock_bars", "get_stock_quotes", "get_stock_trades",
+  "get_crypto_bars", "get_crypto_quotes", "get_crypto_trades",
+  "search_alpaca_docs", "fetch_alpaca_doc", "search_alpaca_api_specs",
+  "list_alpaca_api_endpoints", "get_alpaca_endpoint_docs",
+  "get_all_assets", "get_asset", "get_calendar", "get_clock",
+  "get_corporate_action_announcements", "get_corporate_action_announcement",
+  "get_option_contracts", "get_option_contract", "get_market_movers",
+  "get_most_active_stocks", "get_stock_latest_bar", "get_stock_latest_quote",
+  "get_stock_snapshot", "get_stock_latest_trade",
 ] as const;
 
 export const ALPACA_MCP_WRITE_TOOLS = [
@@ -29,7 +33,10 @@ export function buildTraderSpec(
   model = "zai/glm-5-3-flash",
 ): TrueForgeApi.AgentSpec {
   return {
-    model: { name: model },
+    model: {
+      name: model,
+      params: { maxTokens: 4_096, temperature: 0.1, thinking: { type: "disabled" } },
+    },
     instructions,
     // The trader emits a plan only. Broker execution remains in the local,
     // deterministic paper executor and is never delegated to TrueForge.
@@ -55,6 +62,10 @@ export function buildCriticSpec(
   const base = buildTraderSpec(instructions, model);
   return {
     ...base,
+    model: {
+      name: model,
+      params: { maxTokens: 512, temperature: 0, thinking: { type: "disabled" } },
+    },
     config: {
       ...base.config,
       iterationLimit: 2,
@@ -84,7 +95,7 @@ export function buildOperatorSpec(
       name: "alpaca",
       enableTools: [...ALPACA_MCP_READ_TOOLS],
       disableTools: [...ALPACA_MCP_WRITE_TOOLS],
-      preloadTools: ["get_account_info"],
+      preloadTools: ["get_clock"],
       preload: false,
       requireApprovalForTools: [],
     });

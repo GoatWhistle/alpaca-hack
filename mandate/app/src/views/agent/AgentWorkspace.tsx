@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import type { AgentUIServer } from "@truefoundry/trueforge-ui";
 import {
   Thread,
   ThreadContainer,
@@ -36,10 +37,63 @@ function HiddenTraderNewChat() {
   return <span hidden />;
 }
 
-export function AgentWorkspace() {
+const TRADER_AGENT_CONFIG = { mode: "SingleAgent", name: "mandate-paper-agent" } as const;
+const OPERATOR_AGENT_CONFIG = { mode: "SingleAgent", name: "mandate-operator-agent" } as const;
+const OPERATOR_SERVER = { type: "trueforge", baseUrl: import.meta.env.BASE_URL } as const;
+const TRADER_OVERRIDES = { ThreadListNewButton: HiddenTraderNewChat };
+const TRADER_THEME = {
+  preset: "trueforge",
+  mode: "dark",
+  brand: { name: "Trader days", logo: `${import.meta.env.BASE_URL}agent-mark.svg` },
+  tokens: MANDATE_CHAT_TOKENS,
+} as const;
+const OPERATOR_THEME = {
+  preset: "trueforge",
+  mode: "dark",
+  brand: { name: "Operator fork", logo: `${import.meta.env.BASE_URL}agent-mark.svg` },
+  tokens: MANDATE_CHAT_TOKENS,
+} as const;
+
+const TraderRuntime = memo(function TraderRuntime({
+  server,
+  tradingDate,
+  onError,
+}: {
+  server: AgentUIServer;
+  tradingDate: string;
+  onError: () => void;
+}) {
+  return (
+    <TrueForgeUI
+      server={server}
+      layout={TraderDayLayout}
+      initialSessionId={traderDaySessionId(tradingDate)}
+      agentConfig={TRADER_AGENT_CONFIG}
+      overrides={TRADER_OVERRIDES}
+      theme={TRADER_THEME}
+      onError={onError}
+    />
+  );
+});
+
+const OperatorRuntime = memo(function OperatorRuntime({ onError }: { onError: () => void }) {
+  return (
+    <TrueForgeUI
+      server={OPERATOR_SERVER}
+      layout={OperatorForkLayout}
+      agentConfig={OPERATOR_AGENT_CONFIG}
+      theme={OPERATOR_THEME}
+      onError={onError}
+    />
+  );
+});
+
+export const AgentWorkspace = memo(function AgentWorkspace() {
   const [tradingDate, setTradingDate] = useState(newYorkTradingDate);
   const [traderDegraded, setTraderDegraded] = useState(false);
   const [chatDegraded, setChatDegraded] = useState(false);
+  const markTraderDegraded = useCallback(() => setTraderDegraded(true), []);
+  const markChatDegraded = useCallback(() => setChatDegraded(true), []);
   const traderServer = useMemo(
     () => createTraderChatServer((healthy) => setTraderDegraded(!healthy)),
     [],
@@ -66,20 +120,11 @@ export function AgentWorkspace() {
 
       <div className="trader-room-grid">
         <section className="trader-stream-pane" aria-label="Autonomous trader stream">
-          <TrueForgeUI
+          <TraderRuntime
             key={tradingDate}
             server={traderServer}
-            layout={TraderDayLayout}
-            initialSessionId={traderDaySessionId(tradingDate)}
-            agentConfig={{ mode: "SingleAgent", name: "mandate-paper-agent" }}
-            overrides={{ ThreadListNewButton: HiddenTraderNewChat }}
-            theme={{
-              preset: "trueforge",
-              mode: "dark",
-              brand: { name: "Trader days", logo: `${import.meta.env.BASE_URL}agent-mark.svg` },
-              tokens: MANDATE_CHAT_TOKENS,
-            }}
-            onError={() => setTraderDegraded(true)}
+            tradingDate={tradingDate}
+            onError={markTraderDegraded}
           />
         </section>
 
@@ -92,18 +137,7 @@ export function AgentWorkspace() {
             <span className="fork-policy">inspect context · request memory change</span>
           </header>
           <div className="operator-fork-chat">
-            <TrueForgeUI
-              server={{ type: "trueforge", baseUrl: import.meta.env.BASE_URL }}
-              layout={OperatorForkLayout}
-              agentConfig={{ mode: "SingleAgent", name: "mandate-operator-agent" }}
-              theme={{
-                preset: "trueforge",
-                mode: "dark",
-                brand: { name: "Operator fork", logo: `${import.meta.env.BASE_URL}agent-mark.svg` },
-                tokens: MANDATE_CHAT_TOKENS,
-              }}
-              onError={() => setChatDegraded(true)}
-            />
+            <OperatorRuntime onError={markChatDegraded} />
           </div>
           <footer>
             Persistent changes call <code>append_trader_memory</code> and pause for approval.
@@ -112,4 +146,4 @@ export function AgentWorkspace() {
       </div>
     </main>
   );
-}
+});

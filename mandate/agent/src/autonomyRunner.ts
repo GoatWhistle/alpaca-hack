@@ -8,7 +8,6 @@ import { promisify } from "node:util";
 
 import { TrueForge } from "@truefoundry/trueforge-sdk";
 import { HttpsProxyAgent } from "https-proxy-agent";
-import { AlpacaMcpClient, validateBrokerSnapshot, type BrokerSnapshot } from "./alpacaMcp.js";
 import { AlpacaRealtimeMonitor, type StreamState, type WakeReason } from "./realtimeMonitor.js";
 import {
   CRITIC_NAMES,
@@ -355,6 +354,7 @@ export function buildAutonomyPrompt(
     "Resolve risk, market and execution advice explicitly. A timeout or error is advisory unavailability, not permission to invent evidence.",
     "EXECUTE_PLAN may contain one to three unique ordered steps, each with reason, candidate_id from executable_candidates, and evidence_refs. PARK must contain no steps.",
     "memory_events may contain at most five exact objects with hypothesis, non-empty evidence_refs, and integer ttl_hours from 1 through 168.",
+    "Be terse: every reason and hypothesis must be at most 180 characters. Omit memory_events unless a genuinely reusable hypothesis changed. Keep the entire response below 1200 tokens.",
     "End with exactly one single-line TRADE_PLAN_JSON object matching trade.plan.v1 and the exact supplied cycle_id. The only root fields are schema, cycle_id, reason, action, steps, critic_coverage, critic_resolutions and memory_events. Include exactly one ACCEPTED or OVERRIDDEN resolution for each critic. Never include symbols, sides, quantities, order types or prices. Do not write anything after it.",
   ].join("\n");
 }
@@ -595,6 +595,7 @@ async function readTrajectory(path: string): Promise<Trajectory> {
 }
 
 let writeChain = Promise.resolve();
+const appendChains = new Map<string, Promise<void>>();
 
 async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   const serialized = `${JSON.stringify(value, null, 2)}\n`;
@@ -609,8 +610,14 @@ async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
 }
 
 async function appendJsonLine(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await appendFile(path, `${JSON.stringify(value)}\n`, "utf8");
+  const operation = (appendChains.get(path) ?? Promise.resolve()).then(async () => {
+    await mkdir(dirname(path), { recursive: true });
+    await appendFile(path, `${JSON.stringify(value)}\n`, "utf8");
+  });
+  const settled = operation.catch(() => undefined);
+  appendChains.set(path, settled);
+  await operation;
+  if (appendChains.get(path) === settled) appendChains.delete(path);
 }
 
 function storedMemoryEvent(value: unknown): StoredMemoryEvent | null {
@@ -824,46 +831,35 @@ async function alpacaPaperGet(path: string): Promise<unknown> {
   return response.json() as Promise<unknown>;
 }
 
-export type BrokerState = BrokerSnapshot & { transport: "alpaca-mcp" | "rest"; error?: string };
+export type BrokerState = {
+  account: Record<string, unknown>;
+  positions: Record<string, unknown>[];
+  transport: "rest";
+};
 
-export function alpacaMcpUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const raw = env.MANDATE_ALPACA_MCP_URL?.trim();
-  if (!raw || env.MANDATE_ALPACA_MCP_READS?.toLowerCase() === "false") return undefined;
-  const url = new URL(raw);
-  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
-    throw new Error("MANDATE_ALPACA_MCP_URL must be an HTTP(S) URL without embedded credentials");
+function validateBrokerState(account: unknown, positions: unknown): BrokerState {
+  const accountItem = object(account, "broker account");
+  const equity = Number(accountItem.equity);
+  if (!Number.isFinite(equity) || equity <= 0) {
+    throw new Error("broker account omitted numeric equity");
   }
-  return url.toString();
+  if (!Array.isArray(positions)) throw new Error("broker positions must be a list");
+  const positionItems = positions.map((position) => object(position, "broker position"));
+  if (positionItems.some((position) => typeof position.symbol !== "string"
+    || ![position.qty, position.market_value, position.avg_entry_price, position.current_price]
+      .every((value) => Number.isFinite(Number(value))))) {
+    throw new Error("broker positions contained an invalid entry");
+  }
+  return { account: accountItem, positions: positionItems, transport: "rest" };
 }
 
-/**
- * Broker state for the planning cycle is read through the official Alpaca MCP
- * server when configured. The payload is the same Alpaca account and position
- * objects, so sizing and mandate math do not change; any MCP failure falls back
- * to the direct paper REST read and is reported on the runtime state.
- */
+/** Deployment disables private MCP toolsets; trusted broker state comes from paper REST. */
 async function readBrokerState(): Promise<BrokerState> {
-  let mcpError: string | undefined;
-  const mcpUrl = alpacaMcpUrl();
-  if (mcpUrl) {
-    try {
-      const client = new AlpacaMcpClient(mcpUrl, 8_000);
-      await client.initialize();
-      const [account, positions] = await Promise.all([
-        client.callTool("get_account_info"),
-        client.callTool("get_all_positions"),
-      ]);
-      return { ...validateBrokerSnapshot(account, positions), transport: "alpaca-mcp" };
-    } catch (error) {
-      mcpError = publicRunnerError(error);
-      console.error("Alpaca MCP broker read failed; using the paper REST fallback", error);
-    }
-  }
   const [rawAccount, rawPositions] = await Promise.all([
     alpacaPaperGet("/v2/account"),
     alpacaPaperGet("/v2/positions"),
   ]);
-  return { ...validateBrokerSnapshot(rawAccount, rawPositions), transport: "rest", error: mcpError };
+  return validateBrokerState(rawAccount, rawPositions);
 }
 
 async function precomputeTrajectoryEvaluation(
@@ -963,7 +959,6 @@ async function precomputeTrajectoryEvaluation(
     ]).filter(([symbol]) => symbol)),
     gross_headroom_pct: grossHeadroom,
     broker_transport: broker.transport,
-    broker_transport_error: broker.error,
   };
   return evaluation;
 }
@@ -1065,7 +1060,9 @@ export function enforcePlanSafety(
   candidateSymbols: string[] = trajectory.symbols.filter((symbol) => symbol !== "SPY"),
 ): "PARK" | "EXECUTE_PLAN" {
   if (action !== "EXECUTE_PLAN") return "PARK";
-  const boundedCandidates = candidateSymbols.filter((symbol) => trajectory.symbols.includes(symbol) && symbol !== "SPY");
+  const boundedCandidates = candidateSymbols.filter((symbol) =>
+    /^[A-Z][A-Z0-9.-]{0,9}$/u.test(symbol) && symbol !== "SPY",
+  );
   const symbolQuality = boundedCandidates
     .map((symbol) => market.quality[symbol]);
   const marketSafe = symbolQuality.length > 0
@@ -1199,8 +1196,8 @@ async function runReadOnlyModelTurn(
 }
 
 export function criticTimeoutSeconds(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = Number(env.MANDATE_CRITIC_TIMEOUT_SECONDS ?? 10);
-  return Number.isFinite(raw) ? Math.min(30, Math.max(3, raw)) : 10;
+  const raw = Number(env.MANDATE_CRITIC_TIMEOUT_SECONDS ?? 20);
+  return Number.isFinite(raw) ? Math.min(60, Math.max(3, raw)) : 20;
 }
 
 function criticConfiguration(critic: CriticName): { agent: string; model: string } {
@@ -1262,16 +1259,17 @@ async function runCritics(
   onStart?: (critic: CriticName) => Promise<void>,
   onAdvice?: (advice: CriticAdvice) => Promise<void>,
 ): Promise<CriticAdvice[]> {
-  // Coding Plan concurrency is dynamic and may be one request on smaller tiers.
-  // Serialize the three short advisory turns so they never starve the main trader.
-  const advice: CriticAdvice[] = [];
-  for (const critic of CRITIC_NAMES) {
+  return Promise.all(CRITIC_NAMES.map(async (critic) => {
     await onStart?.(critic);
     const result = await runCritic(client, critic, evaluation, candidates);
-    advice.push(result);
     await onAdvice?.(result);
-  }
-  return advice;
+    return result;
+  }));
+}
+
+export function traderTimeoutSeconds(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.MANDATE_TRADER_TIMEOUT_SECONDS ?? 90);
+  return Number.isFinite(raw) ? Math.min(180, Math.max(30, raw)) : 90;
 }
 
 async function runTraderCycle(
@@ -1290,7 +1288,7 @@ async function runTraderCycle(
   const turn = await runReadOnlyModelTurn(client, sessionId, buildAutonomyPrompt(
     trajectory, alerts, market, outcomeScorecard, evaluation, cycleId,
     candidates, critics, activeMemory,
-  ), 30);
+  ), traderTimeoutSeconds());
   const candidateIds = candidates.map((candidate) => candidate.candidate_id);
   const plan = parseTradePlan(turn.text, cycleId, candidateIds);
   if (!plan) throw new Error("trader violated the trade.plan.v1 root contract");
@@ -1628,19 +1626,20 @@ async function main(): Promise<void> {
             };
           } else {
             const tradingDate = newYorkTradingDate(new Date(nowMs));
-            if (runtime.trader_session_date !== tradingDate || !runtime.trader_session_id) {
-              const session = await client.sessions.create({ agent: { name: agentName } });
-              runtime = {
-                ...runtime,
-                trader_session_id: session.data.id,
-                trader_session_date: tradingDate,
-              };
-              await appendTimeline(
-                "session", "ok", "Created the persistent trader session for the New York trading date.",
-                { reused: false }, session.data.id,
-              );
-              await writeJsonAtomic(runtimePath, runtime);
-            }
+            // Use a bounded planner session per cycle. Durable hypotheses are
+            // supplied explicitly from trader-memory; reusing an unbounded
+            // provider session lets a timed-out turn poison every later turn.
+            const session = await client.sessions.create({ agent: { name: agentName } });
+            runtime = {
+              ...runtime,
+              trader_session_id: session.data.id,
+              trader_session_date: tradingDate,
+            };
+            await appendTimeline(
+              "session", "ok", "Created a bounded planner session for this autonomous cycle.",
+              { reused: false, cycle_id: cycleId }, session.data.id,
+            );
+            await writeJsonAtomic(runtimePath, runtime);
             let traderSessionId = runtime.trader_session_id;
             if (!traderSessionId) throw new Error("persistent trader session was not created");
             const critics = await runCritics(
@@ -1719,7 +1718,12 @@ async function main(): Promise<void> {
           if (result.reasoning) {
             await appendTimeline(
               "reasoning", "ok", result.reasoning,
-              { cycle_id: cycleId, source: candidateCount > 0 ? "trader_model" : "deterministic_gate" },
+              {
+                cycle_id: cycleId,
+                source: candidateCount > 0 && result.structuredValid
+                  ? "trader_model"
+                  : "deterministic_gate",
+              },
               candidateCount > 0 ? runtime.trader_session_id ?? null : null,
             );
           }

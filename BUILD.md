@@ -2,7 +2,7 @@
 
 MANDATE is an autonomous Alpaca paper-trading system with four runtime components:
 
-1. The official Alpaca MCP server (`alpacahq/alpaca-mcp-server`, streamable HTTP on `127.0.0.1:8100`, paper mode) is the broker-state read path: every planning cycle reads the account and open positions through `get_account_info` and `get_all_positions`, falling back to the direct paper REST read only when the MCP call fails, and the operator assistant gets its read-only account, order and market-data tools. Order submission never goes through the MCP server.
+1. The official Alpaca MCP server (`alpacahq/alpaca-mcp-server`, streamable HTTP on `127.0.0.1:8100`) is pinned to `ALPACA_TOOLSETS=assets,stock-data`, so the operator receives only public market/reference reads. Private account, position, order, cancel, close, and exercise toolsets are disabled. The trusted runner reads paper account state directly from Alpaca's paper REST API and remains the only order execution path.
 2. `mandate/research` collects news and market data, compares strategies and sizes candidates.
 3. `mandate/agent` runs continuous monitoring, challenges candidates and sends auto-paper orders directly to Alpaca.
 4. `mandate/control-plane` serves the operator dashboard and reads live account state directly from Alpaca.
