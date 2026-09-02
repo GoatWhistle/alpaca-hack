@@ -14,7 +14,7 @@ Environment=MANDATE_RESEARCH_TRANSPORT=streamable-http
 Environment=MANDATE_RESEARCH_HOST=127.0.0.1
 Environment=MANDATE_RESEARCH_PORT=8120
 Environment=MANDATE_USE_ALPACA_PROXY=true
-ExecStart=/opt/alpaca-hack/venv/bin/python -m mandate_research.server
+ExecStart=/usr/bin/env MANDATE_RESEARCH_TRANSPORT=streamable-http MANDATE_RESEARCH_HOST=127.0.0.1 MANDATE_RESEARCH_PORT=8120 MANDATE_USE_ALPACA_PROXY=true /opt/alpaca-hack/venv/bin/python -m mandate_research.server
 Restart=always
 RestartSec=5
 UMask=0077

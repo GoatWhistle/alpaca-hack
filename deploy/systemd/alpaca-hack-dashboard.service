@@ -22,7 +22,7 @@ Environment=TRUEFORGE_BASE_URL=http://127.0.0.1:8890
 Environment=MANDATE_DASHBOARD_HOST=127.0.0.1
 Environment=MANDATE_DASHBOARD_PORT=8130
 Environment=MANDATE_USE_ALPACA_PROXY=true
-ExecStart=/opt/alpaca-hack/venv/bin/python -m mandate_control.dashboard
+ExecStart=/usr/bin/env MANDATE_PATH=/opt/alpaca-hack/mandate/mandates/example.yaml MANDATE_JOURNAL_PATH=/opt/alpaca-hack/mandate/logs/session.jsonl MANDATE_TRAJECTORY_PATH=/opt/alpaca-hack/mandate/logs/trajectory.json MANDATE_ALERTS_PATH=/opt/alpaca-hack/mandate/logs/news-alerts.jsonl MANDATE_AUTONOMY_RUNTIME_PATH=/opt/alpaca-hack/mandate/logs/autonomy-runtime.json MANDATE_MARKET_MONITORING_PATH=/opt/alpaca-hack/mandate/logs/market-monitoring.json MANDATE_FORWARD_OUTCOMES_PATH=/opt/alpaca-hack/mandate/logs/forward-outcomes.json MANDATE_RESEARCH_URL=http://127.0.0.1:8120/mcp TRUEFORGE_BASE_URL=http://127.0.0.1:8890 MANDATE_DASHBOARD_HOST=127.0.0.1 MANDATE_DASHBOARD_PORT=8130 MANDATE_USE_ALPACA_PROXY=true /opt/alpaca-hack/venv/bin/python -m mandate_control.dashboard
 Restart=always
 RestartSec=5
 UMask=0077
