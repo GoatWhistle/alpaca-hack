@@ -42,7 +42,7 @@ export function AgentWorkspace() {
               <span className="fork-label">Context fork</span>
               <strong>Ask the trader</strong>
             </div>
-            <span className="fork-policy">read account · request memory change</span>
+            <span className="fork-policy">inspect context · request memory change</span>
           </header>
           <div className="operator-fork-chat">
             <TrueForgeUI
