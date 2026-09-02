@@ -15,7 +15,7 @@ deployment:
   `ALPACA_PROXY_URL`; no service from `/opt/harness` is reused
 
 The dashboard and TrueForge stay loopback-only. The preferred public endpoint
-is the dedicated authenticated host from `deploy/nginx/alpaca.miposts.com.conf`:
+is the dedicated public host from `deploy/nginx/alpaca.miposts.com.conf`:
 `https://alpaca.miposts.com/`. Build it with the default `/` Vite base. The
 legacy shared-host fallback remains available in `alpaca-hack.locations.conf`.
 
