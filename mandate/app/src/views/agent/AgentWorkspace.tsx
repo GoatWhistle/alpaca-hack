@@ -10,7 +10,6 @@ import {
   createTraderChatServer,
   newYorkTradingDate,
   traderDaySessionId,
-  watchTraderTurnStarts,
 } from "./traderChatServer";
 
 function OperatorForkLayout({ className }: { className?: string }) {
@@ -39,7 +38,6 @@ function HiddenTraderNewChat() {
 
 export function AgentWorkspace() {
   const [tradingDate, setTradingDate] = useState(newYorkTradingDate);
-  const [traderTurnEpoch, setTraderTurnEpoch] = useState(0);
   const [traderDegraded, setTraderDegraded] = useState(false);
   const [chatDegraded, setChatDegraded] = useState(false);
   const traderServer = useMemo(
@@ -52,19 +50,6 @@ export function AgentWorkspace() {
     const timer = window.setInterval(() => setTradingDate(newYorkTradingDate()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void watchTraderTurnStarts(
-      tradingDate,
-      (sequence) => setTraderTurnEpoch(sequence),
-      controller.signal,
-      (healthy) => setTraderDegraded(!healthy),
-    ).catch((error: unknown) => {
-      if (!(error instanceof Error && error.name === "AbortError")) setTraderDegraded(true);
-    });
-    return () => controller.abort();
-  }, [tradingDate]);
 
   return (
     <main id="main-content" className="agent-workspace" aria-label="Trader room" tabIndex={-1}>
@@ -82,7 +67,7 @@ export function AgentWorkspace() {
       <div className="trader-room-grid">
         <section className="trader-stream-pane" aria-label="Autonomous trader stream">
           <TrueForgeUI
-            key={`${tradingDate}-${traderTurnEpoch}`}
+            key={tradingDate}
             server={traderServer}
             layout={TraderDayLayout}
             initialSessionId={traderDaySessionId(tradingDate)}

@@ -288,9 +288,12 @@ function groupTurnId(sessionId: string, group: DayTurnGroup): string {
 }
 
 function groupIsComplete(group: DayTurnGroup, isLatest: boolean, tradingDate: string): boolean {
+  // Keep one stable native turn open for the current day. It is the live tail;
+  // completed cycles become separate turns after a refresh/day rollover.
+  if (tradingDate === newYorkTradingDate() && isLatest) return false;
   if (group.events.some((event) => event.kind === "execution")) return true;
   if (group.events.length === 1 && group.events[0]?.kind !== "trigger") return true;
-  return tradingDate !== newYorkTradingDate() || !isLatest;
+  return true;
 }
 
 function toTurn(
@@ -325,6 +328,13 @@ function groupedTurns(
   events: TraderTimelineEvent[],
 ): Array<{ group: DayTurnGroup; turn: Turn }> {
   const groups = groupDayEvents(events);
+  if (groups.length === 0 && tradingDate === newYorkTradingDate()) {
+    groups.push({
+      key: "day-watch",
+      input: `Autonomous trader stream for New York trading day ${tradingDate}.`,
+      events: [],
+    });
+  }
   let previousTurnId: string | null = null;
   return groups.map((group, index) => {
     const turn = toTurn(
@@ -466,22 +476,6 @@ async function* readTimelineStream(
   }
 }
 
-export async function watchTraderTurnStarts(
-  tradingDate: string,
-  onStart: (sequence: number) => void,
-  signal?: AbortSignal,
-  onHealthChange?: (healthy: boolean) => void,
-): Promise<void> {
-  const initial = await loadTimeline(tradingDate, signal);
-  const after = initial.at(-1)?.sequence ?? 0;
-  for await (const event of readTimelineStream(tradingDate, after, signal, {
-    maxConsecutiveFailures: Number.POSITIVE_INFINITY,
-    onHealthChange,
-  })) {
-    if (event.kind === "trigger" || event.kind === "risk_exit") onStart(event.sequence);
-  }
-}
-
 export function createTraderChatServer(
   onHealthChange?: (healthy: boolean) => void,
 ): AgentUIServer {
@@ -565,6 +559,7 @@ export function createTraderChatServer(
       const selected = groupedTurns(sessionId, tradingDate, initial)
         .find((item) => item.turn.id === requestedTurnId);
       if (!selected) throw new Error("Unknown trader turn");
+      let activeCycleKey = selected.group.key;
       let streamSequence = (hydratedCursor.get(requestedTurnId) ?? 0) * 4;
       for await (const event of readTimelineStream(
         tradingDate,
@@ -574,41 +569,26 @@ export function createTraderChatServer(
       )) {
         hydratedCursor.set(requestedTurnId, event.sequence);
         const incomingCycle = cycleId(event);
-        if (event.kind === "trigger" && incomingCycle !== selected.group.key) {
+        if (event.kind === "trigger") {
+          activeCycleKey = incomingCycle ?? `trigger-${event.sequence}`;
           streamSequence += 1;
           yield {
             sequenceNumber: streamSequence,
-            event: {
-              type: "turn.done",
-              id: `${requestedTurnId}:superseded`,
-              state: { status: "done", completedAt: event.at, requiredActions: [] },
-              createdAt: event.at,
-              threadId: ROOT_THREAD_ID,
-            },
+            event: modelTextEvent(
+              event,
+              `**Trigger · ${event.status}**\n\n${event.summary}`,
+              "live-trigger",
+            ),
           };
-          return;
+          continue;
         }
-        const belongsToTurn = incomingCycle === selected.group.key
-          || (incomingCycle === null && event.kind === "session");
+        const belongsToTurn = incomingCycle === activeCycleKey
+          || (incomingCycle === null && (event.kind === "session" || event.kind === "risk_exit"));
         if (!belongsToTurn) continue;
-        const projectedEvents = event.kind === "trigger" ? [] : timelineEventToTurnEvents(event);
+        const projectedEvents = timelineEventToTurnEvents(event);
         for (const projected of projectedEvents) {
           streamSequence += 1;
           yield { sequenceNumber: streamSequence, event: projected as TurnStreamingEvent };
-        }
-        if (event.kind === "execution") {
-          streamSequence += 1;
-          yield {
-            sequenceNumber: streamSequence,
-            event: {
-              type: "turn.done",
-              id: `${requestedTurnId}:done`,
-              state: { status: "done", completedAt: event.at, requiredActions: [] },
-              createdAt: event.at,
-              threadId: ROOT_THREAD_ID,
-            },
-          };
-          return;
         }
       }
     },
