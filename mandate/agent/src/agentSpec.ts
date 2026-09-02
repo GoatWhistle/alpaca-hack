@@ -68,7 +68,7 @@ export function buildCriticSpec(
 
 export function buildOperatorSpec(
   instructions: string,
-  model = "zai/glm-4-7-flashx",
+  model = "zai/glm-4-5-air",
   options: { alpacaMcp?: boolean } = {},
 ): TrueForgeApi.AgentSpec {
   const mcpServers: NonNullable<TrueForgeApi.AgentSpec["mcpServers"]> = [{

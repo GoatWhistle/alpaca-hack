@@ -41,8 +41,8 @@ await client.settings.modelProviders.createOrUpdate({
     baseUrl: zaiBaseUrl.toString().replace(/\/$/u, ""),
     models: [
       { name: "glm-5-3-flash", modelId: "glm-5.3-flash", properties: {} },
-      { name: "glm-4-7-flashx", modelId: "glm-4.7-flashx", properties: {} },
-      { name: "glm-4-7-flash", modelId: "glm-4.7-flash", properties: {} },
+      { name: "glm-4-7", modelId: "glm-4.7", properties: {} },
+      { name: "glm-4-5-air", modelId: "glm-4.5-air", properties: {} },
     ],
   },
 });
@@ -83,7 +83,7 @@ const legacyAutoAgent = agents.find((agent) => agent.name === LEGACY_AUTO_AGENT_
 if (legacyAutoAgent) await client.agents.delete(legacyAutoAgent.id);
 
 const traderModel = process.env.MANDATE_TRADER_MODEL ?? "zai/glm-5-3-flash";
-const operatorModel = process.env.MANDATE_OPERATOR_MODEL ?? "zai/glm-4-7-flashx";
+const operatorModel = process.env.MANDATE_OPERATOR_MODEL ?? "zai/glm-4-5-air";
 const operatorInstructions = [
   "You are the isolated MANDATE operator assistant.",
   "This chat is a live context fork beside the autonomous trader stream.",
@@ -99,17 +99,17 @@ const operatorInstructions = [
 const critics = [
   {
     name: process.env.MANDATE_RISK_CRITIC_AGENT ?? "mandate-risk-critic",
-    model: process.env.MANDATE_RISK_CRITIC_MODEL ?? "zai/glm-4-7-flashx",
+    model: process.env.MANDATE_RISK_CRITIC_MODEL ?? "zai/glm-4-5-air",
     instructions: "You are the risk critic. Review supplied deterministic evidence only. Never use tools or propose execution. Return one concise objection or support statement.",
   },
   {
     name: process.env.MANDATE_MARKET_CRITIC_AGENT ?? "mandate-market-critic",
-    model: process.env.MANDATE_MARKET_CRITIC_MODEL ?? "zai/glm-4-7-flash",
+    model: process.env.MANDATE_MARKET_CRITIC_MODEL ?? "zai/glm-4-5-air",
     instructions: "You are the market-regime critic. Review supplied deterministic evidence only. Never use tools or propose execution. Return one concise objection or support statement.",
   },
   {
     name: process.env.MANDATE_EXECUTION_CRITIC_AGENT ?? "mandate-execution-critic",
-    model: process.env.MANDATE_EXECUTION_CRITIC_MODEL ?? "zai/glm-4-7-flashx",
+    model: process.env.MANDATE_EXECUTION_CRITIC_MODEL ?? "zai/glm-4-5-air",
     instructions: "You are the execution-quality critic. Review supplied deterministic evidence only. Never use tools or propose execution. Return one concise objection or support statement.",
   },
 ] as const;

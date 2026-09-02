@@ -135,7 +135,7 @@ def gate_news_batch_llm(
     if len(events) > MAX_ITEMS:
         raise ValueError(f"at most {MAX_ITEMS} news items can be gated per request")
 
-    model = os.environ.get("ZAI_NEWS_MODEL", "glm-4.7-flashx")
+    model = os.environ.get("ZAI_NEWS_MODEL", "glm-4.5-air")
     if store is None:
         requests = [
             gate_request_for_event(event, target_symbols=targets, model=model)

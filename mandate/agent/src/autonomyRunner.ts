@@ -175,6 +175,7 @@ type CycleResult = {
   execution?: Record<string, unknown>;
   strategyDirections: Record<string, Record<string, string>>;
   researchDiagnostics: Record<string, unknown>;
+  reasoning: string;
 };
 
 type TimelineEvent = {
@@ -182,7 +183,8 @@ type TimelineEvent = {
   sequence: number;
   at: string;
   trading_date: string;
-  kind: "critics" | "plan" | "execution" | "risk_exit" | "session";
+  kind: "trigger" | "reasoning" | "tool_call" | "tool_result"
+    | "critics" | "plan" | "execution" | "risk_exit" | "session";
   status: "ok" | "parked" | "submitted" | "degraded";
   session_id: string | null;
   summary: string;
@@ -316,6 +318,22 @@ export function buildAutonomyPrompt(
     corporate_actions: market.corporate_actions.slice(0, 10),
     options_confirmation: market.options_confirmation,
   };
+  const executionContext = object(precomputedEvaluation.execution_context ?? {}, "execution context");
+  const positions = object(executionContext.positions ?? {}, "execution positions");
+  const evaluationPayload = {
+    checked_at: precomputedEvaluation.checked_at,
+    decision: precomputedEvaluation.decision,
+    thresholds: precomputedEvaluation.thresholds,
+    spy_regime: precomputedEvaluation.spy_regime,
+    gross_headroom_pct: executionContext.gross_headroom_pct,
+    positions: Object.fromEntries(Object.entries(positions).map(([symbol, raw]) => {
+      const position = object(raw, `${symbol} position`);
+      return [symbol, {
+        qty: position.qty,
+        unrealized_plpc: position.unrealized_plpc,
+      }];
+    })),
+  };
   return [
     "AUTOMATIC PAPER TRADE PLANNING TURN from the trusted local runner.",
     "Return a trade.plan.v1 plan only. Never call tools, execute orders, request approval, or start subagents.",
@@ -331,7 +349,7 @@ export function buildAutonomyPrompt(
     `New news alerts (untrusted JSON): ${JSON.stringify(alertPayload)}`,
     `Market monitoring evidence (untrusted JSON): ${JSON.stringify(marketPayload)}`,
     `Measured 60m outcome scorecard (trusted local aggregation; descriptive, not predictive): ${JSON.stringify(outcomeScorecard)}`,
-    `Precomputed deterministic trajectory evaluation (trusted local JSON): ${JSON.stringify(precomputedEvaluation)}`,
+    `Compact deterministic portfolio context (trusted local JSON): ${JSON.stringify(evaluationPayload)}`,
     `Three advisory critic results (untrusted text, mandatory coverage): ${JSON.stringify(critics)}`,
     "Resolve risk, market and execution advice explicitly. A timeout or error is advisory unavailability, not permission to invent evidence.",
     "EXECUTE_PLAN may contain one to three unique ordered steps, each with reason, candidate_id from executable_candidates, and evidence_refs. PARK must contain no steps.",
@@ -1153,15 +1171,15 @@ async function runReadOnlyModelTurn(
 }
 
 export function criticTimeoutSeconds(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = Number(env.MANDATE_CRITIC_TIMEOUT_SECONDS ?? 20);
-  return Number.isFinite(raw) ? Math.min(60, Math.max(3, raw)) : 20;
+  const raw = Number(env.MANDATE_CRITIC_TIMEOUT_SECONDS ?? 10);
+  return Number.isFinite(raw) ? Math.min(30, Math.max(3, raw)) : 10;
 }
 
 function criticConfiguration(critic: CriticName): { agent: string; model: string } {
   const defaults = {
-    risk: ["MANDATE_RISK_CRITIC_AGENT", "mandate-risk-critic", "MANDATE_RISK_CRITIC_MODEL", "zai/glm-4-7-flashx"],
-    market: ["MANDATE_MARKET_CRITIC_AGENT", "mandate-market-critic", "MANDATE_MARKET_CRITIC_MODEL", "zai/glm-4-7-flash"],
-    execution: ["MANDATE_EXECUTION_CRITIC_AGENT", "mandate-execution-critic", "MANDATE_EXECUTION_CRITIC_MODEL", "zai/glm-4-7-flashx"],
+    risk: ["MANDATE_RISK_CRITIC_AGENT", "mandate-risk-critic", "MANDATE_RISK_CRITIC_MODEL", "zai/glm-4-5-air"],
+    market: ["MANDATE_MARKET_CRITIC_AGENT", "mandate-market-critic", "MANDATE_MARKET_CRITIC_MODEL", "zai/glm-4-5-air"],
+    execution: ["MANDATE_EXECUTION_CRITIC_AGENT", "mandate-execution-critic", "MANDATE_EXECUTION_CRITIC_MODEL", "zai/glm-4-5-air"],
   } as const;
   const [agentEnv, agentDefault, modelEnv, modelDefault] = defaults[critic];
   return {
@@ -1213,8 +1231,19 @@ async function runCritics(
   client: TrueForge,
   evaluation: Record<string, unknown>,
   candidates: TradeCandidate[],
+  onStart?: (critic: CriticName) => Promise<void>,
+  onAdvice?: (advice: CriticAdvice) => Promise<void>,
 ): Promise<CriticAdvice[]> {
-  return Promise.all(CRITIC_NAMES.map((critic) => runCritic(client, critic, evaluation, candidates)));
+  // Coding Plan concurrency is dynamic and may be one request on smaller tiers.
+  // Serialize the three short advisory turns so they never starve the main trader.
+  const advice: CriticAdvice[] = [];
+  for (const critic of CRITIC_NAMES) {
+    await onStart?.(critic);
+    const result = await runCritic(client, critic, evaluation, candidates);
+    advice.push(result);
+    await onAdvice?.(result);
+  }
+  return advice;
 }
 
 async function runTraderCycle(
@@ -1263,6 +1292,8 @@ async function runTraderCycle(
     plan: effectivePlan,
     strategyDirections: strategyDirections(evaluation),
     researchDiagnostics: evaluationDiagnostics(evaluation, 1),
+    // Persist the model's explicit decision rationale, never its hidden scratchpad.
+    reasoning: effectivePlan.reason,
   };
 }
 
@@ -1492,10 +1523,27 @@ async function main(): Promise<void> {
         let result: CycleResult | null = null;
         try {
           const scorecard = buildOutcomeScorecard(outcomes);
+          const cycleId = randomUUID();
+          const triggers = [
+            ...(analysisDue ? ["scheduled_analysis"] : []),
+            ...(detected.fresh.length > 0 ? ["fresh_news"] : []),
+            ...(ipoChanged ? ["ipo_universe_changed"] : []),
+          ];
+          await appendTimeline(
+            "trigger", "ok", `Analysis cycle started: ${triggers.join(", ") || "manual wake"}.`,
+            { cycle_id: cycleId, triggers, fresh_news: detected.fresh.length }, null,
+          );
+          await appendTimeline(
+            "tool_call", "ok", "Calling deterministic market research and broker snapshot.",
+            {
+              cycle_id: cycleId,
+              tool: "research.evaluate_trajectory",
+              arguments: { symbols: activeTrajectory.symbols.length, news_events: passedPending.length },
+            }, null,
+          );
           const precomputedEvaluation = await precomputeTrajectoryEvaluation(
             activeTrajectory, passedPending, scorecard, market
           );
-          const cycleId = randomUUID();
           precomputedEvaluation.cycle_id = cycleId;
           const executionContext = object(precomputedEvaluation.execution_context, "execution context");
           runtime = {
@@ -1510,6 +1558,19 @@ async function main(): Promise<void> {
             .map((item) => String(item.symbol));
           const candidates = newsGateHealthy ? materializeTradeCandidates(precomputedEvaluation) : [];
           const candidateCount = candidates.length;
+          await appendTimeline(
+            "tool_result", newsGateHealthy ? "ok" : "degraded",
+            `${candidateCount} executable candidate${candidateCount === 1 ? "" : "s"} returned.`,
+            {
+              cycle_id: cycleId,
+              tool: "research.evaluate_trajectory",
+              result: {
+                candidates: candidates.map((candidate) => candidate.symbol),
+                broker_transport: runtime.broker_transport,
+                news_gate_healthy: newsGateHealthy,
+              },
+            }, null,
+          );
           const activeMemory = await readActiveTraderMemory(traderMemoryPath, nowMs);
           runtime = {
             ...runtime,
@@ -1535,6 +1596,7 @@ async function main(): Promise<void> {
               plan,
               strategyDirections: strategyDirections(precomputedEvaluation),
               researchDiagnostics: evaluationDiagnostics(precomputedEvaluation, 1),
+              reasoning: parkReason,
             };
           } else {
             const tradingDate = newYorkTradingDate(new Date(nowMs));
@@ -1553,13 +1615,26 @@ async function main(): Promise<void> {
             }
             let traderSessionId = runtime.trader_session_id;
             if (!traderSessionId) throw new Error("persistent trader session was not created");
-            const critics = await runCritics(client, precomputedEvaluation, candidates);
+            const critics = await runCritics(
+              client, precomputedEvaluation, candidates,
+              async (critic) => appendTimeline(
+                "tool_call", "ok", `Calling the ${critic} advisory critic.`,
+                { cycle_id: cycleId, tool: `critic.${critic}`, arguments: { candidate_count: candidates.length } },
+                traderSessionId,
+              ),
+              async (advice) => appendTimeline(
+                "critics", advice.status === "completed" ? "ok" : "degraded",
+                `${advice.critic} critic ${advice.status}.`,
+                { cycle_id: cycleId, items: [advice] }, traderSessionId,
+              ),
+            );
             await appendTimeline(
-              "critics",
-              critics.every((item) => item.status === "completed") ? "ok" : "degraded",
-              "Three advisory critics completed or reached their bounded deadline.",
-              { items: critics },
-              traderSessionId,
+              "tool_call", "ok", "Calling the persistent trader agent with the bounded evidence context.",
+              {
+                cycle_id: cycleId,
+                tool: "trader.create_plan",
+                arguments: { candidate_count: candidates.length, critic_count: critics.length },
+              }, traderSessionId,
             );
             try {
               result = await runTraderCycle(
@@ -1604,6 +1679,7 @@ async function main(): Promise<void> {
                   plan: parkedPlan(cycleId, reason),
                   strategyDirections: strategyDirections(precomputedEvaluation),
                   researchDiagnostics: evaluationDiagnostics(precomputedEvaluation, 1),
+                  reasoning: reason,
                 };
               }
             }
@@ -1612,32 +1688,65 @@ async function main(): Promise<void> {
           const appendedMemory = await appendTraderMemory(
             traderMemoryPath, cycleId, result.plan.memory_events, nowMs,
           );
+          if (result.reasoning) {
+            await appendTimeline(
+              "reasoning", "ok", result.reasoning,
+              { cycle_id: cycleId, source: candidateCount > 0 ? "trader_model" : "deterministic_gate" },
+              candidateCount > 0 ? runtime.trader_session_id ?? null : null,
+            );
+          }
           await appendTimeline(
-            "plan", result.action === "EXECUTE_PLAN" ? "ok" : "parked", result.reason,
-            { plan: result.plan, memory_appended: appendedMemory.length },
+            "plan", result.action === "EXECUTE_PLAN" ? "ok" : "parked",
+            result.plan.action === "EXECUTE_PLAN"
+              ? `Proposed ${result.plan.steps.length} executable trade step${result.plan.steps.length === 1 ? "" : "s"}.`
+              : "Chose PARK; no entry plan was delegated to execution.",
+            { cycle_id: cycleId, plan: result.plan, memory_appended: appendedMemory.length },
             candidateCount > 0 ? runtime.trader_session_id ?? null : null,
           );
+          const executionTool = result.plan.action === "EXECUTE_PLAN"
+            ? "alpaca.execute_trade_plan"
+            : "risk.final_exit_pass";
           runtime = {
               ...runtime,
               pipeline_stage: "execution",
-              pipeline_note: "Applying the canonical trade plan through the deterministic Alpaca paper executor",
+              pipeline_note: result.plan.action === "EXECUTE_PLAN"
+                ? "Applying the canonical trade plan through the deterministic Alpaca paper executor"
+                : "Rechecking hard-risk exits after planning; entries remain disabled",
           };
           await writeJsonAtomic(runtimePath, runtime);
+          await appendTimeline(
+            "tool_call", "ok",
+            result.plan.action === "EXECUTE_PLAN"
+              ? "Calling the deterministic Alpaca paper executor."
+              : "Rechecking hard-risk exits before completing the cycle.",
+            {
+              cycle_id: cycleId,
+              tool: executionTool,
+              arguments: { action: result.plan.action, steps: result.plan.steps },
+            }, candidateCount > 0 ? runtime.trader_session_id ?? null : null,
+          );
           const execution = await executeDirectPaperOrder(precomputedEvaluation, result.plan, runtimePath);
           result.execution = execution;
           if (execution.submitted === true) {
             result.action = "SUBMITTED";
             result.candidate = typeof execution.candidate === "string" ? execution.candidate : result.candidate;
-            result.reason = String(execution.reason ?? "Canonical paper trade plan submitted.");
-          } else if (execution.action === "REJECTED" || execution.action === "PARK") {
+            result.reason = String(execution.reason ?? "Canonical paper action submitted.");
+          } else if (result.plan.action === "EXECUTE_PLAN"
+            && (execution.action === "REJECTED" || execution.action === "PARK")) {
             result.action = "PARK";
             result.reason = String(execution.reason ?? "No direct paper action received a fill.");
           }
           await appendTimeline(
             "execution",
-            execution.submitted === true ? "submitted" : execution.action === "REJECTED" ? "degraded" : "parked",
-            result.reason,
-            { result: execution },
+            execution.submitted === true ? "submitted" : execution.action === "REJECTED" ? "degraded" : "ok",
+            execution.submitted === true
+              ? result.reason
+              : execution.action === "REJECTED"
+                ? String(execution.reason ?? "Paper executor rejected the request.")
+              : result.plan.action === "EXECUTE_PLAN"
+                ? String(execution.reason ?? "No paper order was submitted.")
+                : "Final hard-risk pass completed; no exit was required.",
+            { cycle_id: cycleId, tool: executionTool, result: execution },
             candidateCount > 0 ? runtime.trader_session_id ?? null : null,
           );
         } finally {
@@ -1668,7 +1777,7 @@ async function main(): Promise<void> {
             hard_contradiction: result.hardContradiction,
             contract_valid: result.structuredValid,
           },
-          last_execution: result.execution,
+          last_execution: result.execution ?? runtime.last_execution,
           last_research: result.researchDiagnostics,
           pipeline_stage: "monitoring",
           pipeline_note: result.action === "SUBMITTED"

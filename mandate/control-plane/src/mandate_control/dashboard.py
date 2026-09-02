@@ -18,7 +18,7 @@ import yaml
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from mandate_control.autonomy import AutonomyStore
@@ -29,7 +29,10 @@ DEFAULT_TRUEFORGE_URL = "http://localhost:8790"
 DEFAULT_RESEARCH_URL = "http://127.0.0.1:8020/mcp"
 SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 APPROVABLE_TOOL_NAMES = frozenset({"append_trader_memory"})
-TIMELINE_KINDS = frozenset({"critics", "plan", "execution", "risk_exit", "session"})
+TIMELINE_KINDS = frozenset({
+    "trigger", "reasoning", "tool_call", "tool_result",
+    "critics", "plan", "execution", "risk_exit", "session",
+})
 TIMELINE_STATUSES = frozenset({"ok", "parked", "submitted", "degraded"})
 NEW_YORK = ZoneInfo("America/New_York")
 DEFAULT_STARTING_EQUITY = Decimal("100000")
@@ -875,6 +878,48 @@ def create_dashboard(
             return JSONResponse({"error": str(exc)}, status_code=500)
         return JSONResponse(_wire_payload(page), headers={"Cache-Control": "no-store"})
 
+    async def trader_stream(request: Request) -> Response:
+        raw_after = request.query_params.get("after") or request.headers.get("last-event-id", "0")
+        try:
+            after = int(raw_after)
+        except ValueError:
+            return JSONResponse({"error": "after must be an integer"}, status_code=400)
+        if after < 0:
+            return JSONResponse({"error": "after must be nonnegative"}, status_code=400)
+
+        async def events() -> AsyncIterator[str]:
+            cursor = after
+            keepalive_at = time.monotonic()
+            yield "retry: 1500\n\n"
+            while not await request.is_disconnected():
+                try:
+                    page = _read_timeline(active_timeline, after=cursor, limit=500)
+                except RuntimeError as exc:
+                    payload = json.dumps({"error": str(exc)}, separators=(",", ":"))
+                    yield f"event: stream_error\ndata: {payload}\n\n"
+                    await asyncio.sleep(1)
+                    continue
+                items = page["items"]
+                for item in items:
+                    cursor = item["sequence"]
+                    payload = json.dumps(_wire_payload(item), separators=(",", ":"))
+                    yield f"id: {cursor}\nevent: trader_event\ndata: {payload}\n\n"
+                now = time.monotonic()
+                if not items and now - keepalive_at >= 15:
+                    yield ": keepalive\n\n"
+                    keepalive_at = now
+                await asyncio.sleep(0.5)
+
+        return StreamingResponse(
+            events(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     async def update_trajectory(request: Request) -> Response:
         if request.headers.get("content-type", "").split(";", 1)[0] != "application/json":
             return JSONResponse({"error": "application/json required"}, status_code=415)
@@ -982,6 +1027,7 @@ def create_dashboard(
     routes = [
         Route("/api/snapshot", snapshot),
         Route("/api/trader/timeline", trader_timeline),
+        Route("/api/trader/stream", trader_stream),
         Route("/api/trajectory", update_trajectory, methods=["POST"]),
         Route("/api/approvals/respond", respond_approval, methods=["POST"]),
         Route("/{path:path}", index),

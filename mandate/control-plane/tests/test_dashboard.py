@@ -421,6 +421,7 @@ def test_trader_timeline_is_cursor_paginated(tmp_path: Path) -> None:
         second = client.get("/api/trader/timeline?after=2&limit=2")
         assert [item["sequence"] for item in second.json()["items"]] == [3, 4]
         assert client.get("/api/trader/timeline?after=-1").status_code == 400
+        assert client.get("/api/trader/stream?after=-1").status_code == 400
 
 
 class _StubGetResponse:

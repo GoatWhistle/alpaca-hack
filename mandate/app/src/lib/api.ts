@@ -15,7 +15,8 @@ export interface TraderTimelineEvent {
   sequence: number;
   at: string;
   trading_date: string;
-  kind: "critics" | "plan" | "execution" | "risk_exit" | "session";
+  kind: "trigger" | "reasoning" | "tool_call" | "tool_result"
+    | "critics" | "plan" | "execution" | "risk_exit" | "session";
   status: "ok" | "parked" | "submitted" | "degraded";
   session_id: string | null;
   summary: string;
@@ -29,11 +30,29 @@ export interface TraderTimelinePage {
 }
 
 const TIMELINE_KINDS = new Set<TraderTimelineEvent["kind"]>([
+  "trigger", "reasoning", "tool_call", "tool_result",
   "critics", "plan", "execution", "risk_exit", "session",
 ]);
 const TIMELINE_STATUSES = new Set<TraderTimelineEvent["status"]>([
   "ok", "parked", "submitted", "degraded",
 ]);
+
+export function isTraderTimelineEvent(item: unknown, after = -1): item is TraderTimelineEvent {
+  return item !== null
+    && typeof item === "object"
+    && (item as TraderTimelineEvent).schema === "trader.timeline.v1"
+    && Number.isInteger((item as TraderTimelineEvent).sequence)
+    && (item as TraderTimelineEvent).sequence > after
+    && typeof (item as TraderTimelineEvent).at === "string"
+    && typeof (item as TraderTimelineEvent).trading_date === "string"
+    && TIMELINE_KINDS.has((item as TraderTimelineEvent).kind)
+    && TIMELINE_STATUSES.has((item as TraderTimelineEvent).status)
+    && ((item as TraderTimelineEvent).session_id === null
+      || typeof (item as TraderTimelineEvent).session_id === "string")
+    && typeof (item as TraderTimelineEvent).summary === "string"
+    && typeof (item as TraderTimelineEvent).details === "object"
+    && (item as TraderTimelineEvent).details !== null;
+}
 
 function getApiBase(): string {
   if (import.meta.env.VITE_MANDATE_API_URL) {
@@ -82,25 +101,22 @@ export async function getTraderTimeline(
   });
   if (!response.ok) throw new Error(await readError(response, `Dashboard API returned ${response.status}`));
   const payload = await response.json() as Partial<TraderTimelinePage>;
-  const validItems = Array.isArray(payload.items) && payload.items.every((item) => (
-    item !== null
-    && typeof item === "object"
-    && item.schema === "trader.timeline.v1"
-    && Number.isInteger(item.sequence)
-    && typeof item.at === "string"
-    && typeof item.trading_date === "string"
-    && TIMELINE_KINDS.has(item.kind)
-    && TIMELINE_STATUSES.has(item.status)
-    && (item.session_id === null || typeof item.session_id === "string")
-    && typeof item.summary === "string"
-    && typeof item.details === "object"
-    && item.details !== null
-  ));
+  let previousSequence = after;
+  const validItems = Array.isArray(payload.items) && payload.items.every((item) => {
+    const valid = isTraderTimelineEvent(item, previousSequence);
+    if (valid) previousSequence = item.sequence;
+    return valid;
+  });
   if (payload.schema !== "trader.timeline.page.v1" || !validItems
-    || !Number.isInteger(payload.next_after)) {
+    || !Number.isInteger(payload.next_after) || Number(payload.next_after) < previousSequence) {
     throw new Error("The dashboard API returned an invalid trader timeline");
   }
   return payload as TraderTimelinePage;
+}
+
+export function getTraderStreamUrl(after = 0): string {
+  const query = new URLSearchParams({ after: String(after) });
+  return `${getApiBase()}/api/trader/stream?${query}`;
 }
 
 export async function updateTrajectory(
