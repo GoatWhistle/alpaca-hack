@@ -4,6 +4,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR
 import json
+import os
 from typing import Any, Callable
 
 from mandate_research.live_comparison import compare_live_signals
@@ -184,7 +185,11 @@ def summarize_trajectory_math(
     benchmark = monitoring.get("benchmark", {})
     benchmark_pass = isinstance(benchmark, dict) and benchmark.get("quality_pass") is True
     macro_context = monitoring.get("macro_context", {})
-    macro_active = isinstance(macro_context, dict) and macro_context.get("active") is True
+    macro_active = (
+        os.environ.get("MANDATE_MACRO_PRICE_ENABLED", "true").lower() == "true"
+        and isinstance(macro_context, dict)
+        and macro_context.get("active") is True
+    )
     macro_direction = macro_context.get("direction") if isinstance(macro_context, dict) else None
     market_is_open = monitoring.get("market_is_open") is True
     results: dict[str, Any] = {}

@@ -1284,6 +1284,11 @@ def _cooldown_active(state: dict[str, Any], symbol: str, *, now: datetime) -> bo
         exited = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         return False
+    if (
+        os.environ.get("MANDATE_ALLOW_SAME_DAY_REENTRY", "true").lower() != "true"
+        and exited.astimezone(NEW_YORK).date() == now.astimezone(NEW_YORK).date()
+    ):
+        return True
     minutes = max(0, int(os.environ.get("MANDATE_REENTRY_COOLDOWN_MINUTES", "10")))
     return now - exited.astimezone(timezone.utc) < timedelta(minutes=minutes)
 

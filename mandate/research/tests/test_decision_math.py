@@ -133,6 +133,7 @@ def test_macro_price_alignment_can_produce_candidate_without_company_news() -> N
     comparison = _comparison("AAPL", news="flat", momentum="buy")
     for name in ("mean_reversion", "breakout_volume"):
         comparison["signals"][name]["direction"] = "buy"
+    comparison["signals"]["regime_ensemble"]["strength"] = "0.01"
     result = summarize_trajectory_math(
         symbols=["AAPL"], monitoring=monitoring, comparisons={"AAPL": comparison}
     )
@@ -140,6 +141,29 @@ def test_macro_price_alignment_can_produce_candidate_without_company_news() -> N
     assert result["symbols"]["AAPL"]["news_price_aligned"] is False
     assert result["symbols"]["AAPL"]["macro_price_aligned"] is True
     assert result["symbols"]["AAPL"]["signal_path"] == "macro_price"
+
+
+def test_macro_price_path_can_be_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("MANDATE_MACRO_PRICE_ENABLED", "false")
+    monitoring = {
+        "market_is_open": True,
+        "benchmark": {"quality_pass": True},
+        "macro_context": {"active": True, "direction": "risk_on", "move_pct": "0.85"},
+        "quality": {"AAPL": {
+            "spread_bps": "2", "relative_volume": "0.4",
+            "session_change_pct": "1.2", "quality_pass": True,
+        }},
+    }
+    comparison = _comparison("AAPL", news="flat", momentum="buy")
+    for name in ("mean_reversion", "breakout_volume"):
+        comparison["signals"][name]["direction"] = "buy"
+    comparison["signals"]["regime_ensemble"]["strength"] = "0.01"
+    result = summarize_trajectory_math(
+        symbols=["AAPL"], monitoring=monitoring, comparisons={"AAPL": comparison},
+    )
+    assert result["symbols"]["AAPL"]["macro_price_aligned"] is False
+    assert result["symbols"]["AAPL"]["signal_path"] is None
+    assert result["research_candidates"] == []
 
 
 def test_price_confirmation_can_trade_a_normal_day_without_news_or_macro_shock() -> None:

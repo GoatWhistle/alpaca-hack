@@ -198,6 +198,7 @@ def test_run_exit_evaluation_uses_the_same_env_policy_shown_by_ui(
 def test_exit_atr_fetch_has_an_explicit_history_window(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALPACA_API_KEY", "paper-key")
     monkeypatch.setenv("ALPACA_SECRET_KEY", "paper-secret")
+    monkeypatch.setenv("MANDATE_EXIT_ATR_TIMEFRAME", "1Day")
     urls: list[str] = []
 
     def fetcher(url: str, _headers: dict[str, str]) -> dict:
@@ -215,3 +216,4 @@ def test_exit_atr_fetch_has_an_explicit_history_window(monkeypatch: pytest.Monke
     assert Decimal(atr["AAPL"]) > 0
     bars_url = next(url for url in urls if "/bars" in url)
     assert "start=" in bars_url and "end=" in bars_url and "limit=1000" in bars_url
+    assert "timeframe=1Day" in bars_url

@@ -220,7 +220,7 @@ def _bars_to_price_bars(items: list[dict[str, Any]]) -> list[PriceBar]:
 def collect_exit_inputs(
     symbols: list[str], *, fetcher: JsonFetcher = _fetch_json
 ) -> tuple[dict[str, str], dict[str, str]]:
-    """Fetch last prices (one snapshot call) and ATR14 (1Hour bars) per symbol."""
+    """Fetch last prices (one snapshot call) and ATR14 bars per symbol."""
     normalized = list(dict.fromkeys(symbol.strip().upper() for symbol in symbols if symbol.strip()))
     if not normalized:
         return {}, {}
@@ -248,13 +248,16 @@ def collect_exit_inputs(
     atr14: dict[str, str] = {}
     checked_at = datetime.now(timezone.utc)
     start = checked_at - timedelta(days=45)
+    atr_timeframe = os.environ.get("MANDATE_EXIT_ATR_TIMEFRAME", "1Hour")
+    if atr_timeframe not in {"1Hour", "1Day"}:
+        raise ValueError("MANDATE_EXIT_ATR_TIMEFRAME must be 1Hour or 1Day")
 
     def fetch_atr(symbol: str) -> tuple[str, str] | None:
         if symbol not in last_prices:
             return None
         bars_url = ALPACA_BARS_ENDPOINT.format(symbol=symbol) + "?" + urlencode(
             {
-                "timeframe": "1Hour",
+                "timeframe": atr_timeframe,
                 "start": start.isoformat().replace("+00:00", "Z"),
                 "end": checked_at.isoformat().replace("+00:00", "Z"),
                 "limit": 1000,

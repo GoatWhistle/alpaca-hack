@@ -275,6 +275,17 @@ def test_flat_option_position_receives_time_stop(monkeypatch: pytest.MonkeyPatch
     assert actions[0]["rationale"] == "option_time_stop_61m"
 
 
+def test_same_day_reentry_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = datetime(2026, 9, 2, 18, 0, tzinfo=timezone.utc)
+    state = {"symbols": {"AAPL": {"last_exit_at": (now - timedelta(hours=4)).isoformat()}}}
+    monkeypatch.setenv("MANDATE_ALLOW_SAME_DAY_REENTRY", "false")
+    monkeypatch.setenv("MANDATE_REENTRY_COOLDOWN_MINUTES", "10")
+    assert execution._cooldown_active(state, "AAPL", now=now) is True
+
+    next_day = now + timedelta(days=1)
+    assert execution._cooldown_active(state, "AAPL", now=next_day) is False
+
+
 def test_exit_is_rechecked_and_clamped_to_live_position() -> None:
     class Broker:
         def positions(self) -> list[dict]:
