@@ -14,6 +14,7 @@ from mandate_research.news import NewsEvent
 from mandate_research.news_graph import (
     NewsGraphStore,
     import_legacy_alerts_once,
+    import_legacy_news,
     legacy_news_event,
     story_id_for,
 )
@@ -85,13 +86,22 @@ def main() -> None:
             str(Path(__file__).resolve().parents[2] / "logs" / "news-alerts.jsonl"),
         ),
     )
-    gates: list[dict[str, Any]] = []
-    for index in range(0, len(ordered_events), MAX_ITEMS):
-        gates.extend(gate_news_batch_llm(
-            ordered_events[index:index + MAX_ITEMS],
-            target_symbols=symbols,
-            store=store,
+    # Materialize the complete graph before deriving request IDs. Otherwise a
+    # later duplicate can change source_count and force already-gated events
+    # through the model again on the next poll.
+    import_legacy_news(store, ordered_events)
+    chunks = [
+        ordered_events[index:index + MAX_ITEMS]
+        for index in range(0, len(ordered_events), MAX_ITEMS)
+    ]
+    with ThreadPoolExecutor(max_workers=min(4, max(1, len(chunks)))) as executor:
+        gated_chunks = list(executor.map(
+            lambda chunk: gate_news_batch_llm(
+                chunk, target_symbols=symbols, store=store,
+            ),
+            chunks,
         ))
+    gates = [gate for chunk in gated_chunks for gate in chunk]
     if len(gates) != len(ordered_events):
         raise RuntimeError("news gate result count does not match collected events")
     ordered = [_event_payload(event, gate) for event, gate in zip(ordered_events, gates, strict=True)]

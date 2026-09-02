@@ -14,10 +14,10 @@ deployment:
 - Alpaca HTTP/WebSocket traffic uses the configured external
   `ALPACA_PROXY_URL`; no service from `/opt/harness` is reused
 
-The dashboard and TrueForge stay loopback-only. On the shared authenticated
-nginx host, include `deploy/nginx/alpaca-hack.locations.conf` in the HTTPS
-`server` block and build the UI with `VITE_BASE_PATH=/alpaca/`. The operator
-URL is then `https://harn.miposts.com/alpaca/`.
+The dashboard and TrueForge stay loopback-only. The preferred public endpoint
+is the dedicated authenticated host from `deploy/nginx/alpaca.miposts.com.conf`:
+`https://alpaca.miposts.com/`. Build it with the default `/` Vite base. The
+legacy shared-host fallback remains available in `alpaca-hack.locations.conf`.
 
 Without nginx, reach the dashboard safely with:
 
@@ -32,7 +32,7 @@ Install and start in dependency order:
 ```sh
 cd /opt/alpaca-hack/mandate/trueforge && npm ci --omit=dev
 cd /opt/alpaca-hack/mandate/agent && npm ci
-cd /opt/alpaca-hack/mandate/app && npm ci && VITE_BASE_PATH=/alpaca/ npm run build
+cd /opt/alpaca-hack/mandate/app && npm ci && npm run build
 systemctl enable --now alpaca-hack-research alpaca-hack-trueforge
 curl --fail http://127.0.0.1:8890/api/v1/agents
 cd /opt/alpaca-hack/mandate/agent && npm run apply
