@@ -6,6 +6,7 @@
     "apply": "tsx src/createAgent.ts",
     "eval:autonomy": "tsx --test src/agentSpec.test.ts src/tradePlan.test.ts src/autonomyRunner.test.ts src/realtimeMonitor.test.ts",
     "eval:patterns": "tsx src/sessionPatternAudit.ts",
+    "smoke:models": "tsx src/modelReadiness.ts",
     "autonomy": "tsx src/autonomyRunner.ts",
     "typecheck": "tsc --noEmit"
   },
