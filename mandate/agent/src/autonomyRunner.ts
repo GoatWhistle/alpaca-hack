@@ -823,13 +823,22 @@ async function alpacaPaperGet(path: string): Promise<unknown> {
     Accept: "application/json",
   };
   const proxyUrl = alpacaProxyUrl();
-  if (proxyUrl) return alpacaPaperGetViaProxy(url, headers, proxyUrl);
-  const response = await fetch(url, {
-    headers,
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) throw new Error(`Alpaca paper request returned ${response.status}`);
-  return response.json() as Promise<unknown>;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      if (proxyUrl) return await alpacaPaperGetViaProxy(url, headers, proxyUrl);
+      const response = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) throw new Error(`Alpaca paper request returned ${response.status}`);
+      return await response.json() as unknown;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Alpaca paper read failed");
 }
 
 export type BrokerState = {

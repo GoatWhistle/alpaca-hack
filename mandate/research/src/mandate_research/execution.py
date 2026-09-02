@@ -169,19 +169,29 @@ class PaperBroker:
         headers = dict(self.headers)
         if payload is not None:
             headers["Content-Type"] = "application/json"
-        try:
-            response = httpx.request(
-                method, url, headers=headers, json=payload, timeout=15,
-                follow_redirects=False,
-                proxy=(
-                    os.environ.get("ALPACA_PROXY_URL") or None
-                    if os.environ.get("MANDATE_USE_ALPACA_PROXY", "false").lower() == "true"
-                    else None
-                ),
-                trust_env=False,
-            )
-        except httpx.RequestError as exc:
-            raise RuntimeError("Alpaca paper request failed: network unavailable") from exc
+        response: httpx.Response | None = None
+        attempts = 2 if method == "GET" else 1
+        last_error: httpx.RequestError | None = None
+        for attempt in range(attempts):
+            try:
+                response = httpx.request(
+                    method, url, headers=headers, json=payload, timeout=15,
+                    follow_redirects=False,
+                    proxy=(
+                        os.environ.get("ALPACA_PROXY_URL") or None
+                        if os.environ.get("MANDATE_USE_ALPACA_PROXY", "false").lower() == "true"
+                        else None
+                    ),
+                    trust_env=False,
+                )
+                if method != "GET" or response.status_code not in {408, 429, 500, 502, 503, 504}:
+                    break
+            except httpx.RequestError as exc:
+                last_error = exc
+            if attempt + 1 < attempts:
+                time.sleep(0.25)
+        if response is None:
+            raise RuntimeError("Alpaca paper request failed: network unavailable") from last_error
         if allow_not_found and response.status_code == 404:
             return None
         if not response.is_success:

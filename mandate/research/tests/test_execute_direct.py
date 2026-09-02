@@ -286,6 +286,35 @@ def test_same_day_reentry_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> No
     assert execution._cooldown_active(state, "AAPL", now=next_day) is False
 
 
+def test_broker_retries_reads_but_not_order_submissions(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALPACA_API_KEY", "paper-key")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "paper-secret")
+    monkeypatch.setenv("MANDATE_USE_ALPACA_PROXY", "false")
+    calls: list[str] = []
+
+    def flaky(method: str, *_args, **_kwargs):
+        calls.append(method)
+        if len(calls) == 1:
+            raise execution.httpx.ConnectTimeout("transient")
+        return execution.httpx.Response(200, json={"equity": "100000"})
+
+    monkeypatch.setattr(execution.httpx, "request", flaky)
+    broker = execution.PaperBroker()
+    assert broker.account()["equity"] == "100000"
+    assert calls == ["GET", "GET"]
+
+    calls.clear()
+
+    def unavailable(method: str, *_args, **_kwargs):
+        calls.append(method)
+        raise execution.httpx.ConnectTimeout("transient")
+
+    monkeypatch.setattr(execution.httpx, "request", unavailable)
+    with pytest.raises(RuntimeError, match="network unavailable"):
+        broker.submit({"symbol": "AAPL"})
+    assert calls == ["POST"]
+
+
 def test_exit_is_rechecked_and_clamped_to_live_position() -> None:
     class Broker:
         def positions(self) -> list[dict]:
