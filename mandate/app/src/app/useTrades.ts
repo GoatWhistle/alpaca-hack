@@ -40,7 +40,11 @@ export function useTrades(paused: boolean): TradesState {
       try {
         const brokerOrders = await getBrokerTradeOrders();
         const brokerRows = tradesFromBrokerOrders(brokerOrders, timelineRows);
-        setTrades(brokerRows.length > 0 ? brokerRows : timelineRows);
+        // A successful empty broker response is authoritative (for example
+        // immediately after switching to a new paper account). Only fall back
+        // to retained timeline rows when Alpaca returned orders that this UI
+        // build could not classify.
+        setTrades(brokerOrders.length === 0 ? [] : brokerRows.length > 0 ? brokerRows : timelineRows);
         setError(null);
       } catch (reason) {
         setTrades(timelineRows);
