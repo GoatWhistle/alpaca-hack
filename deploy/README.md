@@ -43,10 +43,12 @@ cd /opt/alpaca-hack/mandate/app && npm ci && npm run build
 /opt/alpaca-hack/venv/bin/pip install -e /opt/alpaca-hack/mandate/control-plane
 /opt/alpaca-hack/venv/bin/pip install alpaca-mcp-server
 systemctl enable --now alpaca-hack-alpaca-mcp alpaca-hack-research alpaca-hack-trueforge
-curl --fail http://127.0.0.1:8100/mcp
 curl --fail http://127.0.0.1:8890/api/v1/agents
 cd /opt/alpaca-hack/mandate/agent && npm run apply
-systemctl restart alpaca-hack-dashboard alpaca-hack-runner
+systemctl restart alpaca-hack-dashboard
+curl --fail http://127.0.0.1:8130/api/snapshot
+# After the MCP initialize/tools-list checks and all HTTP smoke tests pass:
+systemctl restart alpaca-hack-runner
 ```
 
 Before starting the runner, verify the Alpaca MCP handshake and read-only tool
