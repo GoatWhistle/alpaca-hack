@@ -26,6 +26,27 @@ const client = new TrueForge({
   token: process.env.TRUEFORGE_API_KEY || undefined,
 });
 
+const zaiApiKey = process.env.ZAI_API_KEY;
+if (!zaiApiKey) throw new Error("ZAI_API_KEY is required to configure the isolated model provider");
+const zaiBaseUrl = new URL(process.env.ZAI_BASE_URL ?? "https://api.z.ai/api/coding/paas/v4");
+if (zaiBaseUrl.protocol !== "https:" || zaiBaseUrl.hostname !== "api.z.ai"
+  || zaiBaseUrl.username || zaiBaseUrl.password || zaiBaseUrl.search || zaiBaseUrl.hash
+  || !["/api/coding/paas/v4", "/api/paas/v4"].includes(zaiBaseUrl.pathname.replace(/\/$/u, ""))) {
+  throw new Error("ZAI_BASE_URL must be an official Z.AI HTTPS API base");
+}
+await client.settings.modelProviders.createOrUpdate({
+  manifest: {
+    type: "zai",
+    auth: { apiKey: zaiApiKey },
+    baseUrl: zaiBaseUrl.toString().replace(/\/$/u, ""),
+    models: [
+      { name: "glm-5-3-flash", modelId: "glm-5.3-flash", properties: {} },
+      { name: "glm-4-7-flashx", modelId: "glm-4.7-flashx", properties: {} },
+      { name: "glm-4-7-flash", modelId: "glm-4.7-flash", properties: {} },
+    ],
+  },
+});
+
 await client.settings.mcpServers.createOrUpdate({
   manifest: {
     type: "remote",
