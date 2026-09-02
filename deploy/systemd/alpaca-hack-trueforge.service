@@ -10,8 +10,11 @@ Group=alpaca-hack
 WorkingDirectory=/opt/alpaca-hack/mandate/trueforge
 EnvironmentFile=/etc/alpaca-hack/alpaca-hack.env
 Environment=HOME=/opt/alpaca-hack
+Environment=TMPDIR=/run/alpaca-hack-trueforge
 Environment=PORT=8890
 Environment=NODE_ENV=production
+RuntimeDirectory=alpaca-hack-trueforge
+RuntimeDirectoryMode=0700
 ExecStart=/opt/alpaca-hack/mandate/trueforge/node_modules/.bin/trueforge --port 8890
 Restart=always
 RestartSec=5
