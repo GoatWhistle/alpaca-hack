@@ -24,11 +24,11 @@ import {
 } from "./autonomyRunner.js";
 
 test("trader timeout is configurable and bounded", () => {
-  assert.equal(traderTimeoutSeconds({}), 90);
+  assert.equal(traderTimeoutSeconds({}), 60);
   assert.equal(traderTimeoutSeconds({ MANDATE_TRADER_TIMEOUT_SECONDS: "60" }), 60);
   assert.equal(traderTimeoutSeconds({ MANDATE_TRADER_TIMEOUT_SECONDS: "2" }), 30);
-  assert.equal(traderTimeoutSeconds({ MANDATE_TRADER_TIMEOUT_SECONDS: "900" }), 180);
-  assert.equal(traderTimeoutSeconds({ MANDATE_TRADER_TIMEOUT_SECONDS: "bad" }), 90);
+  assert.equal(traderTimeoutSeconds({ MANDATE_TRADER_TIMEOUT_SECONDS: "900" }), 90);
+  assert.equal(traderTimeoutSeconds({ MANDATE_TRADER_TIMEOUT_SECONDS: "bad" }), 60);
 });
 
 test("critic timeout allows parallel advisors enough time and stays bounded", () => {

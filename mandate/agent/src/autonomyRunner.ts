@@ -1221,9 +1221,11 @@ async function runCritic(
 ): Promise<CriticAdvice> {
   const configuration = criticConfiguration(critic);
   const deadlineSeconds = criticTimeoutSeconds();
+  let sessionId: string | undefined;
   try {
     const session = await client.sessions.create({ agent: { name: configuration.agent } });
-    const turn = await runReadOnlyModelTurn(client, session.data.id, [
+    sessionId = session.data.id;
+    const turn = await runReadOnlyModelTurn(client, sessionId, [
       `You are the ${critic} advisory critic.`,
       "Review only the supplied deterministic candidate evidence.",
       "Do not use tools, delegate, or claim execution authority.",
@@ -1249,6 +1251,14 @@ async function runCritic(
           ? `Critic agent ${configuration.agent} is not provisioned on TrueForge; run \`npm run apply\` against ${process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790"}.`
           : message.slice(0, 300),
     };
+  } finally {
+    if (sessionId) {
+      try {
+        await client.sessions.delete(sessionId);
+      } catch (error) {
+        console.error(`Could not clean up ${critic} critic session`, publicRunnerError(error));
+      }
+    }
   }
 }
 
@@ -1268,8 +1278,8 @@ async function runCritics(
 }
 
 export function traderTimeoutSeconds(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = Number(env.MANDATE_TRADER_TIMEOUT_SECONDS ?? 90);
-  return Number.isFinite(raw) ? Math.min(180, Math.max(30, raw)) : 90;
+  const raw = Number(env.MANDATE_TRADER_TIMEOUT_SECONDS ?? 60);
+  return Number.isFinite(raw) ? Math.min(90, Math.max(30, raw)) : 60;
 }
 
 async function runTraderCycle(
@@ -1708,6 +1718,12 @@ async function main(): Promise<void> {
                   researchDiagnostics: evaluationDiagnostics(precomputedEvaluation, 1),
                   reasoning: reason,
                 };
+              }
+            } finally {
+              try {
+                await client.sessions.delete(traderSessionId);
+              } catch (error) {
+                console.error("Could not clean up bounded planner session", publicRunnerError(error));
               }
             }
           }
