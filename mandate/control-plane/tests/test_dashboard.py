@@ -394,7 +394,7 @@ def test_trader_timeline_is_cursor_paginated(tmp_path: Path) -> None:
                 "schema": "trader.timeline.v1",
                 "sequence": sequence,
                 "at": f"2026-09-02T12:00:0{sequence}+00:00",
-                "trading_date": "2026-09-02",
+                "trading_date": "2026-09-03" if sequence == 4 else "2026-09-02",
                 "kind": "plan",
                 "status": "ok",
                 "session_id": "session-1",
@@ -420,6 +420,9 @@ def test_trader_timeline_is_cursor_paginated(tmp_path: Path) -> None:
         assert first.json()["next_after"] == 2
         second = client.get("/api/trader/timeline?after=2&limit=2")
         assert [item["sequence"] for item in second.json()["items"]] == [3, 4]
+        dated = client.get("/api/trader/timeline?trading_date=2026-09-02")
+        assert [item["sequence"] for item in dated.json()["items"]] == [1, 2, 3]
+        assert client.get("/api/trader/timeline?trading_date=09-02-2026").status_code == 400
         assert client.get("/api/trader/timeline?after=-1").status_code == 400
         assert client.get("/api/trader/stream?after=-1").status_code == 400
 

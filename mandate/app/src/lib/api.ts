@@ -92,8 +92,10 @@ export async function getTraderTimeline(
   after = 0,
   limit = 200,
   signal?: AbortSignal,
+  tradingDate?: string,
 ): Promise<TraderTimelinePage> {
   const query = new URLSearchParams({ after: String(after), limit: String(limit) });
+  if (tradingDate) query.set("trading_date", tradingDate);
   const response = await fetch(`${getApiBase()}/api/trader/timeline?${query}`, {
     headers: { Accept: "application/json" },
     cache: "no-store",
@@ -114,8 +116,9 @@ export async function getTraderTimeline(
   return payload as TraderTimelinePage;
 }
 
-export function getTraderStreamUrl(after = 0): string {
+export function getTraderStreamUrl(after = 0, tradingDate?: string): string {
   const query = new URLSearchParams({ after: String(after) });
+  if (tradingDate) query.set("trading_date", tradingDate);
   return `${getApiBase()}/api/trader/stream?${query}`;
 }
 

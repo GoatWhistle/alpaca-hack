@@ -1,7 +1,17 @@
-import { useCallback, useState } from "react";
-import { Thread, TrueForgeUI } from "@truefoundry/trueforge-ui";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Thread,
+  ThreadContainer,
+  ThreadListContainer,
+  TrueForgeUI,
+} from "@truefoundry/trueforge-ui";
 import { MANDATE_CHAT_TOKENS } from "./chatTheme";
-import { TraderTimeline } from "./TraderTimeline";
+import {
+  createTraderChatServer,
+  newYorkTradingDate,
+  traderDaySessionId,
+  watchTraderTurnStarts,
+} from "./traderChatServer";
 
 function OperatorForkLayout({ className }: { className?: string }) {
   return (
@@ -11,13 +21,47 @@ function OperatorForkLayout({ className }: { className?: string }) {
   );
 }
 
+function TraderDayLayout({ className }: { className?: string }) {
+  return (
+    <div className={`trader-days-layout ${className ?? ""}`}>
+      <aside>
+        <span>Trading days</span>
+        <ThreadListContainer />
+      </aside>
+      <ThreadContainer composer={null} />
+    </div>
+  );
+}
+
 export function AgentWorkspace() {
-  const [timelineState, setTimelineState] = useState<"connecting" | "live" | "degraded">("connecting");
+  const [tradingDate, setTradingDate] = useState(newYorkTradingDate);
+  const [traderTurnEpoch, setTraderTurnEpoch] = useState(0);
+  const [traderDegraded, setTraderDegraded] = useState(false);
   const [chatDegraded, setChatDegraded] = useState(false);
-  const contextState = chatDegraded ? "degraded" : timelineState;
-  const handleContextHealth = useCallback((healthy: boolean) => {
-    setTimelineState(healthy ? "live" : "degraded");
+  const traderServer = useMemo(
+    () => createTraderChatServer((healthy) => setTraderDegraded(!healthy)),
+    [],
+  );
+  const contextState = traderDegraded || chatDegraded ? "degraded" : "live";
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setTradingDate(newYorkTradingDate()), 30_000);
+    return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void watchTraderTurnStarts(
+      tradingDate,
+      (sequence) => setTraderTurnEpoch(sequence),
+      controller.signal,
+      (healthy) => setTraderDegraded(!healthy),
+    ).catch((error: unknown) => {
+      if (!(error instanceof Error && error.name === "AbortError")) setTraderDegraded(true);
+    });
+    return () => controller.abort();
+  }, [tradingDate]);
+
   return (
     <main id="main-content" className="agent-workspace" aria-label="Trader room" tabIndex={-1}>
       <header className="trader-room-header">
@@ -33,7 +77,20 @@ export function AgentWorkspace() {
 
       <div className="trader-room-grid">
         <section className="trader-stream-pane" aria-label="Autonomous trader stream">
-          <TraderTimeline onHealthChange={handleContextHealth} />
+          <TrueForgeUI
+            key={`${tradingDate}-${traderTurnEpoch}`}
+            server={traderServer}
+            layout={TraderDayLayout}
+            initialSessionId={traderDaySessionId(tradingDate)}
+            agentConfig={{ mode: "SingleAgent", name: "mandate-paper-agent" }}
+            theme={{
+              preset: "trueforge",
+              mode: "dark",
+              brand: { name: "Trader days", logo: `${import.meta.env.BASE_URL}agent-mark.svg` },
+              tokens: MANDATE_CHAT_TOKENS,
+            }}
+            onError={() => setTraderDegraded(true)}
+          />
         </section>
 
         <aside className="operator-fork-pane" aria-label="Operator context fork">

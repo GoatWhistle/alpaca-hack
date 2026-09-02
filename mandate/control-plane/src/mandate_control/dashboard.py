@@ -574,7 +574,13 @@ def _runtime_staleness(
     }
 
 
-def _read_timeline(path: Path, *, after: int = 0, limit: int = 200) -> dict[str, Any]:
+def _read_timeline(
+    path: Path,
+    *,
+    after: int = 0,
+    limit: int = 200,
+    trading_date: str | None = None,
+) -> dict[str, Any]:
     """Read the append-only trader projection with a stable sequence cursor."""
     if not path.exists():
         entries: list[dict[str, Any]] = []
@@ -628,6 +634,8 @@ def _read_timeline(path: Path, *, after: int = 0, limit: int = 200) -> dict[str,
     for entry in entries:
         sequence = entry.get("sequence")
         if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence <= after:
+            continue
+        if trading_date is not None and entry.get("trading_date") != trading_date:
             continue
         items.append(entry)
         if len(items) >= limit:
@@ -872,8 +880,13 @@ def create_dashboard(
             return JSONResponse({"error": "after and limit must be integers"}, status_code=400)
         if after < 0 or not 1 <= limit <= 500:
             return JSONResponse({"error": "after must be nonnegative and limit must be 1..500"}, status_code=400)
+        trading_date = request.query_params.get("trading_date")
+        if trading_date is not None and re.fullmatch(r"\d{4}-\d{2}-\d{2}", trading_date) is None:
+            return JSONResponse({"error": "trading_date must be YYYY-MM-DD"}, status_code=400)
         try:
-            page = _read_timeline(active_timeline, after=after, limit=limit)
+            page = _read_timeline(
+                active_timeline, after=after, limit=limit, trading_date=trading_date,
+            )
         except RuntimeError as exc:
             return JSONResponse({"error": str(exc)}, status_code=500)
         return JSONResponse(_wire_payload(page), headers={"Cache-Control": "no-store"})
@@ -886,6 +899,9 @@ def create_dashboard(
             return JSONResponse({"error": "after must be an integer"}, status_code=400)
         if after < 0:
             return JSONResponse({"error": "after must be nonnegative"}, status_code=400)
+        trading_date = request.query_params.get("trading_date")
+        if trading_date is not None and re.fullmatch(r"\d{4}-\d{2}-\d{2}", trading_date) is None:
+            return JSONResponse({"error": "trading_date must be YYYY-MM-DD"}, status_code=400)
 
         async def events() -> AsyncIterator[str]:
             cursor = after
@@ -893,7 +909,9 @@ def create_dashboard(
             yield "retry: 1500\n\n"
             while not await request.is_disconnected():
                 try:
-                    page = _read_timeline(active_timeline, after=cursor, limit=500)
+                    page = _read_timeline(
+                        active_timeline, after=cursor, limit=500, trading_date=trading_date,
+                    )
                 except RuntimeError as exc:
                     payload = json.dumps({"error": str(exc)}, separators=(",", ":"))
                     yield f"event: stream_error\ndata: {payload}\n\n"
