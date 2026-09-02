@@ -33,6 +33,10 @@ function TraderDayLayout({ className }: { className?: string }) {
   );
 }
 
+function HiddenTraderNewChat() {
+  return <span hidden />;
+}
+
 export function AgentWorkspace() {
   const [tradingDate, setTradingDate] = useState(newYorkTradingDate);
   const [traderTurnEpoch, setTraderTurnEpoch] = useState(0);
@@ -83,6 +87,7 @@ export function AgentWorkspace() {
             layout={TraderDayLayout}
             initialSessionId={traderDaySessionId(tradingDate)}
             agentConfig={{ mode: "SingleAgent", name: "mandate-paper-agent" }}
+            overrides={{ ThreadListNewButton: HiddenTraderNewChat }}
             theme={{
               preset: "trueforge",
               mode: "dark",
