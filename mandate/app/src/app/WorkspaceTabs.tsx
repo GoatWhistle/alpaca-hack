@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-export type View = "overview" | "ipo" | "news" | "diagnostics" | "agent";
+export type View = "overview" | "trades" | "ipo" | "news" | "diagnostics" | "agent";
 
 interface WorkspaceTabsProps {
   view: View;
@@ -11,6 +11,7 @@ interface WorkspaceTabsProps {
 
 const tabs: { key: View; label: string }[] = [
   { key: "overview", label: "Dashboard" },
+  { key: "trades", label: "Trade history" },
   { key: "ipo", label: "IPO scout" },
   { key: "news", label: "News" },
   { key: "diagnostics", label: "Diagnostics" },

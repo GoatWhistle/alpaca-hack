@@ -1,6 +1,5 @@
-import type { Journal, Snapshot } from "../../lib/api";
+import type { Snapshot } from "../../lib/api";
 import { number } from "../../lib/format";
-import { timelineFilters, type TimelineFilter } from "../../lib/outcomes";
 
 export interface AttentionLine {
   level: "error" | "warn";
@@ -16,30 +15,6 @@ export function newsItems(snapshot: Snapshot | null): Record<string, unknown>[] 
     seen.add(key);
     return true;
   });
-}
-
-export function filterCounts(journal: Journal[]): Record<TimelineFilter, number> {
-  const counts: Record<TimelineFilter, number> = {
-    all: journal.length,
-    submitted: 0,
-    denied: 0,
-    parked: 0,
-  };
-  for (const entry of journal) {
-    if (["submitted", "submitted_reconciled", "filled"].includes(entry.outcome)) {
-      counts.submitted += 1;
-    }
-    if (entry.outcome === "denied" || entry.outcome === "conflict") counts.denied += 1;
-    if (entry.outcome === "parked") counts.parked += 1;
-  }
-  return counts;
-}
-
-export function visibleJournal(journal: Journal[], filter: TimelineFilter): Journal[] {
-  const active = timelineFilters.find((item) => item.key === filter) ?? timelineFilters[0];
-  return active.outcomes.length
-    ? journal.filter((entry) => active.outcomes.includes(entry.outcome))
-    : journal;
 }
 
 /**

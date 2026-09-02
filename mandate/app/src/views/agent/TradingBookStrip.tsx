@@ -1,21 +1,19 @@
 import type { Snapshot } from "../../lib/api";
-import { hasValue, money, number, percent } from "../../lib/format";
-import { displaySymbol } from "../dashboard/panels/PositionsPanel";
+import { hasValue, money } from "../../lib/format";
+import { displaySymbol } from "../../lib/symbols";
+import { PositionCard } from "../../components/PositionCard";
 
-function record(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
-function exitRules(item: Record<string, unknown>): string[] {
-  return Object.entries(record(item.exit_policy)).flatMap(([label, value]) => {
-    if (typeof value !== "string" || !value.trim()) return [];
-    return [`${label.replaceAll("_", " ")}: ${value.trim().slice(0, 240)}`];
-  }).slice(0, 6);
-}
-
-export function TradingBookStrip({ snapshot, live }: { snapshot: Snapshot | null; live: boolean }) {
+export function TradingBookStrip({
+  snapshot,
+  live,
+  equity = 0,
+  contextState = "live",
+}: {
+  snapshot: Snapshot | null;
+  live: boolean;
+  equity?: number;
+  contextState?: "live" | "degraded";
+}) {
   const positions = Object.entries(snapshot?.session.positions ?? {});
   const pending = snapshot?.session.pending_orders ?? [];
   return (
@@ -25,37 +23,22 @@ export function TradingBookStrip({ snapshot, live }: { snapshot: Snapshot | null
           <span>Current book</span>
           <strong>{positions.length} open · {pending.length} working</strong>
         </div>
-        <small>{live ? "live Alpaca paper state" : "broker snapshot unavailable"}</small>
+        <div className="trading-book-state">
+          <small data-state={contextState}><i className="live-dot" />stream {contextState}</small>
+          <small>{live ? "live Alpaca paper state" : "broker snapshot unavailable"}</small>
+        </div>
       </header>
       <div className="trading-book-cards">
-        {positions.map(([symbol, item]) => {
-          const side = String(item.side ?? (number(item.qty) < 0 ? "short" : "long"));
-          const pnl = number(item.unrealized_pl);
-          const pnlPct = number(item.unrealized_plpc) * 100;
-          const rules = exitRules(item);
-          return (
-            <article className="book-position" key={symbol} data-side={side} title={symbol}>
-              <div className="book-position-title">
-                <b>{displaySymbol(symbol)}</b>
-                <em>{side} · {Math.abs(number(item.qty))}</em>
-              </div>
-              <div className="book-position-price">
-                <span>entry {hasValue(item.avg_entry_price) ? money(item.avg_entry_price) : "—"}</span>
-                <span>mark {live && hasValue(item.market_price) ? money(item.market_price) : "—"}</span>
-                <strong data-tone={pnl > 0 ? "gain" : pnl < 0 ? "loss" : "flat"}>
-                  {pnl > 0 ? "+" : ""}{live && hasValue(item.unrealized_pl) ? money(pnl) : "—"}
-                  {live && hasValue(item.unrealized_plpc) ? ` · ${pnlPct > 0 ? "+" : ""}${percent(pnlPct)}` : ""}
-                </strong>
-              </div>
-              <details>
-                <summary>When this position exits</summary>
-                {rules.length > 0
-                  ? <ul>{rules.map((rule) => <li key={rule}>{rule}</li>)}</ul>
-                  : <p>Hard-risk engine evaluates stop, target, time-stop and session flatten.</p>}
-              </details>
-            </article>
-          );
-        })}
+        {positions.map(([symbol, item]) => (
+          <PositionCard
+            key={symbol}
+            symbol={symbol}
+            item={item}
+            live={live}
+            equity={equity}
+            variant="compact"
+          />
+        ))}
         {pending.map((order, index) => {
           const symbol = String(order.symbol ?? "").trim() || "multi-leg";
           return (

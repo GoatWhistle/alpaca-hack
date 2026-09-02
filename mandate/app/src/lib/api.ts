@@ -29,6 +29,26 @@ export interface TraderTimelinePage {
   next_after: number;
 }
 
+export interface BrokerTradeOrder {
+  id: string | null;
+  client_order_id: string | null;
+  replaces: string | null;
+  replaced_by: string | null;
+  symbol: string | null;
+  asset_class: string | null;
+  side: string | null;
+  position_intent: string | null;
+  ratio_qty: string | null;
+  qty: string | null;
+  filled_qty: string | null;
+  filled_avg_price: string | null;
+  order_class: string | null;
+  status: string | null;
+  submitted_at: string | null;
+  filled_at: string | null;
+  legs: BrokerTradeOrder[];
+}
+
 const TIMELINE_KINDS = new Set<TraderTimelineEvent["kind"]>([
   "trigger", "reasoning", "tool_call", "tool_result",
   "critics", "plan", "execution", "risk_exit", "session",
@@ -94,15 +114,21 @@ export async function getTraderTimeline(
   limit = 200,
   signal?: AbortSignal,
   tradingDate?: string,
+  latest?: number,
 ): Promise<TraderTimelinePage> {
   const query = new URLSearchParams({ after: String(after), limit: String(limit) });
   if (tradingDate) query.set("trading_date", tradingDate);
+  if (latest !== undefined) query.set("latest", String(latest));
   const response = await fetch(`${getApiBase()}/api/trader/timeline?${query}`, {
     headers: { Accept: "application/json" },
     cache: "no-store",
     signal,
   });
   if (!response.ok) throw new Error(await readError(response, `Dashboard API returned ${response.status}`));
+  // A stale dashboard build answers unknown API paths with the SPA index.
+  if (!(response.headers.get("content-type") ?? "").includes("application/json")) {
+    throw new Error("The dashboard API is too old to serve the trader timeline");
+  }
   const payload = await response.json() as Partial<TraderTimelinePage>;
   let previousSequence = after;
   const validItems = Array.isArray(payload.items) && payload.items.every((item) => {
@@ -115,6 +141,20 @@ export async function getTraderTimeline(
     throw new Error("The dashboard API returned an invalid trader timeline");
   }
   return payload as TraderTimelinePage;
+}
+
+export async function getBrokerTradeOrders(signal?: AbortSignal): Promise<BrokerTradeOrder[]> {
+  const response = await fetch(`${getApiBase()}/api/trade-history/orders`, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal,
+  });
+  if (!response.ok) throw new Error(await readError(response, `Dashboard API returned ${response.status}`));
+  const payload = await response.json() as { schema?: unknown; items?: unknown };
+  if (payload.schema !== "trade.orders.v1" || !Array.isArray(payload.items)) {
+    throw new Error("The dashboard API returned invalid broker order history");
+  }
+  return payload.items as BrokerTradeOrder[];
 }
 
 export function getTraderStreamUrl(after = 0, tradingDate?: string): string {

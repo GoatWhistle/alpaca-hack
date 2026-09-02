@@ -259,7 +259,9 @@ def test_option_positions_receive_atomic_expiry_exit() -> None:
 
 
 def test_flat_option_position_receives_time_stop(monkeypatch: pytest.MonkeyPatch) -> None:
-    now = datetime.now(timezone.utc)
+    # Keep this before the mandatory 15:50 America/New_York flatten window so
+    # the test isolates the option time-stop rule regardless of wall-clock time.
+    now = datetime(2026, 9, 2, 18, 0, tzinfo=timezone.utc)
     expiry = (now.date() + timedelta(days=10)).strftime("%y%m%d")
     monkeypatch.setenv("MANDATE_OPTION_TIME_STOP_MINUTES", "60")
     actions = execution.select_option_exits(

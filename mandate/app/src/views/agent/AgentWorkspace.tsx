@@ -1,6 +1,14 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import type { AgentUIServer } from "@truefoundry/trueforge-ui";
+import type {
+  AgentStepsCardProps,
+  AgentUIServer,
+  ThreadComposerAreaShellProps,
+  ToolCallCardProps,
+  ToolGroupCardProps,
+  WelcomeScreenProps,
+} from "@truefoundry/trueforge-ui";
 import {
+  defaultSlots,
   Thread,
   ThreadContainer,
   ThreadListContainer,
@@ -15,6 +23,74 @@ import {
 import type { Snapshot } from "../../lib/api";
 import { TradingBookStrip } from "./TradingBookStrip";
 
+const DefaultToolCallCard = defaultSlots.ToolCallCard;
+const DefaultToolGroupCard = defaultSlots.ToolGroupCard;
+const DefaultAgentStepsCard = defaultSlots.AgentStepsCard;
+
+/**
+ * The autonomous stream must show every subagent tool call by default — a
+ * collapsed tool row hides the desk's work. The operator can still collapse a
+ * card; the choice is local to this override and resets on remount.
+ */
+function OpenToolCallCard(props: ToolCallCardProps) {
+  const [collapsed, setCollapsed] = useState(false);
+  return (
+    <DefaultToolCallCard
+      {...props}
+      expanded={props.expanded === true || !collapsed}
+      onToggle={() => setCollapsed((value) => !value)}
+    />
+  );
+}
+
+function OpenToolGroupCard(props: ToolGroupCardProps) {
+  const [collapsed, setCollapsed] = useState(false);
+  return (
+    <DefaultToolGroupCard
+      {...props}
+      expanded={props.expanded === true || !collapsed}
+      onToggle={() => setCollapsed((value) => !value)}
+    />
+  );
+}
+
+/** Consecutive runs of tool calls also arrive as a collapsed "steps" group. */
+function OpenAgentStepsCard(props: AgentStepsCardProps) {
+  const [collapsed, setCollapsed] = useState(false);
+  return (
+    <DefaultAgentStepsCard
+      {...props}
+      expanded={props.expanded === true || !collapsed}
+      onToggle={() => setCollapsed((value) => !value)}
+    />
+  );
+}
+
+/** No composer on a read-only stream: let the log run to the bottom edge. */
+function StreamTail({ children, className }: ThreadComposerAreaShellProps) {
+  return (
+    <div className={`trader-stream-tail ${className ?? ""}`}>
+      {children}
+    </div>
+  );
+}
+
+function QuietWelcome({ className }: WelcomeScreenProps) {
+  return (
+    <div className={`trader-quiet-welcome ${className ?? ""}`}>
+      <p>The stream starts with the desk's next autonomous cycle.</p>
+    </div>
+  );
+}
+
+function ForkWelcome({ className }: WelcomeScreenProps) {
+  return (
+    <div className={`trader-quiet-welcome ${className ?? ""}`}>
+      <p>Ask the trader — inspect context, request a memory change.</p>
+    </div>
+  );
+}
+
 function OperatorForkLayout({ className }: { className?: string }) {
   return (
     <div className={`operator-fork-runtime ${className ?? ""}`}>
@@ -26,8 +102,7 @@ function OperatorForkLayout({ className }: { className?: string }) {
 function TraderDayLayout({ className }: { className?: string }) {
   return (
     <div className={`trader-days-layout ${className ?? ""}`}>
-      <aside>
-        <span>Trading days</span>
+      <aside aria-label="Trading days">
         <ThreadListContainer />
       </aside>
       <ThreadContainer composer={null} />
@@ -42,7 +117,20 @@ function HiddenTraderNewChat() {
 const TRADER_AGENT_CONFIG = { mode: "SingleAgent", name: "mandate-paper-agent" } as const;
 const OPERATOR_AGENT_CONFIG = { mode: "SingleAgent", name: "mandate-operator-agent" } as const;
 const OPERATOR_SERVER = { type: "trueforge", baseUrl: import.meta.env.BASE_URL } as const;
-const TRADER_OVERRIDES = { ThreadListNewButton: HiddenTraderNewChat };
+const TRADER_OVERRIDES = {
+  ThreadListNewButton: HiddenTraderNewChat,
+  ToolCallCard: OpenToolCallCard,
+  ToolGroupCard: OpenToolGroupCard,
+  AgentStepsCard: OpenAgentStepsCard,
+  // The shell slot is typed as a forwardRef component from the SDK's own
+  // React types; the trader tail never receives a ref, so a plain function
+  // with a slot-type cast is enough.
+  ThreadComposerAreaShell: StreamTail as unknown as typeof defaultSlots.ThreadComposerAreaShell,
+  WelcomeScreen: QuietWelcome,
+};
+const OPERATOR_OVERRIDES = {
+  WelcomeScreen: ForkWelcome,
+};
 const TRADER_THEME = {
   preset: "trueforge",
   mode: "dark",
@@ -84,6 +172,7 @@ const OperatorRuntime = memo(function OperatorRuntime({ onError }: { onError: ()
       server={OPERATOR_SERVER}
       layout={OperatorForkLayout}
       agentConfig={OPERATOR_AGENT_CONFIG}
+      overrides={OPERATOR_OVERRIDES}
       theme={OPERATOR_THEME}
       onError={onError}
     />
@@ -115,18 +204,12 @@ export const AgentWorkspace = memo(function AgentWorkspace({
 
   return (
     <main id="main-content" className="agent-workspace" aria-label="Trader room" tabIndex={-1}>
-      <header className="trader-room-header">
-        <div>
-          <span className="trader-room-eyebrow">Autonomous paper desk</span>
-          <h1>Trader room</h1>
-        </div>
-        <div className="trader-room-contract" aria-label="Authority contract">
-          <span data-state={contextState}><i className="live-dot" />{contextState} context</span>
-          <span>advisory fork</span>
-        </div>
-      </header>
-
-      <TradingBookStrip snapshot={snapshot} live={snapshot?.source === "live" && !error} />
+      <TradingBookStrip
+        snapshot={snapshot}
+        live={snapshot?.source === "live" && !error}
+        equity={Number(snapshot?.session.account.equity ?? 0) || 0}
+        contextState={contextState}
+      />
 
       <div className="trader-room-grid">
         <section className="trader-stream-pane" aria-label="Autonomous trader stream">
@@ -139,13 +222,6 @@ export const AgentWorkspace = memo(function AgentWorkspace({
         </section>
 
         <aside className="operator-fork-pane" aria-label="Operator context fork">
-          <header>
-            <div>
-              <span className="fork-label">Context fork</span>
-              <strong>Ask the trader</strong>
-            </div>
-            <span className="fork-policy">inspect context · request memory change</span>
-          </header>
           <div className="operator-fork-chat">
             <OperatorRuntime onError={markChatDegraded} />
           </div>

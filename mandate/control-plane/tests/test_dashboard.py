@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -95,6 +95,22 @@ def test_snapshot_prefers_live_broker_data(tmp_path: Path, monkeypatch) -> None:
     assert result["autonomy"]["runtime"]["status"] == "running"
     assert result["autonomy"]["alerts"][0]["headline"] == "Test"
     assert not result["errors"]
+
+
+def test_trade_history_endpoint_is_read_only_and_bounded(tmp_path: Path) -> None:
+    mandate, journal = _files(tmp_path)
+    app = create_dashboard(
+        broker=FakeBroker(),
+        dist_path=tmp_path,
+        mandate_path=mandate,
+        journal_path=journal,
+        service_urls={"trueforge": "http://local:8790", "broker": "http://local:8010"},
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/trade-history/orders")
+    assert response.status_code == 200
+    assert response.json() == {"schema": "trade.orders.v1", "items": []}
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_snapshot_falls_back_to_local_evidence(tmp_path: Path, monkeypatch) -> None:
@@ -422,8 +438,16 @@ def test_trader_timeline_is_cursor_paginated(tmp_path: Path) -> None:
         assert [item["sequence"] for item in second.json()["items"]] == [3, 4]
         dated = client.get("/api/trader/timeline?trading_date=2026-09-02")
         assert [item["sequence"] for item in dated.json()["items"]] == [1, 2, 3]
+        tail = client.get("/api/trader/timeline?latest=2")
+        assert [item["sequence"] for item in tail.json()["items"]] == [3, 4]
+        assert tail.json()["next_after"] == 4
+        tail_ignores_after = client.get("/api/trader/timeline?latest=2&after=999")
+        assert [item["sequence"] for item in tail_ignores_after.json()["items"]] == [3, 4]
+        dated_tail = client.get("/api/trader/timeline?latest=5&trading_date=2026-09-02")
+        assert [item["sequence"] for item in dated_tail.json()["items"]] == [1, 2, 3]
         assert client.get("/api/trader/timeline?trading_date=09-02-2026").status_code == 400
         assert client.get("/api/trader/timeline?after=-1").status_code == 400
+        assert client.get("/api/trader/timeline?latest=0").status_code == 400
         assert client.get("/api/trader/stream?after=-1").status_code == 400
 
 
@@ -457,6 +481,67 @@ class _StubBrokerClient:
         _StubBrokerClient.calls.append((path, dict(params or {})))
         key = f"{path}:{(params or {}).get('status', '')}"
         return _StubGetResponse(_StubBrokerClient.payloads[key])
+
+
+class _PaginatedOrdersClient:
+    calls: list[dict] = []
+
+    def __init__(self, *_args, **_kwargs) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    async def get(self, path: str, params: dict | None = None):
+        assert path == "/v2/orders"
+        request = dict(params or {})
+        self.calls.append(request)
+        if "until" in request:
+            return _StubGetResponse([{
+                "id": "older", "symbol": "AMD", "side": "sell", "qty": "2",
+                "filled_qty": "2", "filled_avg_price": "100", "status": "filled",
+                "submitted_at": "2026-09-01T13:00:00Z", "filled_at": "2026-09-01T13:00:01Z",
+                "extra": "must not leak",
+            }])
+        base = datetime(2026, 9, 2, 15, 0, tzinfo=timezone.utc)
+        page = [{
+            "id": f"order-{index}", "symbol": "AAPL", "side": "buy", "qty": "1",
+            "filled_qty": "1", "filled_avg_price": "200", "status": "filled",
+            "submitted_at": (base - timedelta(seconds=index)).isoformat(),
+            "filled_at": (base - timedelta(seconds=index) + timedelta(milliseconds=10)).isoformat(),
+            "legs": [{
+                "id": f"leg-{index}", "symbol": "AAPL260909C00200000", "side": "buy",
+                "position_intent": "buy_to_open", "ratio_qty": "1", "filled_qty": "1",
+            }] if index == 0 else None,
+        } for index in range(500)]
+        return _StubGetResponse(page)
+
+
+def test_trade_order_history_paginates_projects_and_caches(tmp_path: Path, monkeypatch) -> None:
+    from mandate_control.dashboard import AlpacaPaperReader
+
+    mandate, journal = _files(tmp_path)
+    monkeypatch.setenv("ALPACA_API_KEY", "key")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "secret")
+    monkeypatch.delenv("MANDATE_USE_ALPACA_PROXY", raising=False)
+    monkeypatch.setattr("mandate_control.dashboard.httpx.AsyncClient", _PaginatedOrdersClient)
+    _PaginatedOrdersClient.calls = []
+
+    reader = AlpacaPaperReader(mandate, journal, cache_seconds=60.0)
+    orders = asyncio.run(reader.read_trade_orders())
+    assert len(orders) == 501
+    assert orders[-1]["id"] == "older"
+    assert "extra" not in orders[-1]
+    assert orders[0]["legs"][0]["position_intent"] == "buy_to_open"
+    assert len(_PaginatedOrdersClient.calls) == 2
+    assert _PaginatedOrdersClient.calls[0].get("until") is None
+    assert _PaginatedOrdersClient.calls[1]["until"] == orders[499]["submitted_at"]
+
+    assert asyncio.run(reader.read_trade_orders()) is orders
+    assert len(_PaginatedOrdersClient.calls) == 2
 
 
 def _broker_payloads() -> dict[str, object]:

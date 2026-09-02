@@ -148,6 +148,104 @@ class AlpacaPaperReader:
         self.cache_seconds = cache_seconds
         self._cache: tuple[float, tuple[dict[str, Any], dict[str, Any]]] | None = None
         self._lock = asyncio.Lock()
+        self._orders_cache: tuple[float, list[dict[str, Any]]] | None = None
+        self._orders_lock = asyncio.Lock()
+
+    def _connection(self) -> tuple[dict[str, str], str | None]:
+        key = os.environ.get("ALPACA_API_KEY", "")
+        secret = os.environ.get("ALPACA_SECRET_KEY", "")
+        if not key or not secret:
+            raise ValueError("Alpaca paper credentials are required")
+        headers = {
+            "APCA-API-KEY-ID": key,
+            "APCA-API-SECRET-KEY": secret,
+            "Accept": "application/json",
+        }
+        proxy = None
+        if os.environ.get("MANDATE_USE_ALPACA_PROXY", "false").lower() == "true":
+            proxy = os.environ.get("ALPACA_PROXY_URL") or None
+            if proxy is None:
+                raise ValueError("ALPACA_PROXY_URL is required when the Alpaca proxy is enabled")
+        return headers, proxy
+
+    async def read_trade_orders(self) -> list[dict[str, Any]]:
+        """Return complete broker order history, stripped of irrelevant fields."""
+        cached = self._orders_cache
+        if cached is not None and time.monotonic() - cached[0] < self.cache_seconds:
+            return cached[1]
+        async with self._orders_lock:
+            cached = self._orders_cache
+            if cached is not None and time.monotonic() - cached[0] < self.cache_seconds:
+                return cached[1]
+            headers, proxy = self._connection()
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                headers=headers,
+                timeout=self.timeout,
+                proxy=proxy,
+                trust_env=False,
+            ) as client:
+                raw_orders: list[dict[str, Any]] = []
+                seen_ids: set[str] = set()
+                until: str | None = None
+                for _page in range(100):
+                    params = {
+                        "status": "all", "direction": "desc", "limit": 500, "nested": "true",
+                    }
+                    if until is not None:
+                        params["until"] = until
+                    response = await client.get("/v2/orders", params=params)
+                    response.raise_for_status()
+                    payload = response.json()
+                    if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
+                        raise RuntimeError("Alpaca paper returned invalid order history")
+                    for item in payload:
+                        order_id = str(item.get("id") or "")
+                        if order_id and order_id in seen_ids:
+                            continue
+                        if order_id:
+                            seen_ids.add(order_id)
+                        raw_orders.append(item)
+                    if len(payload) < 500:
+                        break
+                    timestamps = [
+                        str(item["submitted_at"])
+                        for item in payload
+                        if item.get("submitted_at")
+                    ]
+                    next_until = min(timestamps) if timestamps else None
+                    if next_until is None or next_until == until:
+                        raise RuntimeError("Alpaca paper order-history cursor did not advance")
+                    until = next_until
+                else:
+                    raise RuntimeError("Alpaca paper order history exceeds the 50000-order safety bound")
+
+            def project(item: dict[str, Any]) -> dict[str, Any]:
+                legs = item.get("legs")
+                return {
+                    "id": item.get("id"),
+                    "client_order_id": item.get("client_order_id"),
+                    "replaces": item.get("replaces"),
+                    "replaced_by": item.get("replaced_by"),
+                    "symbol": item.get("symbol"),
+                    "asset_class": item.get("asset_class"),
+                    "side": item.get("side"),
+                    "position_intent": item.get("position_intent"),
+                    "ratio_qty": item.get("ratio_qty"),
+                    "qty": item.get("qty"),
+                    "filled_qty": item.get("filled_qty"),
+                    "filled_avg_price": item.get("filled_avg_price"),
+                    "order_class": item.get("order_class"),
+                    "status": item.get("status"),
+                    "submitted_at": item.get("submitted_at"),
+                    "filled_at": item.get("filled_at"),
+                    "legs": [project(leg) for leg in legs if isinstance(leg, dict)]
+                    if isinstance(legs, list) else [],
+                }
+
+            result = [project(item) for item in raw_orders]
+            self._orders_cache = (time.monotonic(), result)
+            return result
 
     async def read(self) -> tuple[dict[str, Any], dict[str, Any]]:
         """Serve one broker read per cache window, shared across concurrent tabs."""
@@ -163,20 +261,7 @@ class AlpacaPaperReader:
             return result
 
     async def _read_uncached(self) -> tuple[dict[str, Any], dict[str, Any]]:
-        key = os.environ.get("ALPACA_API_KEY", "")
-        secret = os.environ.get("ALPACA_SECRET_KEY", "")
-        if not key or not secret:
-            raise ValueError("Alpaca paper credentials are required")
-        headers = {
-            "APCA-API-KEY-ID": key,
-            "APCA-API-SECRET-KEY": secret,
-            "Accept": "application/json",
-        }
-        proxy = None
-        if os.environ.get("MANDATE_USE_ALPACA_PROXY", "false").lower() == "true":
-            proxy = os.environ.get("ALPACA_PROXY_URL") or None
-            if proxy is None:
-                raise ValueError("ALPACA_PROXY_URL is required when the Alpaca proxy is enabled")
+        headers, proxy = self._connection()
         # Order budgets are trading-day limits: count from New York midnight,
         # and ask Alpaca for that window only instead of the last 500 orders.
         now_utc = datetime.now(timezone.utc)
@@ -603,8 +688,13 @@ def _read_timeline(
     after: int = 0,
     limit: int = 200,
     trading_date: str | None = None,
+    latest: int | None = None,
 ) -> dict[str, Any]:
-    """Read the append-only trader projection with a stable sequence cursor."""
+    """Read the append-only trader projection with a stable sequence cursor.
+
+    `latest=N` returns the newest N matching items (still ascending) without
+    paging through the whole journal; `after` is ignored in that mode.
+    """
     if not path.exists():
         entries: list[dict[str, Any]] = []
     else:
@@ -656,11 +746,19 @@ def _read_timeline(
     items: list[dict[str, Any]] = []
     for entry in entries:
         sequence = entry.get("sequence")
-        if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence <= after:
+        if (
+            not isinstance(sequence, int)
+            or isinstance(sequence, bool)
+            or (latest is None and sequence <= after)
+        ):
             continue
         if trading_date is not None and entry.get("trading_date") != trading_date:
             continue
         items.append(entry)
+        if latest is not None:
+            if len(items) > latest:
+                items.pop(0)
+            continue
         if len(items) >= limit:
             break
     next_after = items[-1]["sequence"] if items else after
@@ -899,20 +997,47 @@ def create_dashboard(
         try:
             after = int(request.query_params.get("after", "0"))
             limit = int(request.query_params.get("limit", "200"))
+            latest_raw = request.query_params.get("latest")
+            latest = int(latest_raw) if latest_raw is not None else None
         except ValueError:
-            return JSONResponse({"error": "after and limit must be integers"}, status_code=400)
+            return JSONResponse({"error": "after, limit and latest must be integers"}, status_code=400)
         if after < 0 or not 1 <= limit <= 500:
             return JSONResponse({"error": "after must be nonnegative and limit must be 1..500"}, status_code=400)
+        if latest is not None and not 1 <= latest <= 500:
+            return JSONResponse({"error": "latest must be 1..500"}, status_code=400)
         trading_date = request.query_params.get("trading_date")
         if trading_date is not None and re.fullmatch(r"\d{4}-\d{2}-\d{2}", trading_date) is None:
             return JSONResponse({"error": "trading_date must be YYYY-MM-DD"}, status_code=400)
         try:
             page = _read_timeline(
-                active_timeline, after=after, limit=limit, trading_date=trading_date,
+                active_timeline,
+                after=after,
+                limit=limit,
+                trading_date=trading_date,
+                latest=latest,
             )
         except RuntimeError as exc:
             return JSONResponse({"error": str(exc)}, status_code=500)
         return JSONResponse(_wire_payload(page), headers={"Cache-Control": "no-store"})
+
+    async def trade_orders(request: Request) -> Response:
+        read_orders = getattr(reader, "read_trade_orders", None)
+        if not callable(read_orders):
+            return JSONResponse(
+                {"schema": "trade.orders.v1", "items": []},
+                headers={"Cache-Control": "no-store"},
+            )
+        try:
+            items = await asyncio.wait_for(read_orders(), timeout=10.0)
+        except Exception as exc:
+            return JSONResponse(
+                {"error": f"paper broker order history unavailable: {type(exc).__name__}"},
+                status_code=502,
+            )
+        return JSONResponse(
+            _wire_payload({"schema": "trade.orders.v1", "items": items}),
+            headers={"Cache-Control": "no-store"},
+        )
 
     async def trader_stream(request: Request) -> Response:
         raw_after = request.query_params.get("after") or request.headers.get("last-event-id", "0")
@@ -1067,6 +1192,7 @@ def create_dashboard(
 
     routes = [
         Route("/api/snapshot", snapshot),
+        Route("/api/trade-history/orders", trade_orders),
         Route("/api/trader/timeline", trader_timeline),
         Route("/api/trader/stream", trader_stream),
         Route("/api/trajectory", update_trajectory, methods=["POST"]),

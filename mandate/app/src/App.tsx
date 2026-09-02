@@ -14,16 +14,18 @@ import { DiagnosticsView } from "./views/diagnostics/DiagnosticsView";
 import { NewsView } from "./views/news/NewsView";
 import { AgentWorkspace } from "./views/agent/AgentWorkspace";
 import { IpoView, ipoCandidateCount } from "./views/ipo/IpoView";
+import { TradeHistoryView } from "./views/trades/TradeHistoryView";
 
 const VIEW_AREAS: Record<View, string> = {
   overview: "The dashboard",
+  trades: "Trade history",
   ipo: "The IPO scout",
   news: "The news feed",
   diagnostics: "Diagnostics",
   agent: "The trader room",
 };
 
-const VIEWS = new Set<View>(["overview", "ipo", "news", "diagnostics", "agent"]);
+const VIEWS = new Set<View>(["overview", "trades", "ipo", "news", "diagnostics", "agent"]);
 
 function initialView(): View {
   const hash = window.location.hash.slice(1) as View;
@@ -130,12 +132,17 @@ export function App() {
               news={news}
               decisionItems={decisionItems}
               hidden={state.hidden}
+              paused={state.paused}
               approvalActions={approvalActions}
               onRespond={(item, approve) => void handleRespond(item, approve)}
               onOpenNews={() => selectView("news")}
+              onOpenTrades={() => selectView("trades")}
             />
           )}
           {view === "news" && <NewsView items={news} />}
+          {view === "trades" && (
+            <TradeHistoryView snapshot={snapshot} paused={state.paused || state.hidden} />
+          )}
           {view === "ipo" && <IpoView snapshot={snapshot} error={error} nowMs={state.nowMs} />}
           {view === "diagnostics" && <DiagnosticsView snapshot={snapshot} />}
           {view === "agent" && <AgentWorkspace snapshot={snapshot} error={error} />}

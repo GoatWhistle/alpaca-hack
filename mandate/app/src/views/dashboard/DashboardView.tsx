@@ -1,23 +1,17 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Panel } from "../../components/Panel";
 import type { Snapshot } from "../../lib/api";
-import { timelineFilters, type TimelineFilter } from "../../lib/outcomes";
+import { useTrades } from "../../app/useTrades";
 import { NewsCard } from "../news/NewsCard";
 import type { ApprovalAction } from "./decision/DecisionCard";
 import { DecisionQueue, StandingBy } from "./decision/DecisionQueue";
-import { JournalTimeline } from "./journal/JournalTimeline";
 import { LivePipeline } from "./LivePipeline";
 import { DegradedNotice } from "./panels/DegradedNotice";
 import { AttentionBanner, MetricsBlock } from "./panels/MetricsBlock";
-import { PositionsPanel } from "./panels/PositionsPanel";
+import { OpenBookPanel } from "./panels/OpenBookPanel";
 import { RunnerPanel } from "./panels/RunnerPanel";
-import {
-  attentionLines,
-  decisionReason,
-  filterCounts,
-  qualityCounts,
-  visibleJournal,
-} from "./selectors";
+import { TradeLogPanel } from "./panels/TradeLogPanel";
+import { attentionLines, decisionReason, qualityCounts } from "./selectors";
 
 interface DashboardViewProps {
   snapshot: Snapshot | null;
@@ -25,9 +19,11 @@ interface DashboardViewProps {
   news: Record<string, unknown>[];
   decisionItems: Record<string, unknown>[];
   hidden: boolean;
+  paused: boolean;
   approvalActions: Record<string, ApprovalAction>;
   onRespond: (item: Record<string, unknown>, approve: boolean) => void;
   onOpenNews: () => void;
+  onOpenTrades: () => void;
 }
 
 export function DashboardView({
@@ -36,11 +32,13 @@ export function DashboardView({
   news,
   decisionItems,
   hidden,
+  paused,
   approvalActions,
   onRespond,
   onOpenNews,
+  onOpenTrades,
 }: DashboardViewProps) {
-  const [filter, setFilter] = useState<TimelineFilter>("all");
+  const { trades, loading: tradesLoading, error: tradesError } = useTrades(paused || hidden);
 
   const mandate = (snapshot?.mandate.mandate ?? {}) as Record<string, unknown>;
   const limits = (mandate.limits ?? {}) as Record<string, unknown>;
@@ -51,13 +49,8 @@ export function DashboardView({
   const marketOpen = snapshot?.mandate.market_is_open ?? false;
   const live = snapshot?.source === "live" && !error;
   const universe = Array.isArray(mandate.universe) ? mandate.universe.map(String) : [];
+  const equity = Number(account.equity ?? 0) || 0;
 
-  const journal = useMemo(
-    () => [...(snapshot?.session.journal ?? [])].reverse(),
-    [snapshot],
-  );
-  const counts = useMemo(() => filterCounts(journal), [journal]);
-  const visible = useMemo(() => visibleJournal(journal, filter), [journal, filter]);
   const lines = useMemo(() => attentionLines(snapshot, error), [snapshot, error]);
   const [qualityPass, qualityTotal] = qualityCounts(runtime);
 
@@ -97,6 +90,13 @@ export function DashboardView({
           live={live}
         />
 
+        <OpenBookPanel
+          positions={Object.entries(snapshot?.session.positions ?? {})}
+          pending={snapshot?.session.pending_orders ?? []}
+          live={live}
+          equity={equity}
+        />
+
         {news[0] && (
           <Panel
             title="Latest news"
@@ -113,34 +113,15 @@ export function DashboardView({
 
         <section className="dashboard-grid">
           <div className="main-column">
-            <Panel
-              title="Agent decisions"
-              className="timeline-panel"
-              actions={
-                <div className="filter-chips">
-                  {timelineFilters.map((item) => (
-                    <button
-                      key={item.key}
-                      className={filter === item.key ? "active" : ""}
-                      onClick={() => setFilter(item.key)}
-                    >
-                      {item.label}
-                      <em>{counts[item.key]}</em>
-                    </button>
-                  ))}
-                </div>
-              }
-            >
-              <JournalTimeline entries={visible} filter={filter} loading={snapshot === null} />
-            </Panel>
+            <TradeLogPanel
+              trades={trades}
+              loading={tradesLoading}
+              error={tradesError}
+              onOpenHistory={onOpenTrades}
+            />
           </div>
 
           <aside className="side-column">
-            <PositionsPanel
-              positions={Object.entries(snapshot?.session.positions ?? {})}
-              pending={snapshot?.session.pending_orders ?? []}
-              live={live}
-            />
             <RunnerPanel
               trajectory={trajectory}
               runtime={runtime}

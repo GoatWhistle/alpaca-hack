@@ -12,11 +12,11 @@
 @import "./components/metrics.css";
 @import "./components/panel.css";
 @import "./components/pipeline.css";
-@import "./components/filters.css";
-@import "./journal/timeline.css";
-@import "./journal/breach.css";
+@import "./components/open-book.css";
+@import "./components/trade-log.css";
 @import "./journal/skeleton.css";
 @import "./views/news.css";
 @import "./views/ipo.css";
 @import "./views/table.css";
+@import "./views/trade-history.css";
 @import "./views/trader-room.css";

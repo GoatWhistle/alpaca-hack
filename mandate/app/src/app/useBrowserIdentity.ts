@@ -3,6 +3,7 @@ import type { View } from "./WorkspaceTabs";
 
 const VIEW_TITLES: Record<View, string> = {
   overview: "Dashboard",
+  trades: "Trade history",
   ipo: "IPO scout",
   news: "News",
   diagnostics: "Diagnostics",

@@ -92,16 +92,70 @@ function sessionState() {
     },
     market: { is_open: true, clock_timestamp: new Date().toISOString() },
     positions: {
-      AAPL: { qty: "34", market_price: "228.41", market_value: "7765.94" },
-      MSFT: { qty: "12", market_price: "512.08", market_value: "6144.96" },
-      NVDA: { qty: "28", market_price: "186.42", market_value: "5219.76" },
-      AVGO: { qty: "9", market_price: "336.72", market_value: "3030.48" },
-      SPY:  { qty: "3",  market_price: "641.20", market_value: "1923.60" },
+      AAPL: {
+        qty: "34", side: "long", asset_class: "us_equity",
+        market_price: "228.41", market_value: "7765.94", avg_entry_price: "226.10",
+        unrealized_pl: "78.54", unrealized_plpc: "0.0102",
+        exit_policy: {
+          stop: "0.90x ATR14 adverse move",
+          target: "1.50x ATR14 favorable move",
+          time_stop: "45m if still within 0.25x ATR14 of entry",
+          flatten: "mandatory 15:50 ET session flatten",
+        },
+      },
+      MSFT: {
+        qty: "12", side: "long", asset_class: "us_equity",
+        market_price: "512.08", market_value: "6144.96", avg_entry_price: "508.20",
+        unrealized_pl: "46.56", unrealized_plpc: "0.0076",
+        exit_policy: {
+          stop: "0.90x ATR14 adverse move",
+          target: "1.50x ATR14 favorable move",
+          flatten: "mandatory 15:50 ET session flatten",
+        },
+      },
+      NVDA: {
+        qty: "28", side: "long", asset_class: "us_equity",
+        market_price: "186.42", market_value: "5219.76", avg_entry_price: "183.10",
+        unrealized_pl: "92.96", unrealized_plpc: "0.0181",
+        exit_policy: {
+          stop: "0.90x ATR14 adverse move",
+          target: "1.50x ATR14 favorable move",
+          flatten: "mandatory 15:50 ET session flatten",
+        },
+      },
+      "NVDA260919C00190000": {
+        qty: "2", side: "long", asset_class: "us_option",
+        market_price: "1.41", market_value: "282.00", avg_entry_price: "1.24",
+        unrealized_pl: "34.00", unrealized_plpc: "0.1371",
+        exit_policy: {
+          stop: "-25% unrealized P&L",
+          target: "+40% unrealized P&L",
+          time_stop: "180m in the dead band",
+          expiry: "close at DTE <= 2",
+          flatten: "mandatory 15:50 ET session flatten",
+        },
+      },
+      BABA: {
+        qty: "20", side: "short", asset_class: "us_equity",
+        market_price: "94.12", market_value: "-1882.40", avg_entry_price: "92.87",
+        unrealized_pl: "-25.00", unrealized_plpc: "-0.0135",
+        exit_policy: {
+          stop: "0.90x ATR14 adverse move",
+          target: "1.50x ATR14 favorable move",
+          flatten: "mandatory 15:50 ET session flatten",
+        },
+      },
     },
     orders_today: 4,
     pending_orders: [
-      { symbol: "NVDA", side: "buy", remaining_qty: "6", reference_price: "182.90" },
-      { symbol: "CRM",  side: "buy", remaining_qty: "11", reference_price: "268.15" },
+      {
+        id: "mock-order-901", symbol: "NVDA", side: "buy", qty: "6", filled_qty: "0",
+        type: "limit", limit_price: "182.90", status: "working", legs: 0,
+      },
+      {
+        id: "mock-order-902", symbol: "CRM", side: "buy", qty: "11", filled_qty: "4",
+        type: "limit", limit_price: "268.15", status: "partially_filled", legs: 0,
+      },
     ],
     journal: journal(),
   };
@@ -422,19 +476,188 @@ function applyDecision(item, approve) {
   state.decided.push(entry);
 }
 
-function traderTimeline() {
-  const kinds = ["session", "critics", "plan", "execution"];
-  return kinds.map((kind, index) => ({
+// --- Autonomous trader timeline (stateful, keeps growing while the mock runs) ---
+
+const timelineState = { events: [], sequence: 0, startedAt: Date.now() };
+
+function tradingDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function event(kind, status, summary, details, atMs) {
+  timelineState.sequence += 1;
+  return {
     schema: "trader.timeline.v1",
-    sequence: index + 1,
-    at: minutesAgo((kinds.length - index) * 2),
-    trading_date: new Date().toISOString().slice(0, 10),
+    sequence: timelineState.sequence,
+    at: new Date(atMs).toISOString(),
+    trading_date: tradingDate(),
     kind,
-    status: kind === "execution" ? "submitted" : "ok",
+    status,
     session_id: "mock-trader-session",
-    summary: `${kind} contract emitted by the mock automatic trader`,
-    details: {},
-  }));
+    summary,
+    details,
+  };
+}
+
+function executionRecord({ symbol, underlying, side, qty, limit, avg, kind, reason, candidate, filled = true, status = "filled" }) {
+  return {
+    accepted: true,
+    filled,
+    status,
+    filled_qty: filled ? qty : "0",
+    deduplicated: false,
+    replacements: 0,
+    kind,
+    candidate: symbol,
+    underlying: underlying ?? symbol,
+    side,
+    plan_cycle_id: "mock-cycle",
+    plan_candidate_id: candidate,
+    reason,
+    exit_policy: kind.startsWith("option")
+      ? { stop: "-25% unrealized P&L", target: "+40% unrealized P&L", time_stop: "180m in the dead band" }
+      : null,
+    order: { symbol, side, qty, type: "limit", limit_price: limit, time_in_force: "day" },
+    result: {
+      id: `mock-order-${Math.floor(Math.random() * 100000)}`,
+      status,
+      symbol,
+      side,
+      qty,
+      filled_qty: filled ? qty : "0",
+      filled_avg_price: filled ? avg : null,
+      limit_price: limit,
+      submitted_at: new Date().toISOString(),
+      filled_at: filled ? new Date().toISOString() : null,
+    },
+  };
+}
+
+function seedCycle(cycleId, minutesBack, { executes = true, parkReason = null } = {}) {
+  // The cycle spans ~1 minute ending at minutesBack ago, so a live cycle's
+  // events never carry future timestamps.
+  const base = Date.now() - (minutesBack + 1) * 60_000;
+  const at = (offset) => base + offset * 1_000;
+  const events = [
+    event("trigger", "ok", `Scheduled analysis cycle ${cycleId}: news poll closed with 3 fresh signals.`, { cycle_id: cycleId, trigger: "scheduled_poll" }, at(0)),
+    event("reasoning", "ok", "Momentum ensemble turned positive on NVDA after the Blackwell supply headline; spread and freshness gates pass.", { cycle_id: cycleId, source: "trader_model" }, at(6)),
+    event("tool_call", "ok", "Research desk evaluating the NVDA setup.", {
+      cycle_id: cycleId,
+      tool: "research.evaluate_candidates",
+      arguments: { symbols: ["NVDA", "AAPL"], depth: "full" },
+    }, at(12)),
+    event("tool_result", "ok", "Research desk returned 2 evaluated candidates.", {
+      cycle_id: cycleId,
+      tool: "research.evaluate_candidates",
+      result: { candidates: 2, quality_pass: 2, feed: "iex" },
+    }, at(20)),
+    event("critics", "ok", "Risk, news and execution critics returned advisory verdicts.", {
+      cycle_id: cycleId,
+      items: [
+        { critic: "risk", verdict: "pass", reason: "Sizing inside position and gross headroom." },
+        { critic: "news", verdict: "pass", reason: "Headline confirmed by a second source." },
+        { critic: "execution", verdict: "pass", reason: "Spread 4bps, relative volume 2.1x." },
+      ],
+    }, at(28)),
+    event("plan", "ok", executes ? "Plan delegated one entry to the paper executor." : "Plan chose PARK; nothing was delegated to execution.", {
+      cycle_id: cycleId,
+      plan: {
+        action: executes ? "EXECUTE_PLAN" : "PARK",
+        reason: executes
+          ? "News-confirmed momentum with volume confirmation on NVDA."
+          : (parkReason ?? "No candidate cleared the combined signal and risk gates."),
+        hypotheses: [
+          {
+            candidate_id: "nvda-momentum-01",
+            confidence: "medium",
+            thesis: "Supply expansion headline keeps the momentum regime intact for two more sessions.",
+            invalidation: "Failure to hold above the opening range midpoint.",
+            supports: ["alpaca-49128841", "sec-edgar-0001045810-26-000117"],
+            contradicts: [],
+          },
+        ],
+        steps: executes
+          ? [{ candidate_id: "nvda-momentum-01", reason: "Buy the 190 call, defined risk, sizing capped by premium budget.", evidence_refs: ["alpaca-49128841"] }]
+          : [],
+        critic_resolutions: [
+          { critic: "risk", resolution: "accepted", reason: "Premium exposure is 0.3% of equity." },
+        ],
+      },
+    }, at(36)),
+  ];
+  if (executes) {
+    events.push(
+      event("execution", "submitted", "Paper executor submitted the delegated plan; both legs filled.", {
+        cycle_id: cycleId,
+        tool: "alpaca.execute_trade_plan",
+        result: {
+          submitted: true,
+          action: "EXECUTE_PLAN",
+          executions: [
+            executionRecord({
+              symbol: "NVDA260919C00190000", underlying: "NVDA", side: "buy", qty: "2",
+              limit: "1.26", avg: "1.24", kind: "option_entry",
+              reason: "News-confirmed momentum; defined-risk premium sized to 0.3% of equity.",
+              candidate: "nvda-momentum-01",
+            }),
+            executionRecord({
+              symbol: "NVDA", side: "buy", qty: "28", limit: "183.20", avg: "183.10", kind: "entry",
+              reason: "Core equity leg sized by ATR14 inside position headroom.",
+              candidate: "nvda-momentum-01",
+            }),
+          ],
+          errors: [],
+          risk_gate: { passed: true },
+        },
+      }, at(48)),
+    );
+  }
+  events.push(
+    event("session", "ok", "Cycle closed; runtime heartbeats and journals the decision trail.", { cycle_id: cycleId }, at(56)),
+  );
+  return events;
+}
+
+function riskExitEvent() {
+  return event("risk_exit", "ok", "Time stop flattened a dead-band AAPL position at the session review.", {
+    cycle_id: "cycle-043",
+    tool: "risk.evaluate_open_positions",
+    result: {
+      submitted: true,
+      executions: [
+        executionRecord({
+          symbol: "AAPL", side: "sell", qty: "10", limit: "227.80", avg: "227.85", kind: "exit",
+          reason: "45 minutes inside the 0.25x ATR14 dead band; time stop fired.",
+          candidate: "aapl-open-momentum-01",
+        }),
+      ],
+      errors: [],
+    },
+  }, Date.now() - 20 * 60_000);
+}
+
+function seedTimeline() {
+  if (timelineState.events.length > 0) return;
+  timelineState.events = [
+    ...seedCycle("cycle-041", 96, { executes: true }),
+    ...seedCycle("cycle-042", 64, { executes: false, parkReason: "BIDU headline lacked a second source; relative volume under the gate." }),
+    ...seedCycle("cycle-043", 28, { executes: true }),
+    riskExitEvent(),
+    ...seedCycle("cycle-044", 6, { executes: false, parkReason: "Market data gate failed: 16 of 19 symbols passed spread and freshness checks." }),
+  ];
+}
+
+const LIVE_CYCLE_VARIANTS = [
+  { executes: false, parkReason: "No candidate cleared the combined signal and risk gates." },
+  { executes: true },
+  { executes: false, parkReason: "Spread on the AVGO setup widened past the 35bps gate." },
+];
+
+function appendLiveCycle() {
+  seedTimeline();
+  const index = Math.floor((Date.now() - timelineState.startedAt) / 45_000) % LIVE_CYCLE_VARIANTS.length;
+  const cycleId = `cycle-${450 + Math.floor((Date.now() - timelineState.startedAt) / 45_000)}`;
+  timelineState.events.push(...seedCycle(cycleId, 0, LIVE_CYCLE_VARIANTS[index]));
 }
 
 function degradedSnapshot() {
@@ -520,15 +743,55 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
   if (request.method === "OPTIONS") return send(response, 204, {});
   if (url.pathname === "/api/snapshot") return send(response, 200, snapshot());
+  if (url.pathname === "/api/trade-history/orders") {
+    return send(response, 200, { schema: "trade.orders.v1", items: [] });
+  }
   if (url.pathname === "/api/trader/timeline") {
+    seedTimeline();
     const after = Number(url.searchParams.get("after") ?? 0);
     const limit = Number(url.searchParams.get("limit") ?? 200);
-    const items = traderTimeline().filter((item) => item.sequence > after).slice(0, limit);
+    const latest = url.searchParams.has("latest") ? Number(url.searchParams.get("latest")) : null;
+    let items = timelineState.events.filter((item) => item.sequence > after);
+    if (latest !== null) items = items.slice(-latest);
+    else items = items.slice(0, limit);
     return send(response, 200, {
       schema: "trader.timeline.page.v1",
       items,
       next_after: items.at(-1)?.sequence ?? after,
     });
+  }
+  if (url.pathname === "/api/trader/stream") {
+    seedTimeline();
+    const after = Number(url.searchParams.get("after") ?? 0);
+    if (!Number.isInteger(after) || after < 0) {
+      return send(response, 400, { error: "after must be a nonnegative integer" });
+    }
+    response.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+    });
+    let cursor = after;
+    let keepaliveAt = Date.now();
+    let streamTimer = null;
+    const tick = () => {
+      if (response.destroyed) return;
+      if (Math.random() < 0.06) appendLiveCycle();
+      const items = timelineState.events.filter((item) => item.sequence > cursor);
+      for (const item of items) {
+        cursor = item.sequence;
+        response.write(`id: ${cursor}\nevent: trader_event\ndata: ${JSON.stringify(item)}\n\n`);
+      }
+      if (Date.now() - keepaliveAt >= 15_000) {
+        response.write(": keepalive\n\n");
+        keepaliveAt = Date.now();
+      }
+      streamTimer = setTimeout(tick, 1_000);
+    };
+    streamTimer = setTimeout(tick, 1_000);
+    response.on("close", () => clearTimeout(streamTimer));
+    return;
   }
   if (url.pathname === "/api/mock/degraded") {
     state.degraded = url.searchParams.get("on") === "true";

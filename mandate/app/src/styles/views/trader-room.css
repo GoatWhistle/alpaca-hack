@@ -2,62 +2,11 @@
   height: calc(100dvh - 97px);
   min-height: 560px;
   display: grid;
-  grid-template-rows: 58px auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   background:
     radial-gradient(circle at 12% 0%, rgb(74 222 128 / 0.035), transparent 28%),
     var(--ground);
-}
-
-.trader-room-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: 0 var(--space-5);
-  border-bottom: 1px solid var(--line);
-  background: rgb(15 16 20 / 0.92);
-}
-
-.trader-room-header h1 {
-  margin: 2px 0 0;
-  font-size: 17px;
-  letter-spacing: -.02em;
-}
-
-.trader-room-eyebrow,
-.stream-label,
-.fork-label,
-.fork-policy,
-.trader-room-contract {
-  color: var(--ink-faint);
-  font: 500 var(--text-2xs) var(--font-mono);
-  letter-spacing: .11em;
-  text-transform: uppercase;
-}
-
-.trader-room-contract { display: flex; gap: var(--space-5); }
-.trader-room-contract span { display: inline-flex; align-items: center; gap: 7px; }
-
-.live-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--allowed);
-  box-shadow: 0 0 0 4px rgb(74 222 128 / .1);
-}
-
-.trader-room-contract span[data-state="connecting"] .live-dot { background: var(--ink-faint); box-shadow: none; }
-.trader-room-contract span[data-state="degraded"] { color: var(--authority); }
-.trader-room-contract span[data-state="degraded"] .live-dot {
-  background: var(--authority);
-  box-shadow: 0 0 0 4px rgb(214 171 50 / .1);
-}
-
-.trader-room-grid {
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(600px, 1fr) minmax(360px, 420px);
 }
 
 .trading-book {
@@ -86,6 +35,23 @@
 }
 .trading-book > header strong { font: 500 var(--text-xs) var(--font-mono); }
 
+.trading-book-state { display: flex; align-items: center; gap: var(--space-4); }
+.trading-book-state small[data-state] { display: inline-flex; align-items: center; gap: 6px; }
+.trading-book-state small[data-state="degraded"] { color: var(--authority); }
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--allowed);
+  box-shadow: 0 0 0 4px rgb(74 222 128 / .1);
+}
+
+.trading-book-state small[data-state="degraded"] .live-dot {
+  background: var(--authority);
+  box-shadow: 0 0 0 4px rgb(214 171 50 / .1);
+}
+
 .trading-book-cards {
   min-height: 86px;
   max-height: 176px;
@@ -99,38 +65,35 @@
   overscroll-behavior-inline: contain;
 }
 
-.book-position,
 .book-order {
   min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-left: 3px solid var(--allowed);
+  border-left: 3px solid var(--authority);
   border-radius: var(--radius);
   background: var(--surface-inset);
 }
 
-.book-position[data-side="short"] { border-left-color: var(--denied); }
-.book-order { border-left-color: var(--authority); }
+.trading-book-cards .position-card { min-width: 270px; }
 
-.book-position-title,
-.book-position-price { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.book-position-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .book-position-title b { overflow: hidden; font: 600 var(--text-sm) var(--font-mono); text-overflow: ellipsis; }
 .book-position-title em { color: var(--ink-muted); font: 500 var(--text-2xs) var(--font-mono); text-transform: uppercase; }
-.book-position-price { margin-top: 7px; color: var(--ink-muted); font: 400 var(--text-2xs) var(--font-mono); }
-.book-position-price strong { color: var(--ink); font-weight: 500; }
-.book-position-price strong[data-tone="gain"] { color: var(--allowed); }
-.book-position-price strong[data-tone="loss"] { color: var(--denied); }
 
-.book-position details { margin-top: 8px; color: var(--ink-muted); font: 400 var(--text-2xs)/1.5 var(--font-mono); }
-.book-position summary { color: var(--parked); cursor: pointer; user-select: none; }
-.book-position ul { margin: 6px 0 0; padding-left: 16px; }
-.book-position p,
 .book-order p { margin: 7px 0 0; color: var(--ink-muted); font: 400 var(--text-2xs) var(--font-mono); }
 .book-order small { color: var(--authority); font: 500 var(--text-2xs) var(--font-mono); text-transform: uppercase; }
 .trading-book-empty { margin: auto; color: var(--ink-muted); font: 400 var(--text-xs) var(--font-mono); }
 
 .trader-stream-pane,
 .operator-fork-pane { min-width: 0; min-height: 0; }
+
+.trader-room-grid {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+  overflow: hidden;
+}
 
 .trader-stream-pane {
   overflow: hidden;
@@ -140,6 +103,45 @@
 
 .trader-stream-pane > .aui-theme-root { height: 100%; min-height: 0; }
 .trader-stream-pane .aui-thread-root { --thread-max-width: 100% !important; }
+
+/* The read-only stream has no composer: the log runs to the bottom edge and
+   only a floating jump-to-latest button overlays it. */
+.trader-stream-pane [data-slot="aui_thread-viewport"] > div { padding-bottom: 14px; }
+
+.trader-stream-tail {
+  position: relative;
+  display: flex;
+  flex: 0 0 0;
+  height: 0;
+  overflow: visible;
+}
+
+.trader-stream-tail > * {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.trader-quiet-welcome {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding: var(--space-8);
+}
+
+.trader-quiet-welcome p {
+  color: var(--ink-faint);
+  font: 400 var(--text-sm)/1.6 var(--font-mono);
+  text-align: center;
+  max-width: 40ch;
+}
+
+/* The markdown runtime ships a fixed devtools overlay (chunk playback, theme
+   controls) that reads as another chrome layer. It is a debugging aid, not
+   operator surface. */
+.agent-workspace [style*="z-index: 2147483647"] { display: none !important; }
 
 .trader-days-layout {
   height: 100%;
@@ -153,42 +155,19 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 14px 10px;
+  padding: 10px;
   overflow: hidden;
   border-right: 1px solid var(--line);
   background: var(--surface-raised);
-}
-
-.trader-days-layout > aside > span {
-  padding: 0 8px 4px;
-  color: var(--ink-faint);
-  font: 600 var(--text-2xs) var(--font-mono);
-  letter-spacing: .1em;
-  text-transform: uppercase;
 }
 
 .trader-days-layout > aside > *:last-child { min-height: 0; flex: 1; }
 
 .operator-fork-pane {
   display: grid;
-  grid-template-rows: 60px minmax(0, 1fr) 32px;
+  grid-template-rows: minmax(0, 1fr) 32px;
   background: var(--surface);
 }
-
-.operator-fork-pane > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: 0 var(--space-4);
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-raised);
-}
-
-.operator-fork-pane > header div { display: flex; flex-direction: column; gap: 4px; }
-.operator-fork-pane > header strong { font-size: 13px; }
-.fork-label { color: var(--authority); }
-.fork-policy { text-align: right; letter-spacing: .05em; }
 
 .operator-fork-chat { min-height: 0; overflow: hidden; }
 .operator-fork-chat > .aui-theme-root,
@@ -211,7 +190,6 @@
 @media (max-width: 980px) {
   .trader-room-grid { grid-template-columns: minmax(390px, 1fr) minmax(330px, 360px); }
   .trader-days-layout { grid-template-columns: 140px minmax(0, 1fr); }
-  .fork-policy { display: none; }
 }
 
 @media (max-width: 760px) {
@@ -221,8 +199,7 @@
     overflow: visible;
   }
   .trading-book-cards { grid-auto-columns: minmax(260px, 82vw); }
-  .trader-room-header { position: sticky; top: 0; z-index: 4; }
-  .trader-room-contract span:last-child { display: none; }
+  .trading-book > header { position: sticky; top: 0; z-index: 4; }
   .trader-room-grid { display: grid; grid-template-columns: 1fr; grid-template-rows: 54dvh 70dvh; }
   .trader-stream-pane { border-right: 0; border-bottom: 1px solid var(--line-strong); }
   .operator-fork-pane { border-top: 6px solid var(--ground); }

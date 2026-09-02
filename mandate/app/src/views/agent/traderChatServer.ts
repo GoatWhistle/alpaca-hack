@@ -157,56 +157,81 @@ function decisionJournal(plan: Record<string, unknown>, fallback: string): strin
   return capJournal(sections.join("\n\n"));
 }
 
+/** Escape one markdown table cell: pipes break GFM tables, nothing else matters. */
+function cell(value: unknown, limit = 40): string {
+  const text = boundedString(value, limit);
+  return text ? text.replace(/\s+/gu, " ").replaceAll("|", "\\|") : "—";
+}
+
+function boldText(value: unknown, limit: number): string {
+  const text = boundedString(value, limit);
+  return text ? text.replace(/\s+/gu, " ").replaceAll("|", "\\|") : "";
+}
+
+/**
+ * Compact execution summary for the chat stream: one GFM table of fills plus a
+ * short why-line per fill. The full order records stay in the tool result card
+ * and the operator dashboard carries the durable trade log.
+ */
 function executionJournal(event: TraderTimelineEvent): string {
   const result = record(event.details.result);
-  const executions = Array.isArray(result.executions) ? result.executions.slice(0, 24) : [];
-  if (executions.length === 0) {
-    return `**Trade activity · ${event.status}**\n\n${markdownText(event.summary, 4_000) ?? "No summary supplied."}`;
+  const allExecutions = Array.isArray(result.executions) ? result.executions : [];
+  const label = event.kind === "risk_exit" ? "Risk exit" : "Trade activity";
+  if (allExecutions.length === 0) {
+    return `**${label} · ${event.status}**\n\n${markdownText(event.summary, 1_200) ?? "No summary supplied."}`;
   }
-  const cards = executions.map((value, index) => {
+  const executions = allExecutions.slice(0, 12);
+  const rows = executions.map((value) => {
     const execution = record(value);
     const order = record(execution.order);
     const broker = record(execution.result);
-    const side = (markdownText(order.side, 20) ?? markdownText(execution.side, 20) ?? "order").toUpperCase();
-    const symbol = markdownText(order.symbol, 40)
-      ?? markdownText(execution.candidate, 40)
-      ?? markdownText(execution.underlying, 40)
-      ?? `action ${index + 1}`;
-    const kind = markdownText((boundedString(execution.kind, 40) ?? "trade").replaceAll("_", " "), 40) ?? "trade";
-    const status = markdownText(execution.status, 40) ?? "unknown";
-    const filled = markdownText(execution.filled_qty, 40) ?? "0";
-    const requested = markdownText(order.qty, 40) ?? "—";
-    const limit = markdownText(order.limit_price, 60) ?? "—";
-    const average = markdownText(broker.filled_avg_price, 60);
-    const occurredAt = markdownText(broker.filled_at, 80) ?? markdownText(broker.submitted_at, 80);
-    const rationale = markdownText(execution.reason, 800) ?? "No execution rationale supplied.";
-    const candidate = boundedString(execution.plan_candidate_id, 100)
-      ?.replace(/\s+/gu, " ").replaceAll("`", "") ?? null;
-    const policy = record(execution.exit_policy);
-    const policyItems = Object.entries(policy).flatMap(([label, raw]) => {
-      const text = markdownText(raw, 300);
-      const safeLabel = markdownText(label.replaceAll("_", " "), 80) ?? "rule";
-      return text ? [`${safeLabel}: ${text}`] : [];
-    }).slice(0, 6);
-    const lines = [
-      `**${index + 1}. ${side} ${symbol} · ${status}**`,
-      `${kind} · filled ${filled}/${requested} · ${average ? `avg ${average}` : `limit ${limit}`}${occurredAt ? ` · ${occurredAt}` : ""}`,
-      `- Why: ${rationale}`,
-    ];
-    if (candidate) lines.push(`- Candidate: \`${candidate.replaceAll("`", "")}\``);
-    if (policyItems.length > 0) {
-      lines.push(`- Exit plan: ${policyItems.join(" · ")}`);
-    } else if (!kind.includes("exit") && Number(filled) > 0) {
-      lines.push("- Exit plan: managed by the hard-risk engine; exact thresholds were not attached to this legacy fill.");
-    }
-    return lines.join("\n");
+    const symbol = boundedString(order.symbol, 44)
+      ?? boundedString(execution.candidate, 44)
+      ?? boundedString(execution.underlying, 44)
+      ?? "—";
+    const requested = cell(order.qty, 20);
+    const filledQty = boundedString(execution.filled_qty, 20) ?? boundedString(broker.filled_qty, 20);
+    const filledCell = filledQty ? `${filledQty}/${requested}` : `0/${requested}`;
+    const avg = boundedString(broker.filled_avg_price, 24);
+    return [
+      `| ${cell((boundedString(order.side, 12) ?? boundedString(execution.side, 12) ?? "order").toUpperCase(), 12)} `,
+      `| ${cell(symbol, 44)} `,
+      `| ${cell(execution.kind ?? "trade", 26).replaceAll("_", " ")} `,
+      `| ${cell(order.limit_price ?? broker.limit_price, 24)} `,
+      `| ${cell(filledCell, 24)} `,
+      `| ${cell(avg ?? "—", 24)} `,
+      `| ${cell(execution.status ?? broker.status, 24)} |`,
+    ].join("");
   });
+  const table = [
+    "| Side | Instrument | Kind | Limit | Filled | Avg | Status |",
+    "| --- | --- | --- | ---: | ---: | ---: | --- |",
+    ...rows,
+  ].join("\n");
+  const reasons = executions.flatMap((value) => {
+    const execution = record(value);
+    const order = record(execution.order);
+    const symbol = boldText(order.symbol, 44) || boldText(execution.candidate, 44) || boldText(execution.underlying, 44);
+    const why = boldText(execution.reason, 180);
+    if (!symbol && !why) return [];
+    return [`- ${symbol ? `**${symbol}** — ` : ""}${why || "no rationale supplied"}`];
+  }).slice(0, 8);
+  const overflow = allExecutions.length > executions.length
+    ? `\n\n… and ${allExecutions.length - executions.length} more action(s) in the tool result.`
+    : "";
   const errors = stringList(result.errors, 3).map((error) => markdownText(error, 300) ?? "Unknown warning");
   const suffix = errors.length > 0
-    ? `\n\n### Execution warnings\n\n${errors.map((error) => `- ${error}`).join("\n")}`
+    ? `\n\n**Warnings**\n\n${errors.map((error) => `- ${error}`).join("\n")}`
     : "";
-  const summary = markdownText(event.summary, 4_000) ?? "No summary supplied.";
-  return capJournal(`**Trade activity · ${event.status}**\n\n${summary}\n\n### Orders\n\n${cards.join("\n\n")}${suffix}`);
+  const summary = markdownText(event.summary, 280);
+  return capJournal([
+    `**${label} · ${event.status}**`,
+    summary ?? "",
+    table,
+    reasons.length > 0 ? `**Why**\n\n${reasons.join("\n")}` : "",
+    overflow,
+    suffix,
+  ].filter((section) => section !== "").join("\n\n"));
 }
 
 function safeForPublicChat(value: unknown, depth = 0): unknown {

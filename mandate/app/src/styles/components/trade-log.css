@@ -1,0 +1,99 @@
+.trade-list { display: flex; flex-direction: column; }
+
+.trade-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid var(--authority);
+}
+
+.trade-row:last-child { border-bottom: 0; }
+.trade-row[data-tone="filled"] { border-left-color: var(--allowed); }
+.trade-row[data-tone="rejected"] { border-left-color: var(--denied); }
+.trade-row[data-tone="working"] { border-left-color: var(--authority); }
+
+.trade-main { min-width: 0; }
+
+.trade-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.trade-title b {
+  overflow: hidden;
+  font: 600 var(--text-sm) var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trade-kind {
+  color: var(--ink-faint);
+  font: 500 var(--text-2xs) var(--font-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.trade-terms {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: 3px;
+  color: var(--ink-muted);
+  font: 400 var(--text-2xs) var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.trade-terms span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trade-terms time { flex: 0 0 auto; color: var(--ink-faint); }
+
+.trade-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.trade-side em {
+  font: 600 var(--text-2xs) var(--font-mono);
+  font-style: normal;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.trade-side em[data-tone="filled"] { color: var(--allowed); }
+.trade-side em[data-tone="rejected"] { color: var(--denied); }
+.trade-side em[data-tone="working"] { color: var(--authority); }
+
+.trade-side small {
+  color: var(--ink-faint);
+  font: 400 var(--text-2xs) var(--font-mono);
+}
+
+.trade-reason {
+  grid-column: 1 / -1;
+  color: var(--ink-muted);
+  font: 400 var(--text-2xs)/1.5 var(--font-mono);
+}
+
+.trade-reason summary { color: var(--parked); cursor: pointer; user-select: none; }
+.trade-reason p { margin: 5px 0 3px; }
+.trade-reason .trade-reason-exit { color: var(--ink-faint); }
+.trade-reason small { color: var(--ink-faint); }
+
+.trade-log-error {
+  margin: 0;
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--line);
+  color: var(--authority);
+  font: 500 var(--text-2xs) var(--font-mono);
+}
