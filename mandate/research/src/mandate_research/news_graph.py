@@ -352,46 +352,63 @@ class NewsGraphStore:
                 "UPDATE stories SET current_event_id = ? WHERE story_id = ?",
                 (current["event_id"], story_id),
             )
-            self._rebuild_relations(connection)
+            self._refresh_story_relations(connection, story_id)
         return IngestResult(story_id, event["event_id"], story_created, True)
 
-    def _rebuild_relations(self, connection: sqlite3.Connection) -> None:
-        rows = connection.execute(
+    def _refresh_story_relations(self, connection: sqlite3.Connection, story_id: str) -> None:
+        """Recompute only edges touching the changed story (O(stories), not O(stories²))."""
+        current = connection.execute(
             """
-            SELECT s.story_id, s.source, r.published_at, r.headline, r.summary, r.url
+            SELECT s.story_id, r.published_at, r.headline, r.summary, r.url
             FROM stories s JOIN revisions r ON r.event_id = s.current_event_id
-            ORDER BY s.story_id
+            WHERE s.story_id = ?
+            """,
+            (story_id,),
+        ).fetchone()
+        if current is None:
+            raise KeyError(story_id)
+        others = connection.execute(
             """
+            SELECT s.story_id, r.published_at, r.headline, r.summary, r.url
+            FROM stories s JOIN revisions r ON r.event_id = s.current_event_id
+            WHERE s.story_id != ? ORDER BY s.story_id
+            """,
+            (story_id,),
         ).fetchall()
-        connection.execute("DELETE FROM story_relations")
-        for index, left in enumerate(rows):
-            for right in rows[index + 1:]:
-                left_content = _normalized_content(left["headline"], left["summary"])
-                right_content = _normalized_content(right["headline"], right["summary"])
-                same_content = bool(left_content) and left_content == right_content
-                left_url = _normalized_url(left["url"])
-                right_url = _normalized_url(right["url"])
-                same_url = bool(left_url and right_url and left_url == right_url)
-                if same_content or same_url:
-                    reason = "same_normalized_content" if same_content else "same_url"
-                    connection.execute(
-                        "INSERT INTO story_relations VALUES (?, ?, 'DUPLICATE_OF', ?, 1.0)",
-                        (left["story_id"], right["story_id"], reason),
-                    )
-                    continue
-                left_time = datetime.fromisoformat(left["published_at"])
-                right_time = datetime.fromisoformat(right["published_at"])
-                if abs(left_time - right_time) > RELATED_WINDOW:
-                    continue
-                similarity = _jaccard(_headline_tokens(left["headline"]), _headline_tokens(right["headline"]))
-                if similarity >= RELATED_JACCARD_THRESHOLD:
-                    connection.execute(
-                        "INSERT INTO story_relations VALUES (?, ?, 'RELATED_TO', ?, ?)",
-                        (
-                            left["story_id"], right["story_id"],
-                            f"headline_jaccard_{similarity:.6f}", round(similarity, 6),
-                        ),
-                    )
+        connection.execute(
+            "DELETE FROM story_relations WHERE left_story_id = ? OR right_story_id = ?",
+            (story_id, story_id),
+        )
+        for other in others:
+            left, right = (current, other) if story_id < other["story_id"] else (other, current)
+            left_content = _normalized_content(left["headline"], left["summary"])
+            right_content = _normalized_content(right["headline"], right["summary"])
+            same_content = bool(left_content) and left_content == right_content
+            left_url = _normalized_url(left["url"])
+            right_url = _normalized_url(right["url"])
+            same_url = bool(left_url and right_url and left_url == right_url)
+            if same_content or same_url:
+                reason = "same_normalized_content" if same_content else "same_url"
+                connection.execute(
+                    "INSERT INTO story_relations VALUES (?, ?, 'DUPLICATE_OF', ?, 1.0)",
+                    (left["story_id"], right["story_id"], reason),
+                )
+                continue
+            left_time = datetime.fromisoformat(left["published_at"])
+            right_time = datetime.fromisoformat(right["published_at"])
+            if abs(left_time - right_time) > RELATED_WINDOW:
+                continue
+            similarity = _jaccard(
+                _headline_tokens(left["headline"]), _headline_tokens(right["headline"]),
+            )
+            if similarity >= RELATED_JACCARD_THRESHOLD:
+                connection.execute(
+                    "INSERT INTO story_relations VALUES (?, ?, 'RELATED_TO', ?, ?)",
+                    (
+                        left["story_id"], right["story_id"],
+                        f"headline_jaccard_{similarity:.6f}", round(similarity, 6),
+                    ),
+                )
 
     def revision(self, event_id: str) -> dict[str, Any]:
         with self._connect() as connection:
