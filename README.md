@@ -96,7 +96,7 @@ News is not mandatory for a trade. Price-only and macro-price opportunities are 
 
 - Monitor continuously without waiting for chat messages.
 - React to both scheduled cycles and fresh market events.
-- Produce one ranked portfolio decision at a time, with up to two entries and two risk-reducing exits per cycle.
+- Produce one ranked portfolio decision at a time, with up to two entries and two normal risk-reducing exits per cycle; flatten every remaining intraday position after 15:50 ET.
 - Explain every trade, exit, reversal and refusal with a concise market-based reason.
 - Avoid generic inactivity explanations.
 - Avoid repeating research already supplied by the current evaluation.

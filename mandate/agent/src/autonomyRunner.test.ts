@@ -194,6 +194,14 @@ test("bare and fenced JSON are accepted while prose is preserved as fallback rea
   );
 });
 
+test("a malformed final decision marker does not hide an earlier valid marker", () => {
+  const text = [
+    'DECISION_JSON: {"action":"PARK","candidate":null,"candidates":[],"reason":"valid fallback","hard_contradiction":true}',
+    "DECISION_JSON: {broken",
+  ].join("\n");
+  assert.equal(parseModelDecision(text)?.reason, "valid fallback");
+});
+
 test("prompt bounds stale alert context before it reaches the model", () => {
   const alerts = Array.from({ length: 25 }, (_, index) => ({
     ...event,
@@ -299,7 +307,7 @@ test("liquidity-admitted movers expand only the current trading cycle", () => {
   assert.deepEqual(trajectory.symbols, ["AAPL"]);
 });
 
-test("IPO discovery exposes bounded research evidence without expanding authority", () => {
+test("non-execution-ready IPO discovery remains observation-only", () => {
   const market = {
     checked_at: "2026-08-27T10:05:00Z", feed: "iex", market_is_open: true, sources: {},
     quality: {}, benchmark: {}, corporate_actions: [], options_confirmation: {},
@@ -319,7 +327,21 @@ test("IPO discovery exposes bounded research evidence without expanding authorit
   const prompt = buildAutonomyPrompt(trajectory, [], market);
   assert.match(prompt, /IPO_CANDIDATE: SYMBOL/);
   assert.match(prompt, /OUTSIDE_MANDATE/);
-  assert.match(prompt, /research proposal, not an order proposal/);
+  assert.match(prompt, /OBSERVATION_ONLY/);
+  assert.match(prompt, /execution_ready is the stricter live-liquidity gate/);
+});
+
+test("execution-ready IPO joins only the current trading universe", () => {
+  const market = {
+    checked_at: "2026-08-27T10:05:00Z", feed: "iex", market_is_open: true, sources: {},
+    quality: {}, benchmark: {}, corporate_actions: [], options_confirmation: {},
+    discovery: { ipos: { candidates: [{
+      symbol: "NEWC", execution_ready: true, research_ready: true,
+      quality: { quality_pass: true }, alpaca: { tradable: true },
+    }] } },
+  } satisfies MarketResult;
+  assert.deepEqual(activeTradingSymbols(trajectory, market), ["NEWC", "AAPL"]);
+  assert.deepEqual(trajectory.symbols, ["AAPL"]);
 });
 
 test("proposal safety fails closed on market hours and any missing quality evidence", () => {

@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 
 import { TrueForge } from "@truefoundry/trueforge-sdk";
 import { HttpsProxyAgent } from "https-proxy-agent";
-import { AlpacaRealtimeMonitor, type StreamState } from "./realtimeMonitor.js";
+import { AlpacaRealtimeMonitor, type StreamState, type WakeReason } from "./realtimeMonitor.js";
 import { loadWorkspaceEnv } from "./workspaceEnv.js";
 
 const execFileAsync = promisify(execFile);
@@ -125,7 +125,7 @@ type RuntimeState = {
   last_research?: Record<string, unknown>;
   corporate_action_events?: number;
   outcomes_observed?: number;
-  pipeline_stage?: "monitoring" | "signals" | "challenge" | "broker" | "execution";
+  pipeline_stage?: "monitoring" | "signals" | "challenge" | "broker" | "execution" | "risk_exit";
   pipeline_note?: string;
   last_reason?: string;
   last_candidate?: string;
@@ -267,12 +267,12 @@ export function buildAutonomyPrompt(
     `Measured 60m outcome scorecard (trusted local aggregation; descriptive, not predictive): ${JSON.stringify(outcomeScorecard)}`,
     `Precomputed deterministic trajectory evaluation (trusted local JSON): ${JSON.stringify(precomputedEvaluation ?? {})}`,
     `Discovery watchlist not yet liquidity-admitted (top 3): ${JSON.stringify(watchlist)}`,
-    `Fresh IPO research candidates (top 3, observation-only JSON): ${JSON.stringify(ipoCandidates)}`,
+    `Fresh IPO candidates (top 3; execution_ready candidates are eligible for trading): ${JSON.stringify(ipoCandidates)}`,
     "Only symbols explicitly present in Active execution symbols may cause PROPOSE. Other discovery names remain observation-only until the deterministic monitor admits them on spread, relative volume and Alpaca tradability.",
     "You may call compare_live_signals once per non-admitted watchlist symbol for research, but its result cannot cause PROPOSE during this cycle.",
     "For each credible IPO candidate, assess the listing age, offer-price distance, spread, relative volume, price confirmation, borrowability, company/news catalyst, lock-up and dilution risk. research_ready only makes it worth investigating; execution_ready is the stricter live-liquidity gate. Never infer fundamentals that are absent from evidence.",
-    "Report at most three additions as `IPO_CANDIDATE: SYMBOL | why now | liquidity and risks | OUTSIDE_MANDATE`. This is a research proposal, not an order proposal: ACTION must remain PARK unless a separate in-mandate symbol is executable.",
-    "IPO monitoring is a separate non-blocking workflow. Never spawn IPO research or delay an in-mandate trade during this execution cycle; only report the compact observation for the IPO tab.",
+    "Report at most three non-execution-ready IPOs as `IPO_CANDIDATE: SYMBOL | why now | liquidity and risks | OBSERVATION_ONLY`. An execution-ready IPO is eligible for PROPOSE and should be preferred when its evidence is stronger than ordinary symbols.",
+    "IPO monitoring is non-blocking. Do not delay exits or a ready execution candidate; execution-ready IPOs are first-class entries and research-ready-only IPOs remain observation-only.",
     "Short entries are valid when the strategy consensus is SELL, sizing is supplied by evaluate_trajectory, and live Alpaca asset state is shortable/easy-to-borrow. Never turn an unavailable short into a long trade.",
     trajectory.execution_mode === "auto_paper"
       ? "The supplied execution context already includes current Alpaca positions. The trusted runner may execute up to two exits, refresh actual positions, then submit up to two challenged entries per cycle. The first eligible entry is expressed as a defined-loss long option or level-3 defined-risk debit spread when the account and chain permit; otherwise it falls back to equity."
@@ -312,7 +312,10 @@ export function activeTradingSymbols(
   const admitted = Array.isArray(market.discovery.auto_admitted)
     ? market.discovery.auto_admitted.map(String).map((value) => value.trim().toUpperCase())
     : [];
-  return [...new Set([...trajectory.symbols, ...admitted])]
+  const ipoExecutionReady = ipoDiscoveryCandidates(market, trajectory.symbols)
+    .filter((item) => item.execution_ready === true)
+    .map((item) => String(item.symbol));
+  return [...new Set([...ipoExecutionReady, ...trajectory.symbols, ...admitted])]
     .filter((value) => /^[A-Z][A-Z0-9.-]{0,9}$/u.test(value))
     .slice(0, 30);
 }
@@ -561,7 +564,7 @@ async function pollNews(trajectory: Trajectory): Promise<PollResult> {
   return decoded as PollResult;
 }
 
-async function pollMarket(trajectory: Trajectory): Promise<MarketResult> {
+async function pollMarket(trajectory: Trajectory, full = true): Promise<MarketResult> {
   const python = process.env.MANDATE_PYTHON ?? "python3";
   const { stdout } = await execFileAsync(
     python,
@@ -569,10 +572,10 @@ async function pollMarket(trajectory: Trajectory): Promise<MarketResult> {
       marketScript,
       "--symbols", trajectory.symbols.join(","),
       "--feed", trajectory.market_data_feed,
-      "--discovery", String(trajectory.discovery_enabled),
+      "--discovery", String(full && trajectory.discovery_enabled),
       "--discovery-top", String(trajectory.discovery_top),
-      "--corporate-actions", String(trajectory.monitor_corporate_actions),
-      "--options-confirmation", String(trajectory.options_confirmation),
+      "--corporate-actions", String(full && trajectory.monitor_corporate_actions),
+      "--options-confirmation", String(full && trajectory.options_confirmation),
       "--max-spread-bps", String(trajectory.max_spread_bps),
       "--min-relative-volume", String(trajectory.min_relative_volume),
     ],
@@ -670,6 +673,7 @@ async function precomputeTrajectoryEvaluation(
   trajectory: Trajectory,
   alerts: NewsEvent[],
   outcomeScorecard: OutcomeScorecard,
+  market?: MarketResult,
 ): Promise<Record<string, unknown>> {
   const [rawAccount, rawPositions] = await Promise.all([
     alpacaPaperGet("/v2/account"),
@@ -690,7 +694,7 @@ async function precomputeTrajectoryEvaluation(
     }, 0) / equityNumber * 100
     : Number.NaN;
   const configuredPositionPct = Number(process.env.MANDATE_MAX_POSITION_PCT ?? 40);
-  const configuredGrossPct = Number(process.env.MANDATE_MAX_GROSS_EXPOSURE_PCT ?? 200);
+  const configuredGrossPct = Number(process.env.MANDATE_MAX_GROSS_EXPOSURE_PCT ?? 100);
   if (!Number.isFinite(configuredPositionPct) || configuredPositionPct <= 0 || configuredPositionPct > 100) {
     throw new Error("MANDATE_MAX_POSITION_PCT must be greater than 0 and at most 100");
   }
@@ -724,8 +728,13 @@ async function precomputeTrajectoryEvaluation(
     : 1;
   const postureRisk = { defensive: 0.5, balanced: 1.0, opportunistic: 1.5 }[trajectory.risk_posture];
   const postureAtr = { defensive: 1.2, balanced: 1.0, opportunistic: 0.9 }[trajectory.risk_posture];
-  const priorities = [...new Set(alerts.flatMap((alert) => alert.symbols))]
-    .filter((symbol) => trajectory.symbols.includes(symbol));
+  const ipoPriorities = ipoDiscoveryCandidates(market, trajectory.symbols)
+    .filter((item) => item.execution_ready === true)
+    .map((item) => String(item.symbol));
+  const priorities = [...new Set([
+    ...ipoPriorities,
+    ...alerts.flatMap((alert) => alert.symbols),
+  ])].filter((symbol) => trajectory.symbols.includes(symbol));
   const python = process.env.MANDATE_PYTHON ?? "python3";
   const { stdout } = await execFileAsync(python, [
     evaluationScript,
@@ -870,7 +879,7 @@ async function executeDirectPaperOrder(
           : resolve(mandateDir, "logs/session.jsonl"),
       },
       maxBuffer: 4 * 1024 * 1024,
-      timeout: 90_000,
+      timeout: 120_000,
     });
     return object(JSON.parse(stdout) as unknown, "direct paper execution");
   } finally {
@@ -1026,7 +1035,7 @@ export function parseModelDecision(text: string): ModelDecision | null {
         candidates: selected,
       };
     } catch {
-      return null;
+      continue;
     }
   }
   return null;
@@ -1314,7 +1323,11 @@ async function main(): Promise<void> {
   let lastIpoSignal = "";
   let wakeResolver: (() => void) | undefined;
   let wakePromise = new Promise<void>((resolveWake) => { wakeResolver = resolveWake; });
-  const wake = (): void => wakeResolver?.();
+  let pendingMarketWake = false;
+  const wake = (reason: WakeReason): void => {
+    if (reason === "market") pendingMarketWake = true;
+    wakeResolver?.();
+  };
   const initialTrajectory = await readTrajectory(trajectoryPath);
   const realtime = new AlpacaRealtimeMonitor(
     initialTrajectory,
@@ -1341,7 +1354,14 @@ async function main(): Promise<void> {
       return trajectory.news_poll_seconds * 1000;
     }
     try {
-      const [poll, market] = await Promise.all([pollNews(trajectory), pollMarket(trajectory)]);
+      const cycleStartedMs = Date.now();
+      const scheduledAnalysisDue = lastAnalysisMs === 0
+        || cycleStartedMs - lastAnalysisMs >= trajectory.analysis_interval_minutes * 60_000;
+      const [poll, market] = await Promise.all([
+        pollNews(trajectory), pollMarket(trajectory, scheduledAnalysisDue),
+      ]);
+      const marketExitWake = pendingMarketWake;
+      pendingMarketWake = false;
       const activeSymbols = activeTradingSymbols(trajectory, market);
       const activeTrajectory: Trajectory = { ...trajectory, symbols: activeSymbols };
       const realtimeNews = realtime.drainNews();
@@ -1392,6 +1412,33 @@ async function main(): Promise<void> {
         corporate_action_events: market.corporate_actions.length,
         outcomes_observed: outcomes.filter((item) => Object.keys(item.forward_returns_pct).length > 0).length,
       };
+      if (marketExitWake && !analysisDue && detected.fresh.length === 0 && !ipoChanged
+        && market.market_is_open && trajectory.execution_mode === "auto_paper") {
+        runtime = {
+          ...runtime,
+          status: "analyzing",
+          pipeline_stage: "risk_exit",
+          pipeline_note: "Realtime bar triggered a stop/target/expiry exit pass",
+        };
+        await writeJsonAtomic(runtimePath, runtime);
+        const execution = await executeDirectPaperOrder(
+          { market_is_open: true, checked_at: market.checked_at, symbols: {} },
+          {
+            action: "PARK", candidate: null, candidates: [],
+            reason: "realtime risk-only exit pass", hard_contradiction: true,
+          },
+          runtimePath,
+        );
+        runtime = {
+          ...runtime,
+          status: "running",
+          last_execution: execution,
+          last_action: execution.submitted === true ? "SUBMITTED" : runtime.last_action,
+          last_reason: execution.submitted === true
+            ? String(execution.reason ?? "Realtime risk exit submitted")
+            : runtime.last_reason,
+        };
+      }
       if (analysisDue || detected.fresh.length > 0 || ipoChanged) {
         runtime = {
           ...runtime,
@@ -1420,8 +1467,12 @@ async function main(): Promise<void> {
         try {
           const scorecard = buildOutcomeScorecard(outcomes);
           const precomputedEvaluation = await precomputeTrajectoryEvaluation(
-            activeTrajectory, detected.fresh, scorecard
+            activeTrajectory, detected.fresh, scorecard, market
           );
+          const executionContext = object(precomputedEvaluation.execution_context, "execution context");
+          executionContext.ipo_symbols = ipoCandidates
+            .filter((item) => item.execution_ready === true)
+            .map((item) => String(item.symbol));
           const candidateCount = Array.isArray(precomputedEvaluation.research_candidates)
             ? precomputedEvaluation.research_candidates.length
             : 0;

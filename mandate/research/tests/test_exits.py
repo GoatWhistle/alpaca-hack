@@ -126,6 +126,21 @@ def test_tracking_prunes_closed_symbols() -> None:
     assert set(result["first_seen"]) == {"AAPL"}
 
 
+def test_malformed_position_isolated_from_valid_stop() -> None:
+    result = evaluate_position_exits(
+        positions=[
+            _position("AAPL", "10", "100"),
+            {"symbol": "BROKEN", "qty": "1", "avg_entry_price": "not-a-price"},
+        ],
+        last_prices={"AAPL": "95"},
+        atr14={"AAPL": "2"},
+        first_seen={},
+        now=NOW,
+    )
+    assert result["proposals"][0]["reason"] == "long_stop"
+    assert result["unevaluated"][0]["symbol"] == "BROKEN"
+
+
 def test_naive_now_is_rejected() -> None:
     with pytest.raises(ValueError):
         evaluate_position_exits(

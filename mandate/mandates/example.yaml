@@ -5,7 +5,7 @@ order_types: [limit]
 session: regular_hours_only
 limits:
   max_position_pct: 40
-  max_gross_exposure_pct: 200
+  max_gross_exposure_pct: 100
   max_daily_loss_pct: 10
   max_orders_per_day: 200
 wake_me_if:

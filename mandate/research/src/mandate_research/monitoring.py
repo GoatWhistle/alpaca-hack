@@ -339,17 +339,22 @@ def _ipo_research(
             candidate["quality"] = quality
             candidate["execution_ready"] = quality["quality_pass"]
             candidate["research_ready"] = bool(
-                change is not None and change > 0
+                change is not None and change != 0
                 and relative_volume is not None and relative_volume >= Decimal("1")
                 and isinstance(freshest_seconds, int) and freshest_seconds <= 1800
+            )
+            candidate["research_direction"] = (
+                "long" if change is not None and change > 0
+                else "short" if change is not None and change < 0 else None
             )
             candidate["research_warnings"] = quality["quality_failures"]
 
     def rank(item: dict[str, Any]) -> tuple[int, Decimal, Decimal, int]:
         quality = item.get("quality") if isinstance(item.get("quality"), dict) else {}
+        change = _decimal(quality.get("session_change_pct"))
         return (
             int(item.get("research_ready") is True),
-            _decimal(quality.get("session_change_pct")) or Decimal("-999"),
+            abs(change) if change is not None else Decimal("-1"),
             _decimal(quality.get("relative_volume")) or Decimal("-1"),
             -int(item["days_since_listing"]),
         )

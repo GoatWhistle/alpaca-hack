@@ -7,7 +7,8 @@ import type { NewsEvent, Trajectory } from "./autonomyRunner.js";
 type StreamStatus = "disabled" | "connecting" | "connected" | "degraded";
 export type StreamState = { news: StreamStatus; market: StreamStatus; lastEventAt?: string };
 type StatusCallback = (status: StreamState) => void;
-type WakeCallback = () => void;
+export type WakeReason = "news" | "market";
+type WakeCallback = (reason: WakeReason) => void;
 
 function records(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) return [];
@@ -36,6 +37,10 @@ export function parseNewsMessages(value: unknown): NewsEvent[] {
   });
 }
 
+export function containsMarketBar(value: unknown): boolean {
+  return records(value).some((item) => item.T === "b");
+}
+
 export class AlpacaRealtimeMonitor {
   private newsSocket?: WebSocket;
   private marketSocket?: WebSocket;
@@ -44,6 +49,7 @@ export class AlpacaRealtimeMonitor {
   private reconnectAttempts = { news: 0, market: 0 };
   private trajectory: Trajectory;
   private lastStatusEmitMs = 0;
+  private lastMarketWakeMs = 0;
   private status: { news: StreamStatus; market: StreamStatus; lastEventAt?: string } = {
     news: "disabled",
     market: "disabled",
@@ -124,7 +130,7 @@ export class AlpacaRealtimeMonitor {
         this.news.push(...incoming);
         this.status.lastEventAt = new Date().toISOString();
         this.emitStatus();
-        this.onWake();
+        this.onWake("news");
       }
     });
     socket.addEventListener("error", () => this.setStatus("news", "degraded"));
@@ -139,6 +145,7 @@ export class AlpacaRealtimeMonitor {
     socket.addEventListener("open", () => this.authenticate(socket));
     socket.addEventListener("message", (event) => {
       const payload = this.decode(event.data);
+      const shouldWakeForBar = containsMarketBar(payload);
       for (const item of records(payload)) {
         if (item.T === "success" && item.msg === "authenticated") {
           socket.send(JSON.stringify({
@@ -153,6 +160,10 @@ export class AlpacaRealtimeMonitor {
           this.status.lastEventAt = new Date().toISOString();
           if (Date.now() - this.lastStatusEmitMs >= 5_000) this.emitStatus();
         }
+      }
+      if (shouldWakeForBar && Date.now() - this.lastMarketWakeMs >= 30_000) {
+        this.lastMarketWakeMs = Date.now();
+        this.onWake("market");
       }
     });
     socket.addEventListener("error", () => this.setStatus("market", "degraded"));

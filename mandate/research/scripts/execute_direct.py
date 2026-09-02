@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 import hashlib
 import json
+from math import gcd
 import os
 from pathlib import Path
 import re
 import time
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -21,6 +23,10 @@ PAPER_HOST = "paper-api.alpaca.markets"
 DATA_HOST = "data.alpaca.markets"
 TERMINAL_ORDER_STATUSES = {"filled", "canceled", "expired", "rejected", "replaced", "done_for_day"}
 OPTION_SYMBOL = re.compile(r"^([A-Z]{1,6})(\d{6})([CP])(\d{8})$")
+ZERO = Decimal("0")
+ONE = Decimal("1")
+NEW_YORK = ZoneInfo("America/New_York")
+CLIENT_ORDER_PREFIX = "mandate-direct-"
 
 
 def _object(value: Any, label: str) -> dict[str, Any]:
@@ -34,6 +40,77 @@ def _decimal(value: Any, label: str) -> Decimal:
     if not result.is_finite():
         raise ValueError(f"{label} must be finite")
     return result
+
+
+def _mandate_limits() -> dict[str, Decimal]:
+    """Read the small scalar limits block without adding a YAML dependency."""
+    raw_path = Path(os.environ.get("MANDATE_PATH", "mandates/example.yaml"))
+    candidates = [raw_path] if raw_path.is_absolute() else [Path.cwd() / raw_path, Path(__file__).resolve().parents[2] / raw_path]
+    path = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if path is None:
+        return {}
+    limits: dict[str, Decimal] = {}
+    in_limits = False
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            in_limits = stripped == "limits:"
+            continue
+        if not in_limits or indent < 2 or ":" not in stripped:
+            continue
+        key, raw = stripped.split(":", 1)
+        try:
+            limits[key.strip()] = _decimal(raw.split("#", 1)[0].strip(), f"mandate {key.strip()}")
+        except ValueError:
+            continue
+    return limits
+
+
+def _configured_limit(
+    limits: dict[str, Decimal], key: str, env_name: str, default: str,
+) -> Decimal:
+    if key in limits:
+        return limits[key]
+    raw = os.environ.get(env_name)
+    return _decimal(raw if raw not in {None, ""} else default, key)
+
+
+def _execution_state_path() -> Path:
+    root = Path(__file__).resolve().parents[2]
+    raw = Path(os.environ.get("MANDATE_EXECUTION_STATE_PATH", "logs/execution-state.json"))
+    return raw if raw.is_absolute() else root / raw
+
+
+def _read_execution_state() -> dict[str, Any]:
+    try:
+        payload = json.loads(_execution_state_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"symbols": {}}
+    return payload if isinstance(payload, dict) else {"symbols": {}}
+
+
+def _write_execution_state(state: dict[str, Any]) -> None:
+    path = _execution_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(state, indent=2, default=str) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def _now_et() -> datetime:
+    return datetime.now(timezone.utc).astimezone(NEW_YORK)
+
+
+def _after_flatten_window(now: datetime | None = None) -> bool:
+    value = (now or _now_et()).astimezone(NEW_YORK)
+    return (value.hour, value.minute) >= (15, 50)
 
 
 def _paper_base_url() -> str:
@@ -109,6 +186,15 @@ class PaperBroker:
         payload = self.request("GET", "/v2/positions")
         if not isinstance(payload, list):
             raise RuntimeError("Alpaca positions response must be a list")
+        return [item for item in payload if isinstance(item, dict)]
+
+    def orders(self, *, status: str = "all", after: str | None = None) -> list[dict[str, Any]]:
+        params = {"status": status, "limit": "500", "direction": "desc", "nested": "true"}
+        if after:
+            params["after"] = after
+        payload = self.request("GET", "/v2/orders", params=params)
+        if not isinstance(payload, list):
+            raise RuntimeError("Alpaca orders response must be a list")
         return [item for item in payload if isinstance(item, dict)]
 
     def asset(self, symbol: str) -> dict[str, Any]:
@@ -197,7 +283,7 @@ def select_entries(
     existing = existing_symbols or set()
     entries: list[dict[str, Any]] = []
     for symbol in _ordered_candidates(evaluation, decision):
-        if symbol in existing:
+        if symbol == "SPY" or symbol in existing:
             continue
         item = _object(symbols.get(symbol), f"{symbol} evaluation")
         ensemble = _object(
@@ -273,26 +359,52 @@ def select_exits(evaluation: dict[str, Any], positions: list[dict[str, Any]], *,
         strategies = item.get("strategies") if isinstance(item.get("strategies"), dict) else {}
         ensemble = strategies.get("regime_ensemble") if isinstance(strategies.get("regime_ensemble"), dict) else {}
         direction = ensemble.get("direction")
-        qty = _decimal(position.get("qty"), f"{symbol} position qty")
+        try:
+            strength = _decimal(ensemble.get("strength") or 0, f"{symbol} ensemble strength")
+            reversal_floor = _decimal(
+                os.environ.get("MANDATE_REVERSAL_MIN_STRENGTH", "0.20"), "reversal strength floor"
+            )
+            qty = _decimal(position.get("qty"), f"{symbol} position qty")
+        except ValueError:
+            continue
         opposite = (qty > 0 and direction == "sell") or (qty < 0 and direction == "buy")
         market = item.get("market") if isinstance(item.get("market"), dict) else {}
-        if not opposite or market.get("last") is None:
+        if not opposite or strength < reversal_floor or market.get("last") is None:
             continue
-        last = _decimal(market["last"], f"{symbol} last")
+        try:
+            last = _decimal(market["last"], f"{symbol} last")
+        except ValueError:
+            continue
         side = "sell" if qty > 0 else "buy"
         proposals.append({
             "symbol": symbol,
             "order_side": side,
             "qty": str(abs(qty)),
             "limit_price": str(_limit_price(last, side)),
-            "rationale": f"ensemble reversal: position {'long' if qty > 0 else 'short'} while signal is {direction}",
+            "rationale": (
+                f"ensemble reversal: position {'long' if qty > 0 else 'short'} while signal is "
+                f"{direction} at strength {strength}"
+            ),
             "reason": "ensemble_reversal",
             "urgency": "immediate",
             "age_minutes": 0,
         })
 
+    # Never submit an exit whose side would increase the current position.
+    # This protects against stale evaluator state and Alpaca wash-trade rejects.
+    position_sides = {
+        str(item.get("symbol", "")).upper(): _decimal(item.get("qty", 0), "position qty")
+        for item in equities
+    }
+    safe_proposals = [
+        value for value in proposals
+        if (
+            (position_sides.get(str(value.get("symbol", "")).upper(), ZERO) < 0 and value.get("order_side") == "buy")
+            or (position_sides.get(str(value.get("symbol", "")).upper(), ZERO) > 0 and value.get("order_side") == "sell")
+        )
+    ]
     ranked = sorted(
-        proposals,
+        safe_proposals,
         key=lambda value: (0 if value.get("urgency") == "immediate" else 1, -int(value.get("age_minutes", 0))),
     )
     return [{
@@ -302,6 +414,7 @@ def select_exits(evaluation: dict[str, Any], positions: list[dict[str, Any]], *,
         "qty": str(value["qty"]),
         "limit_price": str(value["limit_price"]),
         "rationale": str(value["rationale"]),
+        "exit_reason": str(value.get("reason") or "risk_exit"),
     } for value in ranked[:limit]]
 
 
@@ -318,6 +431,120 @@ def _option_parts(symbol: str) -> tuple[date, str, Decimal] | None:
     return expiration, match.group(3), Decimal(match.group(4)) / Decimal("1000")
 
 
+def _option_underlying(symbol: str) -> str | None:
+    match = OPTION_SYMBOL.fullmatch(symbol)
+    return match.group(1) if match is not None else None
+
+
+def select_option_exits(
+    positions: list[dict[str, Any]], *, now: datetime | None = None, limit: int = 2,
+    first_seen: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Build risk exits for option positions, preserving up to four related legs atomically."""
+    checked_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    flatten = _after_flatten_window(checked_at)
+    stop_pct = _decimal(os.environ.get("MANDATE_OPTION_STOP_LOSS_PCT", "25"), "option stop loss")
+    target_pct = _decimal(os.environ.get("MANDATE_OPTION_PROFIT_TARGET_PCT", "40"), "option profit target")
+    exit_dte = int(os.environ.get("MANDATE_OPTION_EXIT_DTE", "2"))
+    time_stop_minutes = int(os.environ.get("MANDATE_OPTION_TIME_STOP_MINUTES", "180"))
+    dead_band_pct = _decimal(os.environ.get("MANDATE_OPTION_DEAD_BAND_PCT", "10"), "option dead band")
+    tracked = first_seen or {}
+    grouped: dict[tuple[str, date, str], list[dict[str, Any]]] = {}
+    for position in positions:
+        if str(position.get("asset_class", "")) != "us_option":
+            continue
+        symbol = str(position.get("symbol", "")).upper()
+        parts = _option_parts(symbol)
+        underlying = _option_underlying(symbol)
+        if parts is None or underlying is None:
+            continue
+        try:
+            qty = _decimal(position.get("qty"), f"{symbol} option qty")
+            current = _decimal(position.get("current_price"), f"{symbol} current price")
+            if qty == ZERO or current <= ZERO or qty != qty.to_integral_value():
+                continue
+        except ValueError:
+            continue
+        grouped.setdefault((underlying, parts[0], parts[1]), []).append({**position, "_qty": qty, "_current": current})
+
+    actions: list[dict[str, Any]] = []
+    for (underlying, expiration, kind), legs in sorted(grouped.items()):
+        cost = sum((abs(_decimal(item.get("cost_basis") or 0, "option cost basis")) for item in legs), ZERO)
+        pnl = sum((_decimal(item.get("unrealized_pl") or 0, "option unrealized P/L") for item in legs), ZERO)
+        pnl_pct = pnl / cost * Decimal("100") if cost > ZERO else ZERO
+        dte = (expiration - checked_at.date()).days
+        raw_seen = tracked.get(underlying)
+        try:
+            seen = datetime.fromisoformat(str(raw_seen).replace("Z", "+00:00")) if raw_seen else checked_at
+            age_minutes = max(0, int((checked_at - seen.astimezone(timezone.utc)).total_seconds() // 60))
+        except ValueError:
+            age_minutes = 0
+        if flatten:
+            reason = "session_flatten_1550"
+        elif dte <= exit_dte:
+            reason = f"option_expiry_guard_{dte}dte"
+        elif pnl_pct <= -stop_pct:
+            reason = f"option_stop_{pnl_pct.quantize(Decimal('0.01'))}pct"
+        elif pnl_pct >= target_pct:
+            reason = f"option_target_{pnl_pct.quantize(Decimal('0.01'))}pct"
+        elif age_minutes >= time_stop_minutes and abs(pnl_pct) <= dead_band_pct:
+            reason = f"option_time_stop_{age_minutes}m"
+        else:
+            continue
+        # Alpaca mleg supports at most four legs. A larger group is split into
+        # deterministic chunks; normal strategy construction produces 1-4 legs.
+        for chunk_start in range(0, len(legs), 4):
+            chunk = legs[chunk_start:chunk_start + 4]
+            quantities = [int(abs(item["_qty"])) for item in chunk]
+            common_qty = quantities[0]
+            for value in quantities[1:]:
+                common_qty = gcd(common_qty, value)
+            ratios = [value // common_qty for value in quantities]
+            net_credit = sum(
+                item["_current"] * Decimal(ratio) * (ONE if item["_qty"] > ZERO else -ONE)
+                for item, ratio in zip(chunk, ratios)
+            )
+            if len(chunk) == 1:
+                item = chunk[0]
+                side = "sell" if item["_qty"] > ZERO else "buy"
+                price = (
+                    item["_current"] * (Decimal("0.98") if side == "sell" else Decimal("1.02"))
+                ).quantize(Decimal("0.01"), rounding=ROUND_FLOOR if side == "sell" else ROUND_CEILING)
+                actions.append({
+                    "kind": "option_exit", "symbol": str(item["symbol"]), "underlying": underlying,
+                    "side": side, "qty": str(common_qty), "limit_price": str(max(Decimal("0.01"), price)),
+                    "rationale": reason, "exit_reason": reason,
+                    "limit_chase": "down" if side == "sell" else "up",
+                    "payload": {
+                        "symbol": str(item["symbol"]), "qty": str(common_qty), "side": side,
+                        "type": "limit", "limit_price": str(max(Decimal("0.01"), price)),
+                        "time_in_force": "day",
+                        "position_intent": "sell_to_close" if side == "sell" else "buy_to_close",
+                    },
+                })
+                continue
+            chase_up = net_credit < ZERO
+            raw_price = abs(net_credit) * (Decimal("1.02") if chase_up else Decimal("0.98"))
+            price = max(Decimal("0.01"), raw_price).quantize(
+                Decimal("0.01"), rounding=ROUND_CEILING if chase_up else ROUND_FLOOR
+            )
+            payload_legs = [{
+                "symbol": str(item["symbol"]), "ratio_qty": str(ratio),
+                "side": "sell" if item["_qty"] > ZERO else "buy",
+                "position_intent": "sell_to_close" if item["_qty"] > ZERO else "buy_to_close",
+            } for item, ratio in zip(chunk, ratios)]
+            actions.append({
+                "kind": "option_exit_mleg", "symbol": underlying, "side": "buy" if chase_up else "sell",
+                "qty": str(common_qty), "limit_price": str(price), "rationale": reason,
+                "exit_reason": reason, "limit_chase": "up" if chase_up else "down",
+                "payload": {
+                    "qty": str(common_qty), "order_class": "mleg", "type": "limit",
+                    "limit_price": str(price), "time_in_force": "day", "legs": payload_legs,
+                },
+            })
+    return actions if flatten else actions[:limit]
+
+
 def _option_quote(symbol: str, snapshot: Any) -> dict[str, Any] | None:
     if not isinstance(snapshot, dict):
         return None
@@ -330,7 +557,7 @@ def _option_quote(symbol: str, snapshot: Any) -> dict[str, Any] | None:
         return None
     mid = (bid + ask) / Decimal("2")
     spread_pct = (ask - bid) / mid * Decimal("100")
-    if spread_pct > Decimal(os.environ.get("MANDATE_OPTION_MAX_SPREAD_PCT", "15")):
+    if spread_pct > Decimal(os.environ.get("MANDATE_OPTION_MAX_SPREAD_PCT", "8")):
         return None
     parts = _option_parts(symbol)
     if parts is None:
@@ -404,11 +631,20 @@ def build_option_order(
         if debit <= Decimal("0.02") or debit >= width * Decimal("0.90"):
             use_spread = False
     if use_spread and short_leg is not None:
-        debit = (long_leg["ask"] - short_leg["bid"]).quantize(Decimal("0.01"), rounding=ROUND_CEILING)
+        marketable_debit = long_leg["ask"] - short_leg["bid"]
+        midpoint_debit = long_leg["mid"] - short_leg["mid"]
         width = abs(long_leg["strike"] - short_leg["strike"])
-        limit_price = min(width * Decimal("0.95"), debit * Decimal("1.03")).quantize(
-            Decimal("0.01"), rounding=ROUND_CEILING
-        )
+        if midpoint_debit <= Decimal("0.02") or marketable_debit <= Decimal("0.02"):
+            use_spread = False
+        else:
+            limit_price = min(width * Decimal("0.90"), midpoint_debit * Decimal("1.02")).quantize(
+                Decimal("0.01"), rounding=ROUND_CEILING
+            )
+            max_limit_price = min(width * Decimal("0.90"), marketable_debit * Decimal("1.02")).quantize(
+                Decimal("0.01"), rounding=ROUND_CEILING
+            )
+    if use_spread and short_leg is not None:
+        width = abs(long_leg["strike"] - short_leg["strike"])
         max_loss = limit_price * Decimal("100")
         contracts_qty = min(20, int((available_budget / max_loss).to_integral_value(rounding=ROUND_FLOOR)))
         if contracts_qty < 1:
@@ -419,7 +655,8 @@ def build_option_order(
             "side": entry["side"],
             "qty": str(contracts_qty),
             "limit_price": str(limit_price),
-            "max_limit_price": str((width * Decimal("0.95")).quantize(Decimal("0.01"))),
+            "max_limit_price": str(max_limit_price),
+            "limit_chase": "up",
             "rationale": f"defined-risk {'bull call' if desired_kind == 'C' else 'bear put'} spread for {entry['rationale']}",
             "payload": {
                 "qty": str(contracts_qty),
@@ -434,7 +671,9 @@ def build_option_order(
             },
         }
 
-    limit_price = (long_leg["ask"] * Decimal("1.02")).quantize(Decimal("0.01"), rounding=ROUND_CEILING)
+    limit_price = (long_leg["mid"] * Decimal("1.01")).quantize(
+            Decimal("0.01"), rounding=ROUND_CEILING
+        )
     max_loss = limit_price * Decimal("100")
     contracts_qty = min(20, int((available_budget / max_loss).to_integral_value(rounding=ROUND_FLOOR)))
     if contracts_qty < 1:
@@ -445,7 +684,8 @@ def build_option_order(
         "side": entry["side"],
         "qty": str(contracts_qty),
         "limit_price": str(limit_price),
-        "max_limit_price": str((limit_price * Decimal("1.12")).quantize(Decimal("0.01"))),
+        "max_limit_price": str((long_leg["ask"] * Decimal("1.01")).quantize(Decimal("0.01"), rounding=ROUND_CEILING)),
+        "limit_chase": "up",
         "rationale": f"defined-loss long {'call' if desired_kind == 'C' else 'put'} for {entry['rationale']}",
         "payload": {
             "symbol": long_leg["symbol"],
@@ -465,11 +705,106 @@ def _client_order_id(action: dict[str, Any], checked_at: Any, index: int) -> str
         str(action["qty"]), str(checked_at), str(index),
     ))
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
-    return f"mandate-direct-{str(action['symbol']).lower()}-{digest}"
+    return f"{CLIENT_ORDER_PREFIX}{str(action['symbol']).lower()}-{digest}"
+
+
+def _refresh_exit_action(broker: PaperBroker, action: dict[str, Any]) -> dict[str, Any]:
+    """Re-read broker state and clamp every close so stale data cannot flip a position."""
+    if "exit" not in str(action.get("kind", "")):
+        return action
+    live = {str(item.get("symbol", "")).upper(): item for item in broker.positions()}
+    payload = dict(action.get("payload") or {})
+    if payload.get("order_class") == "mleg" and isinstance(payload.get("legs"), list):
+        allowed_parent: int | None = None
+        for leg in payload["legs"]:
+            if not isinstance(leg, dict):
+                raise ValueError("option exit contains an invalid leg")
+            symbol = str(leg.get("symbol", "")).upper()
+            position = live.get(symbol)
+            if position is None:
+                raise ValueError(f"{symbol} option position no longer exists")
+            qty = _decimal(position.get("qty"), f"{symbol} live qty")
+            side = str(leg.get("side"))
+            if not ((qty > ZERO and side == "sell") or (qty < ZERO and side == "buy")):
+                raise ValueError(f"{symbol} exit side would increase or flip the live position")
+            ratio = int(_decimal(leg.get("ratio_qty"), f"{symbol} ratio"))
+            allowed = int(abs(qty)) // ratio
+            allowed_parent = allowed if allowed_parent is None else min(allowed_parent, allowed)
+        parent_qty = min(int(_decimal(payload.get("qty"), "mleg exit qty")), allowed_parent or 0)
+        if parent_qty < 1:
+            raise ValueError("option exit has no remaining live quantity")
+        refreshed = dict(action)
+        refreshed["qty"] = str(parent_qty)
+        refreshed["payload"] = {**payload, "qty": str(parent_qty)}
+        return refreshed
+
+    target_symbol = str(payload.get("symbol") or action.get("symbol", "")).upper()
+    position = live.get(target_symbol)
+    if position is None:
+        raise ValueError(f"{target_symbol} position no longer exists")
+    live_qty = _decimal(position.get("qty"), f"{target_symbol} live qty")
+    side = str(action.get("side"))
+    if not ((live_qty > ZERO and side == "sell") or (live_qty < ZERO and side == "buy")):
+        raise ValueError(f"{target_symbol} exit side would increase or flip the live position")
+    quantity = min(int(abs(live_qty)), int(_decimal(action.get("qty"), "exit qty")))
+    if quantity < 1:
+        raise ValueError(f"{target_symbol} exit has no remaining live quantity")
+    refreshed = dict(action)
+    refreshed["qty"] = str(quantity)
+    if payload:
+        refreshed["payload"] = {**payload, "qty": str(quantity)}
+    return refreshed
+
+
+def _cancel_tagged_open_orders(broker: PaperBroker) -> list[str]:
+    cancelled: list[str] = []
+    for order in broker.orders(status="open"):
+        client_id = str(order.get("client_order_id") or "")
+        order_id = str(order.get("id") or "")
+        if not client_id.startswith(CLIENT_ORDER_PREFIX) or not order_id:
+            continue
+        try:
+            broker.cancel(order_id)
+            cancelled.append(client_id)
+        except RuntimeError:
+            continue
+    return cancelled
+
+
+def _entry_risk_gate(broker: PaperBroker, account: dict[str, Any]) -> dict[str, Any]:
+    limits = _mandate_limits()
+    max_daily_loss = _configured_limit(limits, "max_daily_loss_pct", "MANDATE_MAX_DAILY_LOSS_PCT", "10")
+    entry_stop = _decimal(os.environ.get("MANDATE_DAILY_ENTRY_STOP_PCT", "8"), "daily entry stop")
+    max_orders = int(_configured_limit(limits, "max_orders_per_day", "MANDATE_MAX_ORDERS_PER_DAY", "200"))
+    equity = _decimal(account.get("equity") or 0, "account equity")
+    last_equity = _decimal(account.get("last_equity") or equity, "account last equity")
+    daily_loss_pct = max(ZERO, (last_equity - equity) / last_equity * Decimal("100")) if last_equity > ZERO else ZERO
+    day_start = _now_et().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).isoformat()
+    try:
+        orders_today = len(broker.orders(status="all", after=day_start))
+        order_count_available = True
+    except RuntimeError:
+        orders_today = 0
+        order_count_available = False
+    reasons: list[str] = []
+    if daily_loss_pct >= min(entry_stop, max_daily_loss):
+        reasons.append(f"daily_loss_{daily_loss_pct.quantize(Decimal('0.01'))}pct")
+    if orders_today >= max_orders:
+        reasons.append(f"order_budget_{orders_today}_of_{max_orders}")
+    if not order_count_available:
+        reasons.append("order_count_unavailable")
+    return {
+        "allow_entries": not reasons,
+        "reasons": reasons,
+        "daily_loss_pct": str(daily_loss_pct.quantize(Decimal("0.01"))),
+        "entry_stop_pct": str(min(entry_stop, max_daily_loss)),
+        "orders_today": orders_today,
+        "max_orders_per_day": max_orders,
+    }
 
 
 def _equity_payload(action: dict[str, Any]) -> dict[str, Any]:
-    return {
+    payload = {
         "symbol": action["symbol"],
         "side": action["side"],
         "qty": action["qty"],
@@ -478,6 +813,9 @@ def _equity_payload(action: dict[str, Any]) -> dict[str, Any]:
         "time_in_force": "day",
         "extended_hours": False,
     }
+    if action.get("kind") == "exit":
+        payload["position_intent"] = "sell_to_close" if action["side"] == "sell" else "buy_to_close"
+    return payload
 
 
 def _cap_entry_to_headroom(
@@ -504,6 +842,24 @@ def _cap_entry_to_headroom(
     return bounded, unit_headroom * Decimal(quantity)
 
 
+def _cap_ipo_action(action: dict[str, Any], equity: Decimal, ipo_symbols: set[str]) -> dict[str, Any]:
+    """Keep newly listed names small while still allowing aggressive selection."""
+    if str(action.get("symbol", "")).upper() not in ipo_symbols:
+        return action
+    max_notional = equity * Decimal(os.environ.get("MANDATE_IPO_MAX_POSITION_PCT", "2")) / Decimal("100")
+    price = _decimal(action.get("limit_price", 0), "IPO limit price")
+    multiplier = Decimal("100") if str(action.get("kind", "")).startswith("option") else Decimal("1")
+    max_qty = int((max_notional / (price * multiplier)).to_integral_value(rounding=ROUND_FLOOR))
+    if max_qty < 1:
+        return {}
+    bounded = dict(action)
+    bounded["qty"] = str(min(int(_decimal(action["qty"], "IPO quantity")), max_qty))
+    if isinstance(action.get("payload"), dict):
+        bounded["payload"] = {**action["payload"], "qty": bounded["qty"]}
+    bounded["rationale"] = f"IPO capped at {os.environ.get('MANDATE_IPO_MAX_POSITION_PCT', '2')}% equity; {action.get('rationale', '')}"
+    return bounded
+
+
 def execute_with_lifecycle(
     broker: PaperBroker,
     action: dict[str, Any],
@@ -511,14 +867,20 @@ def execute_with_lifecycle(
     checked_at: Any,
     index: int,
 ) -> dict[str, Any]:
+    action = _refresh_exit_action(broker, action)
     client_order_id = _client_order_id(action, checked_at, index)
     payload = dict(action.get("payload") or _equity_payload(action))
+    payload["qty"] = action["qty"]
+    payload["limit_price"] = action["limit_price"]
     payload["client_order_id"] = client_order_id
     existing = broker.order_by_client_id(client_order_id)
     deduplicated = existing is not None
     current = existing or broker.submit(payload)
     attempts = max(1, min(5, int(os.environ.get("MANDATE_FILL_ATTEMPTS", "3"))))
     wait_seconds = max(0.0, min(10.0, float(os.environ.get("MANDATE_FILL_WAIT_SECONDS", "3"))))
+    if "exit" in str(action.get("kind", "")):
+        attempts = min(attempts, 2)
+        wait_seconds = min(wait_seconds, 1.0)
     replacements = 0
     for attempt in range(attempts):
         status = str(current.get("status", "")).lower()
@@ -531,8 +893,13 @@ def execute_with_lifecycle(
         if status in TERMINAL_ORDER_STATUSES or attempt == attempts - 1:
             break
         old_limit = _decimal(current.get("limit_price") or payload["limit_price"], "working limit")
-        if str(action["kind"]).startswith("option") or action["side"] == "buy":
-            next_limit = old_limit * Decimal("1.003")
+        chase = str(action.get("limit_chase") or ("up" if action["side"] == "buy" else "down"))
+        if chase == "up":
+            if str(action["kind"]).startswith("option") and action.get("max_limit_price") is not None:
+                maximum = _decimal(action["max_limit_price"], "max limit")
+                next_limit = old_limit + (maximum - old_limit) * Decimal("0.5")
+            else:
+                next_limit = old_limit * Decimal("1.003")
             rounding = ROUND_CEILING
         else:
             next_limit = old_limit * Decimal("0.997")
@@ -563,6 +930,7 @@ def execute_with_lifecycle(
         "replacements": replacements,
         "kind": action["kind"],
         "candidate": action["symbol"],
+        "underlying": _action_underlying(action),
         "reason": action["rationale"],
         "order": payload,
         "result": current,
@@ -595,6 +963,71 @@ def _journal(execution: dict[str, Any]) -> None:
         stream.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
 
+def _journal_diagnostic(kind: str, details: dict[str, Any]) -> None:
+    path = Path(os.environ.get("MANDATE_JOURNAL_PATH", "./logs/session.jsonl"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "action": kind,
+        "outcome": "observed",
+        "rationale": kind.replace("_", " "),
+        "details": details,
+    }
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+
+def _action_underlying(action: dict[str, Any]) -> str:
+    explicit = str(action.get("underlying") or "").upper()
+    if explicit:
+        return explicit
+    symbol = str(action.get("symbol") or "").upper()
+    return _option_underlying(symbol) or symbol
+
+
+def _cooldown_active(state: dict[str, Any], symbol: str, *, now: datetime) -> bool:
+    symbols = state.get("symbols") if isinstance(state.get("symbols"), dict) else {}
+    item = symbols.get(symbol) if isinstance(symbols.get(symbol), dict) else {}
+    raw = item.get("last_exit_at")
+    if not isinstance(raw, str):
+        return False
+    try:
+        exited = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    minutes = max(0, int(os.environ.get("MANDATE_REENTRY_COOLDOWN_MINUTES", "10")))
+    return now - exited.astimezone(timezone.utc) < timedelta(minutes=minutes)
+
+
+def _record_fills(state: dict[str, Any], executions: list[dict[str, Any]]) -> None:
+    symbols = state.setdefault("symbols", {})
+    if not isinstance(symbols, dict):
+        symbols = {}
+        state["symbols"] = symbols
+    at = datetime.now(timezone.utc).isoformat()
+    for execution in executions:
+        if execution.get("filled") is not True:
+            continue
+        symbol = _action_underlying({
+            "symbol": execution.get("candidate"),
+            "underlying": execution.get("underlying"),
+        })
+        if not symbol:
+            continue
+        item = symbols.setdefault(symbol, {})
+        if not isinstance(item, dict):
+            item = {}
+            symbols[symbol] = item
+        kind = str(execution.get("kind") or "")
+        if "exit" in kind:
+            item["last_exit_at"] = at
+            item.pop("first_seen_at", None)
+        else:
+            item["last_entry_at"] = at
+            item.setdefault("first_seen_at", at)
+    state["updated_at"] = at
+
+
 def execute(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
     if evaluation.get("market_is_open") is not True:
         return {
@@ -603,9 +1036,41 @@ def execute(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[str, A
             "executions": [], "errors": [],
         }
     broker = PaperBroker()
+    recovered_orders = _cancel_tagged_open_orders(broker)
     account = broker.account()
     positions = broker.positions()
-    exit_actions = select_exits(evaluation, positions, limit=2)
+    checked_at = datetime.now(timezone.utc)
+    state = _read_execution_state()
+    state_symbols = state.setdefault("symbols", {})
+    if not isinstance(state_symbols, dict):
+        state_symbols = {}
+        state["symbols"] = state_symbols
+    live_option_underlyings: set[str] = set()
+    for position in positions:
+        if str(position.get("asset_class", "")) != "us_option":
+            continue
+        underlying = _option_underlying(str(position.get("symbol", "")).upper())
+        if not underlying:
+            continue
+        live_option_underlyings.add(underlying)
+        item = state_symbols.setdefault(underlying, {})
+        if isinstance(item, dict):
+            item.setdefault("first_seen_at", checked_at.isoformat())
+    for symbol, item in state_symbols.items():
+        if isinstance(item, dict) and symbol not in live_option_underlyings:
+            item.pop("first_seen_at", None)
+    after_flatten = _after_flatten_window(checked_at)
+    exit_limit = max(2, len(positions)) if after_flatten else 2
+    equity_exits = select_exits(evaluation, positions, limit=exit_limit)
+    option_first_seen = {
+        symbol: str(item.get("first_seen_at"))
+        for symbol, item in state_symbols.items()
+        if isinstance(item, dict) and item.get("first_seen_at")
+    }
+    option_exits = select_option_exits(
+        positions, now=checked_at, limit=exit_limit, first_seen=option_first_seen,
+    )
+    exit_actions = equity_exits + option_exits
     executions: list[dict[str, Any]] = []
     errors: list[str] = []
 
@@ -624,21 +1089,37 @@ def execute(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[str, A
     if exit_actions:
         positions = broker.positions()
         account = broker.account()
-    existing_equities = {
-        str(item.get("symbol", "")).upper()
-        for item in positions
-        if str(item.get("asset_class", "us_equity")) == "us_equity"
-    }
-    entries = select_entries(evaluation, decision, existing_symbols=existing_equities, limit=2)
+    equity = _decimal(account.get("equity", 0), "account equity")
+    existing_underlyings: set[str] = set()
+    for item in positions:
+        symbol = str(item.get("symbol", "")).upper()
+        if not symbol:
+            continue
+        existing_underlyings.add(_option_underlying(symbol) or symbol)
+    risk_gate = _entry_risk_gate(broker, account)
+    entries = [] if after_flatten or risk_gate["allow_entries"] is not True else select_entries(
+        evaluation, decision, existing_symbols=existing_underlyings, limit=2
+    )
+    entries = [
+        entry for entry in entries
+        if not _cooldown_active(state, str(entry["symbol"]), now=checked_at)
+    ]
     option_exposure = sum(
         abs(_decimal(item.get("market_value") or 0, "option market value"))
         for item in positions if str(item.get("asset_class", "")) == "us_option"
     )
-    equity = _decimal(account.get("equity", 0), "account equity")
     buying_power = max(Decimal("0"), _decimal(account.get("buying_power") or account.get("cash") or 0, "buying power"))
-    gross_limit_pct = _decimal(os.environ.get("MANDATE_MAX_GROSS_EXPOSURE_PCT", "200"), "gross exposure limit")
+    limits = _mandate_limits()
+    gross_limit_pct = _configured_limit(
+        limits, "max_gross_exposure_pct", "MANDATE_MAX_GROSS_EXPOSURE_PCT", "100"
+    )
+    position_limit_pct = _configured_limit(
+        limits, "max_position_pct", "MANDATE_MAX_POSITION_PCT", "40"
+    )
     if gross_limit_pct <= 0 or gross_limit_pct > Decimal("400"):
         raise ValueError("MANDATE_MAX_GROSS_EXPOSURE_PCT must be greater than 0 and at most 400")
+    if position_limit_pct <= 0 or position_limit_pct > Decimal("100"):
+        raise ValueError("MANDATE_MAX_POSITION_PCT must be greater than 0 and at most 100")
     existing_gross = sum(
         abs(_decimal(item.get("market_value") or 0, "position market value")) for item in positions
     )
@@ -648,13 +1129,39 @@ def execute(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[str, A
     )
     option_slots = max(0, min(2, int(os.environ.get("MANDATE_OPTIONS_PER_CYCLE", "1"))))
     entry_actions: list[dict[str, Any]] = []
+    option_status: dict[str, Any] = {
+        "enabled": os.environ.get("MANDATE_OPTIONS_ENABLED", "true").lower() == "true",
+        "approved_level": int(account.get("options_approved_level") or account.get("options_trading_level") or 0),
+        "attempted": 0,
+        "constructed": 0,
+        "fallbacks": [],
+    }
+    execution_context = evaluation.get("execution_context")
+    execution_context = execution_context if isinstance(execution_context, dict) else {}
+    ipo_symbols = {
+        str(value).strip().upper() for value in execution_context.get("ipo_symbols", [])
+        if str(value).strip()
+    }
     for entry in entries:
         action: dict[str, Any] | None = None
         if len(entry_actions) < option_slots:
+            option_status["attempted"] += 1
             try:
                 action = build_option_order(broker, entry, account, option_exposure=option_exposure)
-            except (RuntimeError, ValueError):
+            except (RuntimeError, ValueError) as exc:
+                option_status["fallbacks"].append({
+                    "symbol": entry["symbol"], "reason": f"{type(exc).__name__}:{str(exc)[:120]}"
+                })
                 action = None
+            if action is None and not any(
+                item.get("symbol") == entry["symbol"] for item in option_status["fallbacks"]
+            ):
+                option_status["fallbacks"].append({
+                    "symbol": entry["symbol"],
+                    "reason": "disabled_permission_liquidity_or_option_risk_gate",
+                })
+            elif action is not None:
+                option_status["constructed"] += 1
         if action is None:
             asset = broker.asset(str(entry["symbol"]))
             if asset.get("tradable") is not True:
@@ -664,7 +1171,11 @@ def execute(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[str, A
             ):
                 continue
             action = entry
-        bounded, allocated = _cap_entry_to_headroom(action, portfolio_headroom)
+        action = _cap_ipo_action(action, equity, ipo_symbols)
+        if not action:
+            continue
+        action_headroom = min(portfolio_headroom, equity * position_limit_pct / Decimal("100"))
+        bounded, allocated = _cap_entry_to_headroom(action, action_headroom)
         if bounded is None:
             continue
         action = bounded
@@ -677,6 +1188,17 @@ def execute(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[str, A
             )
         entry_actions.append(action)
 
+    fallback_signature = json.dumps(option_status["fallbacks"], sort_keys=True)
+    if option_status["fallbacks"] and state.get("last_option_fallback") != fallback_signature:
+        _journal_diagnostic("option_fallback", option_status)
+        state["last_option_fallback"] = fallback_signature
+    risk_signature = json.dumps(risk_gate["reasons"], sort_keys=True)
+    if risk_gate["allow_entries"] is not True and state.get("last_risk_gate") != risk_signature:
+        _journal_diagnostic("entry_risk_gate", risk_gate)
+        state["last_risk_gate"] = risk_signature
+    elif risk_gate["allow_entries"] is True:
+        state.pop("last_risk_gate", None)
+
     for offset, action in enumerate(entry_actions, start=len(exit_actions)):
         try:
             execution = execute_with_lifecycle(
@@ -686,6 +1208,8 @@ def execute(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[str, A
             _journal(execution)
         except (RuntimeError, ValueError) as exc:
             errors.append(f"{action['symbol']} {action['kind']}: {str(exc)[:180]}")
+    _record_fills(state, executions)
+    _write_execution_state(state)
     actions = exit_actions + entry_actions
     accepted = [
         item for item in executions
@@ -694,12 +1218,23 @@ def execute(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[str, A
     ]
     filled = [item for item in executions if item.get("filled") is True]
     if not actions:
-        return {"action": "PARK", "submitted": False, "filled": False, "reason": "no exit or challenged entry"}
+        gate_reason = "; ".join(risk_gate["reasons"])
+        return {
+            "action": "PARK", "submitted": False, "filled": False,
+            "reason": (
+                "intraday flatten window: new entries parked" if after_flatten
+                else f"entry risk gate: {gate_reason}" if gate_reason
+                else "no exit or challenged entry"
+            ),
+            "executions": executions, "errors": errors, "risk_gate": risk_gate,
+            "option_status": option_status, "recovered_orders": recovered_orders,
+        }
     if not accepted:
         return {
             "action": "PARK", "submitted": False, "filled": False,
             "reason": "; ".join(errors[:3]) or "portfolio actions remained unfilled and were cancelled",
-            "executions": executions, "errors": errors,
+            "executions": executions, "errors": errors, "risk_gate": risk_gate,
+            "option_status": option_status, "recovered_orders": recovered_orders,
         }
     candidates = [str(item["candidate"]) for item in accepted]
     return {
@@ -714,6 +1249,9 @@ def execute(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[str, A
         "candidates": candidates,
         "executions": executions,
         "errors": errors,
+        "risk_gate": risk_gate,
+        "option_status": option_status,
+        "recovered_orders": recovered_orders,
     }
 
 

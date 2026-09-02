@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
@@ -92,24 +93,37 @@ def evaluate_position_exits(
     market_time = now.astimezone(NEW_YORK)
     session_flatten = (market_time.hour, market_time.minute) >= (15, 50)
 
+    validated: list[tuple[str, Decimal, Decimal]] = []
     for position in positions:
         if not isinstance(position, dict):
-            raise ValueError("each position must be an object")
-        symbol = str(position.get("symbol", "")).strip().upper()
-        if not symbol:
-            raise ValueError("position symbol cannot be blank")
-        qty = _decimal(position.get("qty"), f"{symbol} qty")
-        if qty == ZERO:
+            unevaluated.append({"symbol": "", "reason": "invalid_position_object"})
             continue
-        entry = _decimal(position.get("avg_entry_price"), f"{symbol} avg_entry_price")
-        if entry <= ZERO:
-            raise ValueError(f"{symbol} avg_entry_price must be positive")
+        symbol = str(position.get("symbol", "")).strip().upper()
+        try:
+            if not symbol:
+                raise ValueError("position symbol cannot be blank")
+            qty = _decimal(position.get("qty"), f"{symbol} qty")
+            if qty == ZERO:
+                continue
+            entry = _decimal(position.get("avg_entry_price"), f"{symbol} avg_entry_price")
+            if entry <= ZERO:
+                raise ValueError(f"{symbol} avg_entry_price must be positive")
+        except ValueError as exc:
+            unevaluated.append({"symbol": symbol, "reason": f"invalid_position:{str(exc)[:120]}"})
+            continue
+        validated.append((symbol, qty, entry))
+
+    for symbol, qty, entry in validated:
         tracking[symbol] = str(first_seen.get(symbol) or seen_now)
         if symbol not in last_prices or symbol not in atr14:
             unevaluated.append({"symbol": symbol, "reason": "missing_price_or_atr"})
             continue
-        last = _decimal(last_prices[symbol], f"{symbol} last")
-        atr = _decimal(atr14[symbol], f"{symbol} atr14")
+        try:
+            last = _decimal(last_prices[symbol], f"{symbol} last")
+            atr = _decimal(atr14[symbol], f"{symbol} atr14")
+        except ValueError as exc:
+            unevaluated.append({"symbol": symbol, "reason": f"invalid_market_data:{str(exc)[:120]}"})
+            continue
         if last <= ZERO or atr <= ZERO:
             unevaluated.append({"symbol": symbol, "reason": "nonpositive_price_or_atr"})
             continue
@@ -234,9 +248,10 @@ def collect_exit_inputs(
     atr14: dict[str, str] = {}
     checked_at = datetime.now(timezone.utc)
     start = checked_at - timedelta(days=45)
-    for symbol in normalized:
+
+    def fetch_atr(symbol: str) -> tuple[str, str] | None:
         if symbol not in last_prices:
-            continue
+            return None
         bars_url = ALPACA_BARS_ENDPOINT.format(symbol=symbol) + "?" + urlencode(
             {
                 "timeframe": "1Hour",
@@ -249,7 +264,13 @@ def collect_exit_inputs(
             }
         )
         bars = _bars_to_price_bars(_paginated_bars(bars_url, headers, fetcher))
-        atr14[symbol] = str(average_true_range(bars))
+        return symbol, str(average_true_range(bars))
+
+    workers = min(8, max(1, len(normalized)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        for result in executor.map(fetch_atr, normalized):
+            if result is not None:
+                atr14[result[0]] = result[1]
     return last_prices, atr14
 
 
