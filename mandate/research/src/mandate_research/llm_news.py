@@ -22,8 +22,11 @@ from mandate_research.news_graph import (
 
 JsonPoster = Callable[[str, dict[str, str], dict[str, Any]], dict[str, Any]]
 DECISIONS = {"PASS", "SKIP"}
-MAX_ITEMS = 20
-MAX_OUTPUT_TOKENS = 1_024
+# Each response item echoes a 64-hex request_id plus schema and reason, roughly
+# 90 output tokens. Twenty items at 1024 tokens truncated most batches and
+# surfaced as "model omitted request"; eight items at 4096 tokens leaves headroom.
+MAX_ITEMS = 8
+MAX_OUTPUT_TOKENS = 4_096
 MAX_CACHE_ITEMS = 4_096
 GATE_RETRY_COOLDOWN_SECONDS = 300
 _CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
@@ -76,10 +79,10 @@ def _gate_error(
 def _validate_response(value: Any, request_id: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("news gate response must be an object")
-    required_order = ["schema", "request_id", "reason", "decision"]
-    if list(value) != required_order:
+    required_fields = {"schema", "request_id", "reason", "decision"}
+    if set(value) != required_fields:
         raise ValueError(
-            "news gate response fields must be ordered schema, request_id, reason, decision"
+            "news gate response fields must be exactly schema, request_id, reason, decision"
         )
     if value.get("schema") != GATE_RESPONSE_SCHEMA:
         raise ValueError(f"schema must be {GATE_RESPONSE_SCHEMA}")

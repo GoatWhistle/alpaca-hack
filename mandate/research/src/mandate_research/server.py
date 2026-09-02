@@ -15,6 +15,7 @@ from mandate_research.llm_news import gate_news_llm as gate_llm
 from mandate_research.monitoring import collect_market_monitoring as collect_monitoring
 from mandate_research.news_graph import NewsGraphStore
 from mandate_research.trader_memory import append_operator_memory, read_active_memory
+from mandate_research.trader_context import read_trader_context
 from mandate_research.decision_math import evaluate_trajectory as evaluate_math
 from mandate_research.exits import run_exit_evaluation as run_exits_default
 from mandate_research.env import load_workspace_env
@@ -44,6 +45,7 @@ def create_server(
     run_exits: Callable[..., dict[str, Any]] = run_exits_default,
     news_store_path: str | Path | None = None,
     trader_memory_path: str | Path | None = None,
+    trader_timeline_path: str | Path | None = None,
     host: str = "127.0.0.1",
     port: int = 8020,
 ) -> FastMCP:
@@ -71,6 +73,13 @@ def create_server(
         or os.environ.get(
             "MANDATE_TRADER_MEMORY_PATH",
             Path(__file__).resolve().parents[3] / "logs" / "trader-memory.jsonl",
+        )
+    )
+    active_timeline_path = Path(
+        trader_timeline_path
+        or os.environ.get(
+            "MANDATE_TRADER_TIMELINE_PATH",
+            Path(__file__).resolve().parents[3] / "logs" / "trader-timeline.jsonl",
         )
     )
 
@@ -113,6 +122,15 @@ def create_server(
             "schema": "trader.memory.page.v1",
             "items": read_active_memory(active_memory_path),
         }
+
+    @mcp.tool(annotations=READ_ONLY)
+    def get_trader_context(max_events: int = 12) -> dict[str, Any]:
+        """Read the compact live trader timeline and approved durable memory."""
+        return read_trader_context(
+            active_timeline_path,
+            active_memory_path,
+            max_events=max_events,
+        )
 
     @mcp.tool(annotations=APPROVAL_WRITE)
     def append_trader_memory(

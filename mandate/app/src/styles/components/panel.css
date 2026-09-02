@@ -98,6 +98,16 @@
   font-style: normal;
 }
 
+.positions .position-loss {
+  color: var(--denied);
+  font-style: normal;
+}
+
+.positions .position-flat {
+  color: var(--ink-muted);
+  font-style: normal;
+}
+
 .pending-list div {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -142,6 +152,8 @@
 .runner-status--degraded { color: var(--denied); }
 .runner-status--degraded i { background: var(--denied); }
 .runner-status--paused { color: var(--ink-muted); }
+.runner-status--stalled { color: var(--denied); }
+.runner-status--stalled i { background: var(--denied); }
 
 .runner-line {
   padding: var(--space-3) var(--space-5);

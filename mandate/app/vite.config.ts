@@ -16,6 +16,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      "/api/v1": process.env.TRUEFORGE_PROXY ?? "http://127.0.0.1:8890",
       "/api": process.env.MANDATE_API_PROXY ?? "http://127.0.0.1:8030",
     },
   },

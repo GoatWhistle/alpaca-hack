@@ -14,7 +14,7 @@ const tabs: { key: View; label: string }[] = [
   { key: "ipo", label: "IPO scout" },
   { key: "news", label: "News" },
   { key: "diagnostics", label: "Diagnostics" },
-  { key: "agent", label: "Trader / Operator" },
+  { key: "agent", label: "Trader room" },
 ];
 
 export function WorkspaceTabs({ view, newsCount, ipoCount, onSelect }: WorkspaceTabsProps) {

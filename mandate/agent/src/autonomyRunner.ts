@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 
 import { TrueForge } from "@truefoundry/trueforge-sdk";
 import { HttpsProxyAgent } from "https-proxy-agent";
+import { AlpacaMcpClient, validateBrokerSnapshot, type BrokerSnapshot } from "./alpacaMcp.js";
 import { AlpacaRealtimeMonitor, type StreamState, type WakeReason } from "./realtimeMonitor.js";
 import {
   CRITIC_NAMES,
@@ -153,6 +154,8 @@ type RuntimeState = {
   corporate_action_events?: number;
   outcomes_observed?: number;
   pipeline_stage?: "monitoring" | "signals" | "challenge" | "broker" | "execution" | "risk_exit";
+  broker_transport?: "alpaca-mcp" | "rest";
+  broker_transport_error?: string;
   pipeline_note?: string;
   last_reason?: string;
   last_candidate?: string;
@@ -657,6 +660,8 @@ async function pollNews(trajectory: Trajectory): Promise<PollResult> {
       cwd: researchDir,
       env: { ...process.env, PYTHONPATH: resolve(researchDir, "src") },
       maxBuffer: 4 * 1024 * 1024,
+      // A stuck news source must never stall the loop; hard-risk exits run on it.
+      timeout: 90_000,
     },
   );
   const decoded = object(JSON.parse(stdout) as unknown, "news poll result");
@@ -686,6 +691,7 @@ async function pollMarket(trajectory: Trajectory, full = true): Promise<MarketRe
       cwd: researchDir,
       env: { ...process.env, PYTHONPATH: resolve(researchDir, "src") },
       maxBuffer: 8 * 1024 * 1024,
+      timeout: 120_000,
     },
   );
   return object(JSON.parse(stdout) as unknown, "market poll result") as MarketResult;
@@ -772,21 +778,57 @@ async function alpacaPaperGet(path: string): Promise<unknown> {
   return response.json() as Promise<unknown>;
 }
 
+export type BrokerState = BrokerSnapshot & { transport: "alpaca-mcp" | "rest"; error?: string };
+
+export function alpacaMcpUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const raw = env.MANDATE_ALPACA_MCP_URL?.trim();
+  if (!raw || env.MANDATE_ALPACA_MCP_READS?.toLowerCase() === "false") return undefined;
+  const url = new URL(raw);
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+    throw new Error("MANDATE_ALPACA_MCP_URL must be an HTTP(S) URL without embedded credentials");
+  }
+  return url.toString();
+}
+
+/**
+ * Broker state for the planning cycle is read through the official Alpaca MCP
+ * server when configured. The payload is the same Alpaca account and position
+ * objects, so sizing and mandate math do not change; any MCP failure falls back
+ * to the direct paper REST read and is reported on the runtime state.
+ */
+async function readBrokerState(): Promise<BrokerState> {
+  let mcpError: string | undefined;
+  const mcpUrl = alpacaMcpUrl();
+  if (mcpUrl) {
+    try {
+      const client = new AlpacaMcpClient(mcpUrl, 8_000);
+      await client.initialize();
+      const [account, positions] = await Promise.all([
+        client.callTool("get_account_info"),
+        client.callTool("get_all_positions"),
+      ]);
+      return { ...validateBrokerSnapshot(account, positions), transport: "alpaca-mcp" };
+    } catch (error) {
+      mcpError = publicRunnerError(error);
+      console.error("Alpaca MCP broker read failed; using the paper REST fallback", error);
+    }
+  }
+  const [rawAccount, rawPositions] = await Promise.all([
+    alpacaPaperGet("/v2/account"),
+    alpacaPaperGet("/v2/positions"),
+  ]);
+  return { ...validateBrokerSnapshot(rawAccount, rawPositions), transport: "rest", error: mcpError };
+}
+
 async function precomputeTrajectoryEvaluation(
   trajectory: Trajectory,
   alerts: NewsEvent[],
   outcomeScorecard: OutcomeScorecard,
   market?: MarketResult,
 ): Promise<Record<string, unknown>> {
-  const [rawAccount, rawPositions] = await Promise.all([
-    alpacaPaperGet("/v2/account"),
-    alpacaPaperGet("/v2/positions"),
-  ]);
-  const account = object(rawAccount, "Alpaca account");
-  const positionItems = Array.isArray(rawPositions)
-    ? rawPositions.filter((item): item is Record<string, unknown> =>
-      typeof item === "object" && item !== null && !Array.isArray(item))
-    : [];
+  const broker = await readBrokerState();
+  const account = broker.account;
+  const positionItems = broker.positions;
   const equity = String(account.equity ?? "");
   const buyingPower = Number(account.buying_power ?? account.cash ?? 0);
   const equityNumber = Number(equity);
@@ -874,6 +916,8 @@ async function precomputeTrajectoryEvaluation(
       },
     ]).filter(([symbol]) => symbol)),
     gross_headroom_pct: grossHeadroom,
+    broker_transport: broker.transport,
+    broker_transport_error: broker.error,
   };
   return evaluation;
 }
@@ -1108,6 +1152,11 @@ async function runReadOnlyModelTurn(
   return { text, toolCalls };
 }
 
+export function criticTimeoutSeconds(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.MANDATE_CRITIC_TIMEOUT_SECONDS ?? 20);
+  return Number.isFinite(raw) ? Math.min(60, Math.max(3, raw)) : 20;
+}
+
 function criticConfiguration(critic: CriticName): { agent: string; model: string } {
   const defaults = {
     risk: ["MANDATE_RISK_CRITIC_AGENT", "mandate-risk-critic", "MANDATE_RISK_CRITIC_MODEL", "zai/glm-4-7-flashx"],
@@ -1128,6 +1177,7 @@ async function runCritic(
   candidates: TradeCandidate[],
 ): Promise<CriticAdvice> {
   const configuration = criticConfiguration(critic);
+  const deadlineSeconds = criticTimeoutSeconds();
   try {
     const session = await client.sessions.create({ agent: { name: configuration.agent } });
     const turn = await runReadOnlyModelTurn(client, session.data.id, [
@@ -1137,7 +1187,7 @@ async function runCritic(
       "Return one concise support or objection statement with the exact evidence that drives it.",
       `Candidate evidence: ${JSON.stringify(candidates)}`,
       `Execution context: ${JSON.stringify(evaluation.execution_context ?? {})}`,
-    ].join("\n"), 3);
+    ].join("\n"), deadlineSeconds);
     const summary = turn.text.replace(/\s+/gu, " ").trim().slice(0, 600);
     if (!summary) throw new Error("critic returned no text");
     return { critic, status: "completed", model: configuration.model, summary };
@@ -1145,11 +1195,16 @@ async function runCritic(
     const message = error instanceof Error ? error.message : String(error);
     const timeout = /timeout|timed out|abort/iu.test(message)
       || (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name));
+    const missingAgent = /agent not found/iu.test(message);
     return {
       critic,
       status: timeout ? "timeout" : "error",
       model: configuration.model,
-      summary: timeout ? "Advisory critic exceeded the 3 second deadline." : message.slice(0, 300),
+      summary: timeout
+        ? `Advisory critic exceeded the ${deadlineSeconds} second deadline.`
+        : missingAgent
+          ? `Critic agent ${configuration.agent} is not provisioned on TrueForge; run \`npm run apply\` against ${process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790"}.`
+          : message.slice(0, 300),
     };
   }
 }
@@ -1443,6 +1498,13 @@ async function main(): Promise<void> {
           const cycleId = randomUUID();
           precomputedEvaluation.cycle_id = cycleId;
           const executionContext = object(precomputedEvaluation.execution_context, "execution context");
+          runtime = {
+            ...runtime,
+            broker_transport: executionContext.broker_transport === "alpaca-mcp" ? "alpaca-mcp" : "rest",
+            broker_transport_error: typeof executionContext.broker_transport_error === "string"
+              ? executionContext.broker_transport_error
+              : undefined,
+          };
           executionContext.ipo_symbols = ipoCandidates
             .filter((item) => item.execution_ready === true)
             .map((item) => String(item.symbol));

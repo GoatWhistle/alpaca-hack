@@ -49,72 +49,6 @@
 .diagnostics-view .main-column,
 .diagnostics-view .side-column { display: contents; }
 
-.agent-workspace {
-  height: calc(100dvh - 97px);
-  min-height: 560px;
-  background: var(--ground);
-  overflow: hidden;
-}
-
-.agent-channels {
-  height: 44px;
-  display: flex;
-  gap: 4px;
-  align-items: end;
-  padding: 0 var(--space-4);
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
-}
-
-.agent-channels button {
-  height: 36px;
-  padding: 0 18px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  color: var(--ink-muted);
-  background: transparent;
-  cursor: pointer;
-}
-
-.agent-channels button.active { color: var(--ink); border-bottom-color: var(--allowed); }
-.agent-channel-body { height: calc(100% - 44px); }
-.agent-channel-body > .aui-theme-root { height: 100%; }
-
-.trader-timeline {
-  height: 100%;
-  max-width: 1100px;
-  margin: auto;
-  padding: var(--space-4);
-  overflow: auto;
-}
-
-.trader-timeline > header {
-  position: sticky;
-  top: calc(var(--space-4) * -1);
-  z-index: 1;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: var(--space-3) 0;
-  background: var(--ground);
-}
-
-.trader-timeline > header div { display: flex; flex-direction: column; gap: 3px; }
-.trader-timeline > header span { color: var(--ink-muted); font-size: 12px; }
-.trader-timeline > header button { color: var(--ink-muted); background: transparent; border: 1px solid var(--line); padding: 6px 10px; cursor: pointer; }
-.trader-timeline ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.trader-timeline li { border: 1px solid var(--line); border-left: 3px solid var(--ink-muted); background: var(--surface); padding: 14px 16px; }
-.trader-timeline li[data-status="submitted"], .trader-timeline li[data-status="ok"] { border-left-color: var(--allowed); }
-.trader-timeline li[data-status="degraded"] { border-left-color: var(--authority); }
-.trader-event-meta { display: flex; gap: 10px; align-items: center; color: var(--ink-muted); font-size: 11px; text-transform: uppercase; }
-.trader-event-meta span:first-child { color: var(--ink); font-weight: 700; }
-.trader-event-meta time { margin-left: auto; }
-.trader-timeline li > p { margin: 10px 0; line-height: 1.45; }
-.trader-timeline details summary { color: var(--ink-muted); cursor: pointer; font-size: 12px; }
-.trader-timeline pre { overflow: auto; color: var(--ink-muted); font-size: 11px; }
-.trader-timeline-empty { margin-top: 20vh; text-align: center; color: var(--ink-muted); }
-.trader-timeline-error { color: var(--authority); }
-
 @media (max-width: 1050px) {
   .dashboard-grid { grid-template-columns: 1fr; }
   .top-status .market-pill { display: none; }
@@ -126,10 +60,6 @@
   .ipo-view main,
   .diagnostics-view main {
     padding: var(--space-4) 14px var(--space-8);
-  }
-  .agent-workspace {
-    height: calc(100dvh - 95px);
-    min-height: 480px;
   }
 }
 

@@ -16,6 +16,7 @@ def test_research_mcp_has_only_bounded_read_only_tools() -> None:
         "probe_news_sources",
         "gate_news_llm",
         "list_trader_memory",
+        "get_trader_context",
         "append_trader_memory",
         "compare_live_signals",
         "get_market_monitoring",
@@ -133,3 +134,52 @@ def test_operator_memory_tools_share_the_append_only_contract(tmp_path) -> None:
     assert appended[1]["schema"] == "trader.memory.v1"
     assert active[1]["schema"] == "trader.memory.page.v1"
     assert active[1]["items"] == [appended[1]]
+
+
+def test_operator_context_is_compact_and_tracks_latest_session(tmp_path) -> None:
+    timeline = tmp_path / "trader-timeline.jsonl"
+    memory = tmp_path / "trader-memory.jsonl"
+    timeline.write_text("\n".join([
+        "{broken",
+        '{"schema":"trader.timeline.v1","sequence":1,"at":"2026-09-02T10:00:00Z","trading_date":"2026-09-02","kind":"plan","status":"ok","session_id":"trader-1","summary":"  First   plan  ","details":{"large":"ignored"}}',
+        '{"schema":"trader.timeline.v1","sequence":2,"at":"2026-09-02T10:01:00Z","trading_date":"2026-09-02","kind":"execution","status":"submitted","session_id":"trader-2","summary":"Second event","details":{}}',
+    ]), encoding="utf-8")
+    server = create_server(trader_timeline_path=timeline, trader_memory_path=memory)
+
+    result = asyncio.run(server.call_tool("get_trader_context", {"max_events": 1}))[1]
+
+    assert result["schema"] == "trader.context.v1"
+    assert result["current_session_id"] == "trader-2"
+    assert result["timeline"] == [{
+        "sequence": 2,
+        "at": "2026-09-02T10:01:00Z",
+        "trading_date": "2026-09-02",
+        "kind": "execution",
+        "status": "submitted",
+        "session_id": "trader-2",
+        "summary": "Second event",
+    }]
+    assert result["contract"]["execution_authority"] is False
+
+
+def test_operator_context_skips_malformed_tail_and_memory_fields(tmp_path) -> None:
+    timeline = tmp_path / "trader-timeline.jsonl"
+    memory = tmp_path / "trader-memory.jsonl"
+    timeline.write_bytes(
+        b'\xff{"schema":"trader.timeline.v1","sequence":true,"at":"bad",'
+        b'"trading_date":"bad","kind":"unknown","status":"ok","summary":"bad"}\n'
+        b'{"schema":"trader.timeline.v1","sequence":3,"at":"2026-09-02T10:02:00Z",'
+        b'"trading_date":"2026-09-02","kind":"session","status":"ok",'
+        b'"session_id":null,"summary":"healthy"}\n'
+    )
+    memory.write_text(
+        '{"schema":"trader.memory.v1","event_id":"m1","created_at":"2026-09-02T10:00:00+00:00",'
+        '"expires_at":"2099-09-02T10:00:00+00:00","hypothesis":"data","evidence_refs":null}\n',
+        encoding="utf-8",
+    )
+    server = create_server(trader_timeline_path=timeline, trader_memory_path=memory)
+
+    result = asyncio.run(server.call_tool("get_trader_context", {}))[1]
+
+    assert [item["sequence"] for item in result["timeline"]] == [3]
+    assert result["memory"][0]["evidence_refs"] == []

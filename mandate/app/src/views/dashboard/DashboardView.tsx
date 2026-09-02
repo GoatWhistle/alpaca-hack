@@ -13,8 +13,8 @@ import { PositionsPanel } from "./panels/PositionsPanel";
 import { RunnerPanel } from "./panels/RunnerPanel";
 import {
   attentionLines,
+  decisionReason,
   filterCounts,
-  parkReason,
   qualityCounts,
   visibleJournal,
 } from "./selectors";
@@ -144,7 +144,7 @@ export function DashboardView({
             <RunnerPanel
               trajectory={trajectory}
               runtime={runtime}
-              parkReason={parkReason(runtime, trajectory, marketOpen, qualityPass, qualityTotal)}
+              decisionReason={decisionReason(runtime, trajectory, marketOpen, qualityPass, qualityTotal)}
               qualityPass={qualityPass}
               qualityTotal={qualityTotal}
             />

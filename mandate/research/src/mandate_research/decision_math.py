@@ -295,8 +295,10 @@ def summarize_trajectory_math(
         features = comparison.get("features", {}) if isinstance(comparison.get("features"), dict) else {}
         reasons: list[str] = []
         gate_error_count = int(data.get("news_gate_errors") or 0)
+        # A failed news gate degrades only the news-driven path. News is not
+        # mandatory for a trade, so price-only and macro paths stay eligible.
         if gate_error_count:
-            reasons.append("news_gate_error")
+            price_news_aligned = False
         if regular_hours_only and not market_is_open:
             reasons.append("outside_regular_hours")
         if not quality_pass:
@@ -375,6 +377,7 @@ def summarize_trajectory_math(
             "effective_strategy_weights": effective_weights,
             "sizing": sizing,
             "news_price_aligned": price_news_aligned,
+            "news_gate_degraded": gate_error_count > 0,
             "macro_price_aligned": macro_price_aligned,
             "price_confirmation_aligned": price_confirmation_aligned,
             "price_confirmation_votes": price_vote_count,

@@ -1,5 +1,6 @@
 const STEPS = [
   { key: "monitoring", label: "Monitor", detail: "prices · news" },
+  { key: "risk_exit", label: "Risk exit", detail: "stops · targets" },
   { key: "signals", label: "Signals", detail: "ensemble · ATR" },
   { key: "challenge", label: "Challenge", detail: "agent critic" },
   { key: "broker", label: "Broker", detail: "account · capacity" },

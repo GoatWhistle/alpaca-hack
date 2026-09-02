@@ -20,11 +20,18 @@ const VIEW_AREAS: Record<View, string> = {
   ipo: "The IPO scout",
   news: "The news feed",
   diagnostics: "Diagnostics",
-  agent: "The agent chat",
+  agent: "The trader room",
 };
 
+const VIEWS = new Set<View>(["overview", "ipo", "news", "diagnostics", "agent"]);
+
+function initialView(): View {
+  const hash = window.location.hash.slice(1) as View;
+  return VIEWS.has(hash) ? hash : "overview";
+}
+
 export function App() {
-  const [view, setView] = useState<View>("overview");
+  const [view, setView] = useState<View>(initialView);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [approvalActions, setApprovalActions] = useState<Record<string, ApprovalAction>>({});
   const state = useSnapshot();
@@ -47,6 +54,9 @@ export function App() {
   const selectView = useCallback(
     (next: View) => {
       if (next === view) return;
+      const url = new URL(window.location.href);
+      url.hash = next === "overview" ? "" : next;
+      window.history.replaceState(null, "", url);
       const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (reduce || !document.startViewTransition) {
         setView(next);

@@ -6,7 +6,7 @@ const VIEW_TITLES: Record<View, string> = {
   ipo: "IPO scout",
   news: "News",
   diagnostics: "Diagnostics",
-  agent: "Agent chat",
+  agent: "Trader room",
 };
 
 export type IdentityState = "idle" | "pending" | "degraded";

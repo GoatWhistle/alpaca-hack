@@ -42,15 +42,20 @@ export function visibleJournal(journal: Journal[], filter: TimelineFilter): Jour
     : journal;
 }
 
-export function parkReason(
+/**
+ * The reason behind the runner's latest decision. Every cycle carries one:
+ * a PARK explains what blocked entries, a SUBMITTED cycle explains the trade.
+ */
+export function decisionReason(
   runtime: Record<string, unknown>,
   trajectory: Record<string, unknown>,
   marketOpen: boolean,
   qualityPass: number,
   qualityTotal: number,
 ): string | null {
-  if (String(runtime.last_action ?? "") !== "PARK") return null;
+  const lastAction = String(runtime.last_action ?? "");
   const modelReason = String(runtime.last_reason ?? "").trim();
+  if (lastAction !== "PARK") return lastAction && modelReason ? modelReason : null;
   if (modelReason) return modelReason;
   if (!marketOpen && Boolean(trajectory.regular_hours_only ?? true)) {
     return "Market closed — proposals are disabled outside regular hours.";

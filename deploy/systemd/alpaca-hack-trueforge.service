@@ -1,7 +1,8 @@
 [Unit]
 Description=Alpaca Hack isolated TrueForge agent server
-After=network-online.target alpaca-hack-research.service
-Wants=network-online.target alpaca-hack-research.service
+After=network-online.target alpaca-hack-research.service alpaca-hack-alpaca-mcp.service
+Wants=network-online.target alpaca-hack-research.service alpaca-hack-alpaca-mcp.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

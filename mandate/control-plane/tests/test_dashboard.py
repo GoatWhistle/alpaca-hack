@@ -421,3 +421,280 @@ def test_trader_timeline_is_cursor_paginated(tmp_path: Path) -> None:
         second = client.get("/api/trader/timeline?after=2&limit=2")
         assert [item["sequence"] for item in second.json()["items"]] == [3, 4]
         assert client.get("/api/trader/timeline?after=-1").status_code == 400
+
+
+class _StubGetResponse:
+    def __init__(self, payload) -> None:
+        self.payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self):
+        return self.payload
+
+
+class _StubBrokerClient:
+    """Answers the five paper reads with canned payloads and records the calls."""
+
+    calls: list[tuple[str, dict]] = []
+    payloads: dict[str, object] = {}
+
+    def __init__(self, *_args, **_kwargs) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    async def get(self, path: str, params: dict | None = None):
+        _StubBrokerClient.calls.append((path, dict(params or {})))
+        key = f"{path}:{(params or {}).get('status', '')}"
+        return _StubGetResponse(_StubBrokerClient.payloads[key])
+
+
+def _broker_payloads() -> dict[str, object]:
+    return {
+        "/v2/account:": {
+            "status": "ACTIVE", "equity": "90410.95", "last_equity": "94880.21",
+            "buying_power": "290522.03", "options_approved_level": 3,
+        },
+        "/v2/positions:": [
+            {
+                "symbol": "AMD", "qty": "-27", "side": "short", "asset_class": "us_equity",
+                "current_price": "456.87", "market_value": "-12335.38",
+                "avg_entry_price": "460.86", "unrealized_pl": "107.84",
+                "unrealized_plpc": "0.0087", "qty_available": "-27",
+            },
+            {
+                "symbol": "NVDA260909C00222500", "qty": "7", "asset_class": "us_option",
+                "current_price": "6.15", "market_value": "4305", "avg_entry_price": "3.9",
+                "unrealized_pl": "1575", "unrealized_plpc": "0.5769",
+            },
+        ],
+        "/v2/orders:all": [
+            {"submitted_at": "2026-09-02T14:07:37.123456789Z"},
+            {"submitted_at": "2026-09-02T03:30:00Z"},
+        ],
+        "/v2/orders:open": [
+            {
+                "id": "o-1", "symbol": "META", "side": "buy", "qty": "9", "filled_qty": "0",
+                "type": "limit", "order_class": "simple", "limit_price": "598.81",
+                "status": "new", "submitted_at": "2026-09-02T14:12:56Z",
+                "asset_class": "us_equity", "legs": None,
+                "extra_alpaca_field": "must not leak",
+            },
+            {
+                "id": "o-2", "symbol": "", "side": "buy", "qty": "6", "filled_qty": "0",
+                "type": "limit", "order_class": "mleg", "limit_price": "2.41",
+                "status": "new", "submitted_at": "2026-09-02T14:04:44Z",
+                "legs": [{"symbol": "NVDA260909C00222500"}, {"symbol": "NVDA260909C00230000"}],
+            },
+        ],
+        "/v2/clock:": {"is_open": True, "timestamp": "2026-09-02T10:15:00-04:00"},
+    }
+
+
+def test_alpaca_reader_projects_positions_orders_and_total_pnl(tmp_path: Path, monkeypatch) -> None:
+    from mandate_control.dashboard import AlpacaPaperReader
+
+    mandate, journal = _files(tmp_path)
+    monkeypatch.setenv("ALPACA_API_KEY", "key")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "secret")
+    monkeypatch.delenv("MANDATE_USE_ALPACA_PROXY", raising=False)
+    monkeypatch.delenv("MANDATE_STARTING_EQUITY", raising=False)
+    monkeypatch.setattr("mandate_control.dashboard.httpx.AsyncClient", _StubBrokerClient)
+    _StubBrokerClient.calls = []
+    _StubBrokerClient.payloads = _broker_payloads()
+    fixed_now = datetime(2026, 9, 2, 14, 20, tzinfo=timezone.utc)
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now if tz is None else fixed_now.astimezone(tz)
+
+    monkeypatch.setattr("mandate_control.dashboard.datetime", _FixedDatetime)
+
+    reader = AlpacaPaperReader(mandate, journal)
+    mandate_state, session = asyncio.run(reader.read())
+
+    account = session["account"]
+    assert account["equity"] == "90410.95"
+    assert account["starting_equity"] == "100000"
+    assert account["total_pnl"] == "-9589.05"
+    assert account["total_pnl_pct"] == "-9.59"
+    assert account["daily_pnl"] == "-4469.26"
+    assert account["options_approved_level"] == 3
+
+    amd = session["positions"]["AMD"]
+    assert amd["side"] == "short"
+    assert amd["asset_class"] == "us_equity"
+    assert amd["unrealized_pl"] == "107.84"
+    assert amd["unrealized_plpc"] == "0.0087"
+    assert amd["qty_available"] == "-27"
+    call = session["positions"]["NVDA260909C00222500"]
+    assert call["asset_class"] == "us_option"
+    assert call["side"] == "long"
+    assert "qty_available" not in call
+
+    pending = session["pending_orders"]
+    assert pending[0] == {
+        "id": "o-1", "symbol": "META", "side": "buy", "qty": "9", "filled_qty": "0",
+        "type": "limit", "order_class": "simple", "limit_price": "598.81", "status": "new",
+        "submitted_at": "2026-09-02T14:12:56Z", "legs": 0, "asset_class": "us_equity",
+    }
+    assert pending[1]["legs"] == 2
+    assert pending[1]["asset_class"] == "us_equity"
+    assert "extra_alpaca_field" not in pending[0]
+
+    # 03:30Z is the previous New York trading date; only the 14:07Z order counts.
+    assert session["orders_today"] == 1
+    assert mandate_state["usage"]["orders_today"] == 1
+    all_orders = next(params for path, params in _StubBrokerClient.calls if params.get("status") == "all")
+    assert all_orders["after"] == "2026-09-02T04:00:00+00:00"
+    open_orders = next(params for path, params in _StubBrokerClient.calls if params.get("status") == "open")
+    assert open_orders["nested"] == "true"
+
+
+def test_alpaca_reader_shares_one_read_per_cache_window(tmp_path: Path, monkeypatch) -> None:
+    from mandate_control.dashboard import AlpacaPaperReader
+
+    mandate, journal = _files(tmp_path)
+    monkeypatch.setenv("ALPACA_API_KEY", "key")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "secret")
+    monkeypatch.delenv("MANDATE_USE_ALPACA_PROXY", raising=False)
+    monkeypatch.setattr("mandate_control.dashboard.httpx.AsyncClient", _StubBrokerClient)
+    _StubBrokerClient.calls = []
+    _StubBrokerClient.payloads = _broker_payloads()
+
+    reader = AlpacaPaperReader(mandate, journal, cache_seconds=60.0)
+
+    async def concurrent():
+        return await asyncio.gather(reader.read(), reader.read(), reader.read())
+
+    results = asyncio.run(concurrent())
+    assert len(_StubBrokerClient.calls) == 5
+    assert results[0] is results[1] is results[2]
+    asyncio.run(reader.read())
+    assert len(_StubBrokerClient.calls) == 5
+
+    uncached = AlpacaPaperReader(mandate, journal, cache_seconds=0.0)
+    asyncio.run(uncached.read())
+    asyncio.run(uncached.read())
+    assert len(_StubBrokerClient.calls) == 15
+
+
+def test_snapshot_marks_stale_runner_heartbeat(tmp_path: Path, monkeypatch) -> None:
+    mandate, journal = _files(tmp_path)
+    trajectory = tmp_path / "trajectory.json"
+    trajectory.write_text(json.dumps({"version": 2, "news_poll_seconds": 30}), encoding="utf-8")
+    runtime = tmp_path / "runtime.json"
+    stale_beat = "2026-09-02T15:10:41.630Z"
+    runtime.write_text(json.dumps({"status": "running", "heartbeat_at": stale_beat}), encoding="utf-8")
+
+    async def online(name: str, url: str):
+        return {"name": name, "url": url, "ok": True}
+
+    monkeypatch.setattr("mandate_control.dashboard._service_status", online)
+    result = asyncio.run(
+        build_snapshot(
+            broker=FakeBroker(),
+            mandate_path=mandate,
+            journal_path=journal,
+            trajectory_path=trajectory,
+            runtime_path=runtime,
+            service_urls={"trueforge": "http://local:8790", "broker": "http://local:8010"},
+        )
+    )
+    assert result["autonomy"]["runtime"]["status"] == "running"
+    assert result["autonomy"]["runtime"]["stale"] is True
+    assert result["autonomy"]["runtime"]["stale_seconds"] > 120
+    assert result["autonomy"]["runtime"]["stale_threshold_seconds"] == 120
+
+    fresh = datetime.now(timezone.utc).isoformat()
+    runtime.write_text(json.dumps({"status": "running", "heartbeat_at": fresh}), encoding="utf-8")
+    result = asyncio.run(
+        build_snapshot(
+            broker=FakeBroker(),
+            mandate_path=mandate,
+            journal_path=journal,
+            trajectory_path=trajectory,
+            runtime_path=runtime,
+            service_urls={"trueforge": "http://local:8790", "broker": "http://local:8010"},
+        )
+    )
+    assert result["autonomy"]["runtime"]["stale"] is False
+    assert result["autonomy"]["runtime"]["stale_seconds"] <= 5
+
+    runtime.unlink()
+    result = asyncio.run(
+        build_snapshot(
+            broker=FakeBroker(),
+            mandate_path=mandate,
+            journal_path=journal,
+            trajectory_path=trajectory,
+            runtime_path=runtime,
+            service_urls={"trueforge": "http://local:8790", "broker": "http://local:8010"},
+        )
+    )
+    assert result["autonomy"]["runtime"]["status"] == "not_started"
+    assert result["autonomy"]["runtime"]["stale"] is False
+
+
+def test_journal_tolerates_partial_tail_and_reports_bad_lines(tmp_path: Path, monkeypatch) -> None:
+    from mandate_control.dashboard import _read_journal
+
+    mandate, journal = _files(tmp_path)
+    good = json.dumps({"at": "2026-09-02T14:00:00+00:00", "action": "submit_order",
+                       "outcome": "filled", "rationale": "ok", "details": {}})
+    journal.write_text(good + "\n" + "{not json}\n" + good + "\n" + '{"at": "2026-09-02T14:0',
+                       encoding="utf-8")
+    errors: list[str] = []
+    entries = _read_journal(journal, errors=errors)
+    assert len(entries) == 2
+    assert errors == ["session.jsonl: skipped 1 unreadable line(s)"]
+
+    async def online(name: str, url: str):
+        return {"name": name, "url": url, "ok": True}
+
+    monkeypatch.setattr("mandate_control.dashboard._service_status", online)
+    result = asyncio.run(
+        build_snapshot(
+            broker=OfflineBroker(),
+            mandate_path=mandate,
+            journal_path=journal,
+            service_urls={"trueforge": "http://local:8790", "broker": "http://local:8010"},
+        )
+    )
+    assert len(result["session"]["journal"]) == 2
+    assert "session.jsonl: skipped 1 unreadable line(s)" in result["errors"]
+
+
+def test_snapshot_ships_only_the_outcome_scorecard(tmp_path: Path, monkeypatch) -> None:
+    mandate, journal = _files(tmp_path)
+    outcomes = tmp_path / "forward-outcomes.json"
+    outcomes.write_text(json.dumps({
+        "updated_at": "2026-09-02T14:00:00+00:00",
+        "records": [{"session_id": "s", "prices": {"AAPL": "1"}}] * 50,
+        "scorecard": {"momentum": {"observations": 12}},
+    }), encoding="utf-8")
+
+    async def online(name: str, url: str):
+        return {"name": name, "url": url, "ok": True}
+
+    monkeypatch.setattr("mandate_control.dashboard._service_status", online)
+    result = asyncio.run(
+        build_snapshot(
+            broker=FakeBroker(),
+            mandate_path=mandate,
+            journal_path=journal,
+            outcomes_path=outcomes,
+            service_urls={"trueforge": "http://local:8790", "broker": "http://local:8010"},
+        )
+    )
+    assert result["autonomy"]["outcomes"] == {
+        "updated_at": "2026-09-02T14:00:00+00:00",
+        "scorecard": {"momentum": {"observations": 12}},
+    }

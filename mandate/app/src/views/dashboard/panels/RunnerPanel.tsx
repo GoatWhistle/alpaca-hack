@@ -1,9 +1,9 @@
-import { timestamp } from "../../../lib/format";
+import { number, timestamp } from "../../../lib/format";
 
 interface RunnerPanelProps {
   trajectory: Record<string, unknown>;
   runtime: Record<string, unknown>;
-  parkReason: string | null;
+  decisionReason: string | null;
   qualityPass: number;
   qualityTotal: number;
 }
@@ -11,13 +11,21 @@ interface RunnerPanelProps {
 export function RunnerPanel({
   trajectory,
   runtime,
-  parkReason,
+  decisionReason,
   qualityPass,
   qualityTotal,
 }: RunnerPanelProps) {
-  const status = String(runtime.status ?? "not_started");
+  const stale = runtime.stale === true;
+  const staleSeconds = number(runtime.stale_seconds);
+  const status = stale ? "stalled" : String(runtime.status ?? "not_started");
+  const statusLabel = stale
+    ? `stalled ${staleSeconds > 0 ? `${staleSeconds}s` : ""}`.trim()
+    : status.replaceAll("_", " ");
   const stream = (runtime.stream ?? {}) as Record<string, unknown>;
   const symbols = Array.isArray(trajectory.symbols) ? trajectory.symbols : [];
+  const lastAction = String(runtime.last_action ?? "");
+  const candidate = typeof runtime.last_candidate === "string" ? runtime.last_candidate : "";
+  const brokerTransport = typeof runtime.broker_transport === "string" ? runtime.broker_transport : "";
 
   const health = [
     { label: "News stream", value: String(stream.news ?? "—") },
@@ -26,6 +34,7 @@ export function RunnerPanel({
     { label: "Forward outcomes", value: `${String(runtime.outcomes_observed ?? 0)} measured` },
     { label: "Last analysis", value: timestamp(runtime.last_analysis_at) },
     { label: "Next analysis", value: timestamp(runtime.next_analysis_at) },
+    ...(brokerTransport ? [{ label: "Broker reads", value: brokerTransport }] : []),
   ];
 
   return (
@@ -34,8 +43,11 @@ export function RunnerPanel({
         <div>
           <h2>Agent runner</h2>
         </div>
-        <span className={`runner-status runner-status--${status}`}>
-          <i aria-hidden="true" /> {status.replaceAll("_", " ")}
+        <span
+          className={`runner-status runner-status--${status}`}
+          title={stale ? `No runner heartbeat for ${staleSeconds}s` : undefined}
+        >
+          <i aria-hidden="true" /> {statusLabel}
         </span>
       </div>
 
@@ -45,14 +57,34 @@ export function RunnerPanel({
         <span>{String(runtime.market_feed ?? "—")}</span>
         <span>every {String(trajectory.analysis_interval_minutes ?? "—")} min</span>
         <span>
-          last action <b>{String(runtime.last_action ?? "—")}</b>
+          last action <b>{lastAction || "—"}</b>
         </span>
+        {candidate && (
+          <span>
+            candidate <b>{candidate}</b>
+          </span>
+        )}
+        {brokerTransport && (
+          <span>
+            broker reads <b>{brokerTransport}</b>
+          </span>
+        )}
       </div>
 
-      {parkReason && (
+      {stale && (
         <div className="decision-explanation">
-          <b>Why park</b>
-          <span>{parkReason}</span>
+          <b>Runner stalled</b>
+          <span>
+            The persisted state is {staleSeconds}s old. The runner process is down or wedged; the
+            broker figures above are still live, but no new decisions are being made.
+          </span>
+        </div>
+      )}
+
+      {decisionReason && (
+        <div className="decision-explanation">
+          <b>{lastAction === "PARK" ? "Why park" : "Last decision"}</b>
+          <span>{decisionReason}</span>
         </div>
       )}
 

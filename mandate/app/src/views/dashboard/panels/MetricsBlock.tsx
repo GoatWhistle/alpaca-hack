@@ -20,6 +20,10 @@ export function MetricsBlock({
   live,
 }: MetricsBlockProps) {
   const dailyPnl = number(account.daily_pnl);
+  const totalPnl = number(account.total_pnl);
+  const totalPnlHint = hasValue(account.starting_equity)
+    ? `${percent(account.total_pnl_pct)} from ${money(account.starting_equity)}`
+    : undefined;
   const exposureLimit = number(limits.max_gross_exposure_pct);
   const exposureUsed = number(account.gross_exposure_pct);
   const exposureTone = exposureLimit > 0 && exposureUsed / exposureLimit >= 0.8 ? "warn" : "default";
@@ -31,6 +35,12 @@ export function MetricsBlock({
           label="Account equity"
           value={live && hasValue(account.equity) ? money(account.equity) : <Withheld />}
           hint={live ? "Alpaca paper account" : "Needs the broker"}
+        />
+        <Metric
+          label="P&L since start"
+          value={live && hasValue(account.total_pnl) ? money(totalPnl) : <Withheld />}
+          tone={live && totalPnl !== 0 ? (totalPnl > 0 ? "good" : "bad") : "default"}
+          hint={live ? totalPnlHint : "Needs the broker"}
         />
         <Metric
           label="Daily P&L"

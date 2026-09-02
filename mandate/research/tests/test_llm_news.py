@@ -147,6 +147,6 @@ def test_gate_rejects_non_official_endpoint(monkeypatch) -> None:
 
 
 def test_gate_bounds_batch_size() -> None:
-    events = [_event(f"batch-{index}") for index in range(21)]
-    with pytest.raises(ValueError, match="at most 20"):
+    events = [_event(f"batch-{index}") for index in range(llm_news.MAX_ITEMS + 1)]
+    with pytest.raises(ValueError, match=f"at most {llm_news.MAX_ITEMS}"):
         gate_news_batch_llm(events, symbol="AAPL")

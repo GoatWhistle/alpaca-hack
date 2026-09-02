@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "apply": "tsx src/createAgent.ts",
-    "eval:autonomy": "tsx --test src/agentSpec.test.ts src/tradePlan.test.ts src/autonomyRunner.test.ts src/realtimeMonitor.test.ts",
+    "eval:autonomy": "tsx --test src/agentSpec.test.ts src/tradePlan.test.ts src/autonomyRunner.test.ts src/realtimeMonitor.test.ts src/alpacaMcp.test.ts",
     "eval:patterns": "tsx src/sessionPatternAudit.ts",
     "autonomy": "tsx src/autonomyRunner.ts",
     "typecheck": "tsc --noEmit"

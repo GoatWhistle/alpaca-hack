@@ -2,6 +2,7 @@
 Description=Alpaca Hack operator dashboard
 After=network-online.target alpaca-hack-research.service alpaca-hack-trueforge.service
 Wants=network-online.target alpaca-hack-research.service alpaca-hack-trueforge.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

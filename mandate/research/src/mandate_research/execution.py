@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from mandate_research.exits import run_exit_evaluation
+from mandate_research.exits import clear_position_tracking, run_exit_evaluation
 
 
 PAPER_HOST = "paper-api.alpaca.markets"
@@ -734,7 +734,12 @@ def _option_quote(symbol: str, snapshot: Any) -> dict[str, Any] | None:
         return None
     mid = (bid + ask) / Decimal("2")
     spread_pct = (ask - bid) / mid * Decimal("100")
-    if spread_pct > Decimal(os.environ.get("MANDATE_OPTION_MAX_SPREAD_PCT", "8")):
+    # A purely relative cap rejects every cheap near-the-money contract with a
+    # $0.10 spread and leaves only deep in-the-money contracts, which then get
+    # selected as "closest to ATM". A small absolute allowance keeps ATM eligible.
+    max_spread_pct = Decimal(os.environ.get("MANDATE_OPTION_MAX_SPREAD_PCT", "8"))
+    max_spread_abs = Decimal(os.environ.get("MANDATE_OPTION_MAX_SPREAD_ABS", "0.15"))
+    if spread_pct > max_spread_pct and (ask - bid) > max_spread_abs:
         return None
     parts = _option_parts(symbol)
     if parts is None:
@@ -787,10 +792,19 @@ def build_option_order(
             contracts.append(option)
     if not contracts:
         return None
-    expirations = sorted({value["expiration"] for value in contracts})
-    expiration = expirations[0]
-    same_expiry = [value for value in contracts if value["expiration"] == expiration]
-    long_leg = min(same_expiry, key=lambda value: abs(value["strike"] - last))
+    # The long leg must sit near the money. Deep in-the-money contracts behave
+    # like stock with none of the defined-risk convexity this path is for.
+    moneyness_cap = last * Decimal(os.environ.get("MANDATE_OPTION_MAX_MONEYNESS_PCT", "10")) / Decimal("100")
+    same_expiry: list[dict[str, Any]] = []
+    near_money: list[dict[str, Any]] = []
+    for expiration in sorted({value["expiration"] for value in contracts}):
+        same_expiry = [value for value in contracts if value["expiration"] == expiration]
+        near_money = [value for value in same_expiry if abs(value["strike"] - last) <= moneyness_cap]
+        if near_money:
+            break
+    if not near_money:
+        return None
+    long_leg = min(near_money, key=lambda value: abs(value["strike"] - last))
     if desired_kind == "C":
         farther = [value for value in same_expiry if value["strike"] > long_leg["strike"]]
         target = last * Decimal("1.04")
@@ -1415,6 +1429,19 @@ def _execute_locked(evaluation: dict[str, Any], decision: dict[str, Any]) -> dic
         if not symbol:
             continue
         existing_underlyings.add(_option_underlying(symbol) or symbol)
+    # A symbol that received a fill on an exit this cycle is never re-entered in
+    # the same cycle, and a fully closed symbol forgets its first-seen timestamp
+    # so the next entry starts a fresh time-stop clock.
+    exited_underlyings = {
+        _action_underlying({"symbol": item.get("candidate"), "underlying": item.get("underlying")})
+        for item in executions
+        if item.get("filled") is True and str(item.get("kind") or "") in EXIT_ACTION_KINDS
+    }
+    exited_underlyings.discard("")
+    closed_underlyings = exited_underlyings - existing_underlyings
+    if closed_underlyings:
+        clear_position_tracking(closed_underlyings)
+    existing_underlyings |= exited_underlyings
     limits = _mandate_limits()
     risk_gate = _entry_risk_gate(broker, account, limits)
     plan: dict[str, Any] | None = None

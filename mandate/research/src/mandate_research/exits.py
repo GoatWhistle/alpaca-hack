@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -292,6 +292,25 @@ def _write_tracking(path: Path, tracking: dict[str, Any]) -> None:
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(tracking, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
+
+
+def clear_position_tracking(symbols: Iterable[str], *, tracking_path: Path | None = None) -> list[str]:
+    """Forget first-seen timestamps for symbols whose position was closed.
+
+    Without this a re-entry inherits the old timestamp, immediately satisfies the
+    time stop again and the runner churns exit/entry pairs every cycle.
+    """
+    active_path = tracking_path or _default_tracking_path()
+    stored = _read_tracking(active_path)
+    first_seen = stored.get("first_seen") if isinstance(stored.get("first_seen"), dict) else {}
+    closed = {str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()}
+    removed = sorted(symbol for symbol in first_seen if str(symbol).upper() in closed)
+    if removed:
+        _write_tracking(
+            active_path,
+            {"first_seen": {key: value for key, value in first_seen.items() if key not in removed}},
+        )
+    return removed
 
 
 ExitInputs = Callable[[list[str]], tuple[dict[str, str], dict[str, str]]]

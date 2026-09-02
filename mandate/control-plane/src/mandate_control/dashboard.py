@@ -4,12 +4,14 @@ import asyncio
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncIterator, Protocol
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import httpx
 import yaml
@@ -29,6 +31,57 @@ SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 APPROVABLE_TOOL_NAMES = frozenset({"append_trader_memory"})
 TIMELINE_KINDS = frozenset({"critics", "plan", "execution", "risk_exit", "session"})
 TIMELINE_STATUSES = frozenset({"ok", "parked", "submitted", "degraded"})
+NEW_YORK = ZoneInfo("America/New_York")
+DEFAULT_STARTING_EQUITY = Decimal("100000")
+# The runner heartbeats every poll; a heartbeat older than this many polls
+# (never less than two minutes) means the process is dead or wedged.
+STALE_HEARTBEAT_POLLS = 3
+STALE_HEARTBEAT_MIN_SECONDS = 120
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    """Parse an ISO-8601 timestamp, tolerating `Z` and nanosecond fractions."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip().replace("Z", "+00:00")
+    text = re.sub(r"(\.\d{6})\d+", r"\1", text)
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
+
+
+def _starting_equity() -> Decimal:
+    raw = os.environ.get("MANDATE_STARTING_EQUITY", "").strip()
+    if not raw:
+        return DEFAULT_STARTING_EQUITY
+    try:
+        value = Decimal(raw)
+    except InvalidOperation:
+        return DEFAULT_STARTING_EQUITY
+    return value if value.is_finite() and value > 0 else DEFAULT_STARTING_EQUITY
+
+
+def _pending_order(item: dict[str, Any]) -> dict[str, Any]:
+    """Project a raw Alpaca order onto the fields the console renders."""
+    legs = item.get("legs")
+    return {
+        "id": item.get("id"),
+        "symbol": item.get("symbol") or "",
+        "side": item.get("side"),
+        "qty": item.get("qty"),
+        "filled_qty": item.get("filled_qty"),
+        "type": item.get("type") or item.get("order_type"),
+        "order_class": item.get("order_class"),
+        "limit_price": item.get("limit_price"),
+        "status": item.get("status"),
+        "submitted_at": item.get("submitted_at"),
+        "legs": len(legs) if isinstance(legs, list) else 0,
+        "asset_class": item.get("asset_class") or "us_equity",
+    }
 
 
 class BrokerReader(Protocol):
@@ -48,6 +101,7 @@ class AlpacaPaperReader:
         journal_path: Path,
         *,
         timeout: float = 8.0,
+        cache_seconds: float = 3.0,
     ) -> None:
         base_url = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
         parsed = urlparse(base_url)
@@ -66,8 +120,24 @@ class AlpacaPaperReader:
         self.mandate_path = mandate_path
         self.journal_path = journal_path
         self.timeout = timeout
+        self.cache_seconds = cache_seconds
+        self._cache: tuple[float, tuple[dict[str, Any], dict[str, Any]]] | None = None
+        self._lock = asyncio.Lock()
 
     async def read(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Serve one broker read per cache window, shared across concurrent tabs."""
+        cached = self._cache
+        if cached is not None and time.monotonic() - cached[0] < self.cache_seconds:
+            return cached[1]
+        async with self._lock:
+            cached = self._cache
+            if cached is not None and time.monotonic() - cached[0] < self.cache_seconds:
+                return cached[1]
+            result = await self._read_uncached()
+            self._cache = (time.monotonic(), result)
+            return result
+
+    async def _read_uncached(self) -> tuple[dict[str, Any], dict[str, Any]]:
         key = os.environ.get("ALPACA_API_KEY", "")
         secret = os.environ.get("ALPACA_SECRET_KEY", "")
         if not key or not secret:
@@ -82,6 +152,12 @@ class AlpacaPaperReader:
             proxy = os.environ.get("ALPACA_PROXY_URL") or None
             if proxy is None:
                 raise ValueError("ALPACA_PROXY_URL is required when the Alpaca proxy is enabled")
+        # Order budgets are trading-day limits: count from New York midnight,
+        # and ask Alpaca for that window only instead of the last 500 orders.
+        now_utc = datetime.now(timezone.utc)
+        trading_date = now_utc.astimezone(NEW_YORK).date()
+        day_start = datetime.combine(trading_date, datetime.min.time(), tzinfo=NEW_YORK)
+        after = day_start.astimezone(timezone.utc).isoformat()
         async with httpx.AsyncClient(
             base_url=self.base_url,
             headers=headers,
@@ -92,8 +168,14 @@ class AlpacaPaperReader:
             responses = await asyncio.gather(
                 client.get("/v2/account"),
                 client.get("/v2/positions"),
-                client.get("/v2/orders", params={"status": "all", "direction": "desc", "limit": 500}),
-                client.get("/v2/orders", params={"status": "open", "direction": "desc", "limit": 500}),
+                client.get(
+                    "/v2/orders",
+                    params={"status": "all", "direction": "desc", "limit": 500, "after": after},
+                ),
+                client.get(
+                    "/v2/orders",
+                    params={"status": "open", "direction": "desc", "limit": 500, "nested": "true"},
+                ),
                 client.get("/v2/clock"),
             )
         for response in responses:
@@ -107,6 +189,9 @@ class AlpacaPaperReader:
             raise RuntimeError("Alpaca paper returned an invalid account snapshot")
         equity = Decimal(str(account.get("equity", "0")))
         last_equity = Decimal(str(account.get("last_equity", equity)))
+        starting_equity = _starting_equity()
+        total_pnl = equity - starting_equity
+        total_pnl_pct = total_pnl / starting_equity * Decimal("100")
         positions: dict[str, Any] = {}
         gross = Decimal("0")
         largest = Decimal("0")
@@ -117,23 +202,37 @@ class AlpacaPaperReader:
             market_value = abs(Decimal(str(item.get("market_value", "0"))))
             gross += market_value
             largest = max(largest, market_value)
-            positions[symbol] = {
+            qty = Decimal(str(item.get("qty", "0") or "0"))
+            position = {
                 "qty": str(item.get("qty", "0")),
+                "side": str(item.get("side") or ("short" if qty < 0 else "long")),
+                "asset_class": str(item.get("asset_class") or "us_equity"),
                 "market_price": str(item.get("current_price", "0")),
                 "market_value": str(item.get("market_value", "0")),
                 "avg_entry_price": item.get("avg_entry_price"),
+                "unrealized_pl": item.get("unrealized_pl"),
+                "unrealized_plpc": item.get("unrealized_plpc"),
             }
+            if item.get("qty_available") is not None:
+                position["qty_available"] = str(item.get("qty_available"))
+            positions[symbol] = position
         gross_pct = gross / equity * Decimal("100") if equity else Decimal("0")
         largest_pct = largest / equity * Decimal("100") if equity else Decimal("0")
         daily_pnl = equity - last_equity
         local = _read_yaml(self.mandate_path)
         limits = local.get("limits", {}) if isinstance(local.get("limits"), dict) else {}
-        now = datetime.now(timezone.utc).isoformat()
-        orders_today = sum(
-            1
-            for item in orders if isinstance(item, dict)
-            and str(item.get("submitted_at", ""))[:10] == now[:10]
-        ) if isinstance(orders, list) else 0
+        now = now_utc.isoformat()
+        orders_today = 0
+        if isinstance(orders, list):
+            for item in orders:
+                if not isinstance(item, dict):
+                    continue
+                submitted = _parse_timestamp(item.get("submitted_at"))
+                if submitted is not None and submitted.astimezone(NEW_YORK).date() == trading_date:
+                    orders_today += 1
+        pending_orders = [
+            _pending_order(item) for item in pending if isinstance(item, dict)
+        ] if isinstance(pending, list) else []
         mandate_state = {
             "mandate": local,
             "as_of": now,
@@ -156,9 +255,14 @@ class AlpacaPaperReader:
             "account": {
                 "status": account.get("status"),
                 "equity": str(equity),
+                "last_equity": str(last_equity),
                 "daily_pnl": str(daily_pnl),
+                "starting_equity": str(starting_equity),
+                "total_pnl": str(total_pnl),
+                "total_pnl_pct": str(total_pnl_pct.quantize(Decimal("0.01"))),
                 "gross_exposure_pct": str(gross_pct),
                 "buying_power": str(account.get("buying_power", "0")),
+                "options_approved_level": account.get("options_approved_level"),
             },
             "market": {
                 "is_open": bool(clock.get("is_open")) if isinstance(clock, dict) else False,
@@ -166,7 +270,7 @@ class AlpacaPaperReader:
             },
             "positions": positions,
             "orders_today": orders_today,
-            "pending_orders": pending if isinstance(pending, list) else [],
+            "pending_orders": pending_orders,
             "journal": _read_journal(self.journal_path),
         }
         return mandate_state, session_state
@@ -396,22 +500,75 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _read_journal(path: Path, *, limit: int = 100) -> list[dict[str, Any]]:
+def _read_journal(
+    path: Path, *, limit: int = 100, errors: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Read the tail of an append-only JSONL file.
+
+    The runner appends without a rename, so the final line may be half-written
+    while the dashboard polls; that tail is skipped silently. Any other
+    unreadable line is skipped and reported through `errors` instead of hiding
+    the whole journal behind one bad record.
+    """
     if not path.exists():
         return []
     entries: list[dict[str, Any]] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        content = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise RuntimeError(f"cannot read journal: {type(exc).__name__}") from exc
+    lines = content.splitlines()
+    skipped = 0
     for line_number, line in enumerate(lines[-limit:], start=max(1, len(lines) - limit + 1)):
+        if not line.strip():
+            continue
         try:
             item = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"invalid journal entry at line {line_number}") from exc
+        except json.JSONDecodeError:
+            if line_number == len(lines) and not content.endswith("\n"):
+                break
+            skipped += 1
+            continue
         if isinstance(item, dict):
             entries.append(item)
+    if skipped and errors is not None:
+        errors.append(f"{path.name}: skipped {skipped} unreadable line(s)")
     return entries
+
+
+def _read_outcomes(path: Path) -> dict[str, Any]:
+    """Ship only the aggregate scorecard; the raw records are megabytes per poll."""
+    payload = _read_json(path)
+    return {key: payload[key] for key in ("updated_at", "scorecard") if key in payload}
+
+
+def _runtime_staleness(
+    runtime: dict[str, Any], trajectory: dict[str, Any], *, now: datetime | None = None,
+) -> dict[str, Any]:
+    """Annotate the persisted runner state with whether its heartbeat is fresh."""
+    current = now or datetime.now(timezone.utc)
+    status = str(runtime.get("status", "not_started"))
+    heartbeat = _parse_timestamp(runtime.get("heartbeat_at"))
+    poll_seconds = trajectory.get("news_poll_seconds")
+    try:
+        poll = int(poll_seconds) if poll_seconds is not None else 30
+    except (TypeError, ValueError):
+        poll = 30
+    threshold = max(STALE_HEARTBEAT_MIN_SECONDS, STALE_HEARTBEAT_POLLS * max(1, poll))
+    if heartbeat is None:
+        return {
+            **runtime,
+            "stale": status != "not_started",
+            "stale_seconds": None,
+            "stale_threshold_seconds": threshold,
+        }
+    age = max(0, int((current - heartbeat).total_seconds()))
+    return {
+        **runtime,
+        "stale": age > threshold,
+        "stale_seconds": age,
+        "stale_threshold_seconds": threshold,
+    }
 
 
 def _read_timeline(path: Path, *, after: int = 0, limit: int = 200) -> dict[str, Any]:
@@ -528,7 +685,7 @@ async def build_snapshot(
     except RuntimeError as exc:
         errors.append(str(exc))
     try:
-        local_journal = _read_journal(journal_path)
+        local_journal = _read_journal(journal_path, errors=errors)
     except RuntimeError as exc:
         errors.append(str(exc))
     autonomy: dict[str, Any] = {
@@ -541,9 +698,9 @@ async def build_snapshot(
     for key, path, reader in (
         ("trajectory", trajectory_path, _read_json),
         ("runtime", runtime_path, _read_json),
-        ("alerts", alerts_path, lambda value: _read_journal(value, limit=50)),
+        ("alerts", alerts_path, lambda value: _read_journal(value, limit=50, errors=errors)),
         ("market", market_path, _read_json),
-        ("outcomes", outcomes_path, _read_json),
+        ("outcomes", outcomes_path, _read_outcomes),
     ):
         if path is None:
             continue
@@ -553,6 +710,8 @@ async def build_snapshot(
                 autonomy[key] = payload
         except RuntimeError as exc:
             errors.append(str(exc))
+    if runtime_path is not None:
+        autonomy["runtime"] = _runtime_staleness(autonomy["runtime"], autonomy["trajectory"])
 
     statuses_task = asyncio.gather(
         *(_service_status(name, url) for name, url in service_urls.items())
