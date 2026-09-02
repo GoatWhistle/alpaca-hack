@@ -12,18 +12,6 @@ export const outcomeLabels: Record<string, string> = {
   conflict: "Conflict",
 };
 
-export const outcomeShapes: Record<string, string> = {
-  prepared: "dash",
-  submitted: "disc",
-  submitted_reconciled: "disc",
-  filled: "disc",
-  unfilled_cancelled: "ring",
-  deduplicated: "dash",
-  denied: "ring",
-  parked: "square",
-  conflict: "double-ring",
-};
-
 export const timelineFilters: {
   key: TimelineFilter;
   label: string;

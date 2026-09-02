@@ -12,7 +12,7 @@ const stream = await client.sessions.createTurnStream(session.data.id, {
       type: "user.message",
       content:
         "AUTONOMY CYCLE conformance probe. Use only exec to calculate 7 * 6 with deterministic " +
-        "code, then report the result and end with ACTION: PARK. Do not call MCP, broker, approval, " +
+        "code, then report the result and end with a DECISION_JSON object whose action is PARK. Do not call MCP, broker, approval, " +
         "trajectory-write, or any other tool.",
     },
   ],

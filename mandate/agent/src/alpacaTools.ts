@@ -15,9 +15,6 @@ export const ALPACA_READ_TOOLS = [
   "get_stock_trades",
 ] as const;
 
-// Backwards-compatible alias for the read-only E2E helpers.
-export const ALPACA_RESEARCH_TOOLS = ALPACA_READ_TOOLS;
-
 export const ALPACA_WRITE_TOOLS = [
   "add_asset_to_watchlist_by_id",
   "cancel_all_orders",

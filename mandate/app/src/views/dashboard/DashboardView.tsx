@@ -49,7 +49,6 @@ export function DashboardView({
   const account = snapshot?.session.account ?? {};
   const runtime = snapshot?.autonomy.runtime ?? {};
   const trajectory = snapshot?.autonomy.trajectory ?? {};
-  const approvals = snapshot?.approvals ?? { count: 0, items: [] };
   const marketOpen = snapshot?.mandate.market_is_open ?? false;
   const live = snapshot?.source === "live" && !error;
   const universe = Array.isArray(mandate.universe) ? mandate.universe.map(String) : [];

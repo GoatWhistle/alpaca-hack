@@ -2,23 +2,13 @@ import type { TrueForgeApi } from "@truefoundry/trueforge-sdk";
 
 import { ALPACA_READ_TOOLS, ALPACA_WRITE_TOOLS } from "./alpacaTools.js";
 
-export function parseOptionalBoolean(value: string | undefined, name: string): boolean {
-  if (value === undefined || value === "") return false;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  throw new Error(`${name} must be true or false`);
-}
-
 export function buildAgentSpec(
   instructions: string,
-  enableResearchSkill = false,
-  requireSubmitApproval = true,
   enableSandbox = true,
 ): TrueForgeApi.AgentSpec {
   return {
     model: { name: "zai/glm-5-3-flash" },
     instructions,
-    ...(enableResearchSkill ? { skills: [{ name: "mandate-research" }] } : {}),
     mcpServers: [
       {
         name: "alpaca",
@@ -26,7 +16,7 @@ export function buildAgentSpec(
         disableTools: [],
         preloadTools: ["get_account_info", "get_all_positions", "get_clock", "get_stock_bars", "get_stock_latest_quote"],
         preload: false,
-        requireApprovalForTools: requireSubmitApproval ? [...ALPACA_WRITE_TOOLS] : [],
+        requireApprovalForTools: [...ALPACA_WRITE_TOOLS],
       },
       {
         name: "mandate-research",

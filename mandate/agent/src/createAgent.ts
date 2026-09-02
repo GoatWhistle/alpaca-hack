@@ -3,21 +3,16 @@ import { fileURLToPath } from "node:url";
 
 import { TrueForge } from "@truefoundry/trueforge-sdk";
 
-import { buildAgentSpec, parseOptionalBoolean } from "./agentSpec.js";
+import { buildAgentSpec } from "./agentSpec.js";
 import { loadWorkspaceEnv } from "./workspaceEnv.js";
 
 loadWorkspaceEnv();
 
 const AGENT_NAME = "mandate-paper-agent";
-const AUTO_AGENT_NAME = "mandate-paper-agent-auto";
+const LEGACY_AUTO_AGENT_NAME = "mandate-paper-agent-auto";
 const baseUrl = process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790";
 const alpacaUrl = process.env.MANDATE_ALPACA_MCP_URL ?? "http://127.0.0.1:8000/mcp";
 const researchUrl = process.env.MANDATE_RESEARCH_URL ?? "http://127.0.0.1:8020/mcp";
-const skillRef = process.env.MANDATE_GIT_REF ?? "feat/mandate-integration";
-const enableResearchSkill = parseOptionalBoolean(
-  process.env.MANDATE_ENABLE_RESEARCH_SKILL,
-  "MANDATE_ENABLE_RESEARCH_SKILL",
-);
 const sandboxSetting = process.env.MANDATE_ENABLE_SANDBOX;
 if (sandboxSetting !== undefined && sandboxSetting !== "true" && sandboxSetting !== "false") {
   throw new Error("MANDATE_ENABLE_SANDBOX must be true or false");
@@ -59,39 +54,16 @@ await client.settings.mcpServers.createOrUpdate({
   },
 });
 
-if (enableResearchSkill) {
-  await client.settings.skills.createOrUpdate({
-    manifest: {
-      type: "git",
-      name: "mandate-research",
-      url: "https://github.com/GoatWhistle/harness-hack",
-      ref: skillRef,
-      path: "mandate/research",
-      description:
-        "Compare point-in-time-safe news-confirmed, momentum, mean-reversion, and breakout signals in the sandbox.",
-    },
-  });
-}
-
 const agents = (await client.agents.list()).data;
-const applyAgent = async (name: string, requireSubmitApproval: boolean) => {
-  const manifest = buildAgentSpec(
-    instructions,
-    enableResearchSkill,
-    requireSubmitApproval,
-    enableSandbox,
-  );
-  const existing = agents.find((agent) => agent.name === name);
-  return existing
-    ? client.agents.update(existing.id, { manifest })
-    : client.agents.create({ name, manifest });
-};
-const [manual, automatic] = await Promise.all([
-  applyAgent(AGENT_NAME, true),
-  applyAgent(AUTO_AGENT_NAME, false),
-]);
+const legacyAutoAgent = agents.find((agent) => agent.name === LEGACY_AUTO_AGENT_NAME);
+if (legacyAutoAgent) await client.agents.delete(legacyAutoAgent.id);
+const manifest = buildAgentSpec(instructions, enableSandbox);
+const existing = agents.find((agent) => agent.name === AGENT_NAME);
+const agent = existing
+  ? await client.agents.update(existing.id, { manifest })
+  : await client.agents.create({ name: AGENT_NAME, manifest });
 
 console.log(JSON.stringify({
-  manual: { id: manual.data.id, name: manual.data.name },
-  automatic: { id: automatic.data.id, name: automatic.data.name },
+  agent: { id: agent.data.id, name: agent.data.name },
+  removedLegacyAutoAgent: legacyAutoAgent !== undefined,
 }, null, 2));

@@ -1,5 +1,7 @@
 import { TrueForge } from "@truefoundry/trueforge-sdk";
 
+import { parseModelDecision } from "./autonomyRunner.js";
+
 const baseUrl = process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790";
 const agentName = process.env.MANDATE_AGENT_NAME ?? "mandate-paper-agent";
 const trajectorySymbols = ["AAPL", "MSFT", "NVDA", "SPY"];
@@ -53,8 +55,8 @@ const stream = await client.sessions.createTurnStream(sessionId, {
       "min_relative_volume 0.25 and single_symbol_move_pct 5. Pass account.equity, position headroom 100, " +
       "and buying_power/equity*100 as gross-exposure headroom so sizing is ready. Use the returned arithmetic directly. " +
       "Do not create subagents. Do not call exec, compare_live_signals, get_market_monitoring, or write calculation code. " +
-      "Do not call any broker-write tool. End with exactly one line ACTION: PARK or ACTION: PROPOSE. " +
-      "PROPOSE means research discussion only and never execution.",
+      "Do not call any broker-write tool. End with DECISION_JSON using action PARK or PROPOSE, candidate, " +
+      "candidates, a concrete reason and hard_contradiction. PROPOSE means research discussion only and never execution.",
   }],
 });
 for await (const event of stream) {
@@ -145,8 +147,9 @@ for (const symbol of trajectorySymbols) {
     throw new Error(`${symbol} did not return a mandate-bounded whole-share quantity`);
   }
 }
-if (!/(^|\n)ACTION: (PARK|PROPOSE)\s*$/u.test(finalText.trim())) {
-  throw new Error(`agent did not emit the bounded ACTION line; tail=${JSON.stringify(finalText.slice(-240))}`);
+const modelDecision = parseModelDecision(finalText);
+if (!modelDecision || !["PARK", "PROPOSE"].includes(modelDecision.action)) {
+  throw new Error(`agent did not emit a bounded DECISION_JSON object; tail=${JSON.stringify(finalText.slice(-240))}`);
 }
 
 console.log(JSON.stringify({
@@ -156,7 +159,7 @@ console.log(JSON.stringify({
   symbols: Object.keys(symbols).sort(),
   decision: evaluation.decision,
   researchCandidates: evaluation.research_candidates,
-  action: finalText.trim().split("\n").at(-1),
+  action: modelDecision.action,
   sandboxCodeUsed: false,
   brokerWriteAttempted: false,
 }, null, 2));

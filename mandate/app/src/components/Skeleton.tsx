@@ -14,16 +14,3 @@ export function SkeletonTimeline({ rows = 4 }: { rows?: number }) {
     </div>
   );
 }
-
-export function SkeletonRows({ rows = 3 }: { rows?: number }) {
-  return (
-    <div className="skeleton-rows" aria-busy="true">
-      {Array.from({ length: rows }, (_, index) => (
-        <div key={index}>
-          <span className="skeleton-line skeleton-line--short" />
-          <span className="skeleton-line skeleton-line--body" />
-        </div>
-      ))}
-    </div>
-  );
-}

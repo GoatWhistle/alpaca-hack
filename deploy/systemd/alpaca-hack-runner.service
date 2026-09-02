@@ -22,7 +22,7 @@ Environment=MANDATE_FORWARD_OUTCOMES_PATH=/opt/alpaca-hack/mandate/logs/forward-
 Environment=MANDATE_PYTHON=/opt/alpaca-hack/venv/bin/python
 Environment=MANDATE_RESEARCH_URL=http://127.0.0.1:8120/mcp
 Environment=MANDATE_USE_ALPACA_PROXY=true
-ExecStart=/usr/bin/env MANDATE_PATH=/opt/alpaca-hack/mandate/mandates/example.yaml MANDATE_JOURNAL_PATH=/opt/alpaca-hack/mandate/logs/session.jsonl MANDATE_TRAJECTORY_PATH=/opt/alpaca-hack/mandate/logs/trajectory.json MANDATE_ALERTS_PATH=/opt/alpaca-hack/mandate/logs/news-alerts.jsonl MANDATE_AUTONOMY_RUNTIME_PATH=/opt/alpaca-hack/mandate/logs/autonomy-runtime.json MANDATE_NEWS_CURSOR_PATH=/opt/alpaca-hack/mandate/logs/news-cursor.json MANDATE_MARKET_MONITORING_PATH=/opt/alpaca-hack/mandate/logs/market-monitoring.json MANDATE_FORWARD_OUTCOMES_PATH=/opt/alpaca-hack/mandate/logs/forward-outcomes.json MANDATE_PYTHON=/opt/alpaca-hack/venv/bin/python MANDATE_RESEARCH_URL=http://127.0.0.1:8120/mcp MANDATE_USE_ALPACA_PROXY=true /usr/bin/npm run autonomy
+ExecStart=/usr/bin/npm run autonomy
 Restart=always
 RestartSec=10
 TimeoutStopSec=30

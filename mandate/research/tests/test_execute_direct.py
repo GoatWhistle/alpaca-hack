@@ -1,20 +1,14 @@
 from __future__ import annotations
 
-import importlib.util
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
-
-SCRIPT = Path(__file__).parents[1] / "scripts" / "execute_direct.py"
-SPEC = importlib.util.spec_from_file_location("execute_direct", SCRIPT)
-assert SPEC is not None and SPEC.loader is not None
-execute_direct = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(execute_direct)
+from mandate_research import execution
 
 
-def test_select_entry_uses_challenged_candidate_without_mandate_layer() -> None:
+def test_select_entries_use_challenged_candidate_without_mandate_layer() -> None:
     evaluation = {
         "research_candidates": ["AAPL"],
         "symbols": {
@@ -27,34 +21,36 @@ def test_select_entry_uses_challenged_candidate_without_mandate_layer() -> None:
             }
         },
     }
-    order = execute_direct.select_entry(
+    orders = execution.select_entries(
         evaluation,
         {"action": "PROPOSE", "candidate": "AAPL", "hard_contradiction": False},
+        limit=1,
     )
-    assert order == {
+    assert orders == [{
         "kind": "entry",
         "symbol": "AAPL",
         "side": "buy",
         "qty": "10",
         "limit_price": "100.12",
+        "last": "100",
         "rationale": "direct price_confirmation entry; ensemble strength 0.8 after LLM challenge",
-    }
+    }]
 
 
 def test_hard_contradiction_still_parks() -> None:
-    assert execute_direct.select_entry(
+    assert execution.select_entries(
         {"research_candidates": [], "symbols": {}},
         {"action": "PARK", "candidate": None, "hard_contradiction": True},
-    ) is None
+    ) == []
 
 
 def test_closed_market_never_constructs_a_broker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        execute_direct,
+        execution,
         "PaperBroker",
         lambda: (_ for _ in ()).throw(AssertionError("broker must not be constructed")),
     )
-    result = execute_direct.execute(
+    result = execution.execute(
         {"market_is_open": False},
         {"action": "PROPOSE", "candidate": "AAPL", "hard_contradiction": False},
     )
@@ -65,21 +61,45 @@ def test_closed_market_never_constructs_a_broker(monkeypatch: pytest.MonkeyPatch
 def test_exit_selection_does_not_crash_and_requires_confident_reversal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(execute_direct, "run_exit_evaluation", lambda _positions: {
+    monkeypatch.setattr(execution, "run_exit_evaluation", lambda _positions: {
         "proposals": [{
             "symbol": "AAPL", "order_side": "sell", "qty": "2", "limit_price": "99.9",
             "rationale": "long stop", "reason": "long_stop", "urgency": "immediate", "age_minutes": 5,
         }],
     })
     positions = [{"symbol": "AAPL", "qty": "2", "avg_entry_price": "100", "asset_class": "us_equity"}]
-    assert execute_direct.select_exits({"symbols": {}}, positions)[0]["exit_reason"] == "long_stop"
+    assert execution.select_exits({"symbols": {}}, positions)[0]["rationale"] == "long stop"
 
-    monkeypatch.setattr(execute_direct, "run_exit_evaluation", lambda _positions: {"proposals": []})
+    monkeypatch.setattr(execution, "run_exit_evaluation", lambda _positions: {"proposals": []})
     weak = {"symbols": {"AAPL": {
         "strategies": {"regime_ensemble": {"direction": "sell", "strength": "0.08"}},
         "market": {"last": "100"},
     }}}
-    assert execute_direct.select_exits(weak, positions) == []
+    assert execution.select_exits(weak, positions) == []
+
+
+def test_malformed_position_does_not_block_other_exits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(execution, "run_exit_evaluation", lambda _positions: {
+        "proposals": [{
+            "symbol": "MSFT", "order_side": "sell", "qty": "1", "limit_price": "99.9",
+            "rationale": "valid stop", "urgency": "immediate", "age_minutes": 5,
+        }],
+    })
+    positions = [
+        {"symbol": "BROKEN", "qty": "bad", "avg_entry_price": "100", "asset_class": "us_equity"},
+        {"symbol": "MSFT", "qty": "1", "avg_entry_price": "100", "asset_class": "us_equity"},
+    ]
+    assert execution.select_exits({"symbols": {}}, positions)[0]["symbol"] == "MSFT"
+
+
+def test_package_move_preserves_mandate_and_state_roots(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MANDATE_PATH", raising=False)
+    monkeypatch.delenv("MANDATE_EXECUTION_STATE_PATH", raising=False)
+    assert execution._mandate_limits()["max_daily_loss_pct"] == execution.Decimal("10")
+    assert execution._execution_state_path() == execution.MANDATE_ROOT / "logs/execution-state.json"
 
 
 def test_spy_and_existing_option_underlying_are_not_selected() -> None:
@@ -96,7 +116,7 @@ def test_spy_and_existing_option_underlying_are_not_selected() -> None:
         },
     }
     decision = {"action": "PROPOSE", "candidate": "SPY", "candidates": ["SPY", "AAPL"], "hard_contradiction": False}
-    assert execute_direct.select_entries(evaluation, decision, existing_symbols={"AAPL"}) == []
+    assert execution.select_entries(evaluation, decision, existing_symbols={"AAPL"}) == []
 
 
 def test_option_builder_prefers_defined_risk_debit_spread(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,14 +131,14 @@ def test_option_builder_prefers_defined_risk_debit_spread(monkeypatch: pytest.Mo
             }
 
     monkeypatch.setenv("MANDATE_OPTIONS_ENABLED", "true")
-    order = execute_direct.build_option_order(
+    order = execution.build_option_order(
         Broker(),
         {
             "symbol": "AAPL", "side": "buy", "last": "100", "qty": "50",
             "rationale": "strong price confirmation",
         },
         {"equity": "100000", "options_approved_level": 3},
-        option_exposure=execute_direct.Decimal("0"),
+        option_exposure=execution.Decimal("0"),
     )
     assert order is not None
     assert order["kind"] == "option_spread_entry"
@@ -139,7 +159,7 @@ def test_option_positions_receive_atomic_expiry_exit() -> None:
             "current_price": "1", "cost_basis": "-300", "unrealized_pl": "100",
         },
     ]
-    actions = execute_direct.select_option_exits(positions, limit=2)
+    actions = execution.select_option_exits(positions, limit=2)
     assert len(actions) == 1
     assert actions[0]["kind"] == "option_exit_mleg"
     assert actions[0]["payload"]["qty"] == "2"
@@ -152,7 +172,7 @@ def test_flat_option_position_receives_time_stop(monkeypatch: pytest.MonkeyPatch
     now = datetime.now(timezone.utc)
     expiry = (now.date() + timedelta(days=10)).strftime("%y%m%d")
     monkeypatch.setenv("MANDATE_OPTION_TIME_STOP_MINUTES", "60")
-    actions = execute_direct.select_option_exits(
+    actions = execution.select_option_exits(
         [{
             "symbol": f"AAPL{expiry}C00100000", "asset_class": "us_option", "qty": "1",
             "current_price": "2", "cost_basis": "200", "unrealized_pl": "5",
@@ -160,7 +180,7 @@ def test_flat_option_position_receives_time_stop(monkeypatch: pytest.MonkeyPatch
         now=now,
         first_seen={"AAPL": (now - timedelta(minutes=61)).isoformat()},
     )
-    assert actions[0]["exit_reason"] == "option_time_stop_61m"
+    assert actions[0]["rationale"] == "option_time_stop_61m"
 
 
 def test_exit_is_rechecked_and_clamped_to_live_position() -> None:
@@ -168,12 +188,12 @@ def test_exit_is_rechecked_and_clamped_to_live_position() -> None:
         def positions(self) -> list[dict]:
             return [{"symbol": "AAPL", "qty": "3", "asset_class": "us_equity"}]
 
-    action = execute_direct._refresh_exit_action(Broker(), {
+    action = execution._refresh_exit_action(Broker(), {
         "kind": "exit", "symbol": "AAPL", "side": "sell", "qty": "10",
         "limit_price": "99", "rationale": "stop",
     })
     assert action["qty"] == "3"
-    assert execute_direct._equity_payload(action)["position_intent"] == "sell_to_close"
+    assert execution._equity_payload(action)["position_intent"] == "sell_to_close"
 
 
 def test_entry_risk_gate_enforces_daily_loss_and_order_budget(
@@ -190,7 +210,7 @@ def test_entry_risk_gate_enforces_daily_loss_and_order_budget(
         encoding="utf-8",
     )
     monkeypatch.setenv("MANDATE_PATH", str(mandate))
-    gate = execute_direct._entry_risk_gate(
+    gate = execution._entry_risk_gate(
         Broker(), {"equity": "91000", "last_equity": "100000"},
     )
     assert gate["allow_entries"] is False
@@ -212,7 +232,7 @@ def test_only_tagged_open_orders_are_recovered() -> None:
             self.cancelled.append(order_id)
 
     broker = Broker()
-    recovered = execute_direct._cancel_tagged_open_orders(broker)
+    recovered = execution._cancel_tagged_open_orders(broker)
     assert broker.cancelled == ["ours"]
     assert recovered == ["mandate-direct-aapl-deadbeef"]
 
@@ -239,11 +259,11 @@ def test_open_market_cycle_blocks_entries_after_daily_stop(
         "  max_daily_loss_pct: 10\n  max_orders_per_day: 200\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(execute_direct, "PaperBroker", Broker)
+    monkeypatch.setattr(execution, "PaperBroker", Broker)
     monkeypatch.setenv("MANDATE_PATH", str(mandate))
     monkeypatch.setenv("MANDATE_EXECUTION_STATE_PATH", str(tmp_path / "execution-state.json"))
     monkeypatch.setenv("MANDATE_JOURNAL_PATH", str(tmp_path / "journal.jsonl"))
-    result = execute_direct.execute(
+    result = execution.execute(
         {"market_is_open": True, "checked_at": "2026-09-02T14:00:00Z", "symbols": {}},
         {"action": "PROPOSE", "candidate": "AAPL", "hard_contradiction": False},
     )
@@ -278,7 +298,7 @@ def test_order_lifecycle_reprices_then_reports_real_fill(monkeypatch: pytest.Mon
 
     monkeypatch.setenv("MANDATE_FILL_WAIT_SECONDS", "0")
     broker = Broker()
-    result = execute_direct.execute_with_lifecycle(
+    result = execution.execute_with_lifecycle(
         broker,
         {
             "kind": "entry", "symbol": "AAPL", "side": "buy", "qty": "10",
@@ -298,12 +318,12 @@ def test_portfolio_headroom_is_allocated_across_ranked_entries() -> None:
         "kind": "entry", "symbol": "AAPL", "side": "buy", "qty": "100",
         "limit_price": "100", "rationale": "test entry",
     }
-    bounded, allocated = execute_direct._cap_entry_to_headroom(
-        action, execute_direct.Decimal("3500"),
+    bounded, allocated = execution._cap_entry_to_headroom(
+        action, execution.Decimal("3500"),
     )
     assert bounded is not None
     assert bounded["qty"] == "35"
-    assert allocated == execute_direct.Decimal("3500")
+    assert allocated == execution.Decimal("3500")
 
 
 @pytest.mark.parametrize(
@@ -318,4 +338,4 @@ def test_portfolio_headroom_is_allocated_across_ranked_entries() -> None:
 def test_executor_rejects_non_paper_endpoints(monkeypatch: pytest.MonkeyPatch, url: str) -> None:
     monkeypatch.setenv("ALPACA_BASE_URL", url)
     with pytest.raises(ValueError, match="ALPACA_BASE_URL"):
-        execute_direct._paper_base_url()
+        execution._paper_base_url()

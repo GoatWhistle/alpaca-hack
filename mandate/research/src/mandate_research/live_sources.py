@@ -167,7 +167,7 @@ def collect_official_news(
                     {
                         "User-Agent": os.environ.get(
                             "MANDATE_SEC_USER_AGENT",
-                            "MANDATE research probe github.com/GoatWhistle/harness-hack",
+                            "MANDATE research probe github.com/GoatWhistle/alpaca-hack",
                         ),
                         "Accept": "application/atom+xml",
                     },

@@ -22,10 +22,10 @@ import {
 
 test("executor failures are safe and compact in the operator UI", () => {
   const message = publicRunnerError(new Error(
-    "Command failed: /opt/harness/research/scripts/execute_direct.py\nTraceback secret internals",
+    "Command failed: /opt/alpaca-hack/mandate/research/scripts/execute_direct.py\nTraceback secret internals",
   ));
   assert.equal(message, "Direct Alpaca executor failed. No order was submitted; broker state will be rechecked next cycle.");
-  assert.doesNotMatch(message, /Traceback|\/opt\/harness/u);
+  assert.doesNotMatch(message, /Traceback|\/opt\/alpaca-hack/u);
 });
 
 const trajectory: Trajectory = {
@@ -59,6 +59,24 @@ const event: NewsEvent = {
   symbols: ["AAPL"],
   url: null,
   content_hash: "hash",
+};
+const promptMarket: MarketResult = {
+  checked_at: "2026-08-28T13:44:00Z",
+  feed: "iex",
+  market_is_open: true,
+  sources: {},
+  quality: { AAPL: { quality_pass: true } },
+  benchmark: { symbol: "SPY", quality_pass: true },
+  macro_context: { active: true, direction: "risk_on", move_pct: "0.75" },
+  discovery: {},
+  corporate_actions: [],
+  options_confirmation: {},
+};
+const promptEvaluation = {
+  execution_authority: false,
+  decision: "PROPOSE_RESEARCH",
+  research_candidates: ["AAPL"],
+  symbols: {},
 };
 
 test("first poll seeds cursor without replaying historical news", () => {
@@ -112,23 +130,11 @@ test("pending news is bounded to the newest twenty events", () => {
 });
 
 test("approval prompt keeps news untrusted and routes candidates to human approval", () => {
-  const prompt = buildAutonomyPrompt(trajectory, [event], {
-    checked_at: "2026-08-28T13:44:00Z",
-    feed: "iex",
-    market_is_open: true,
-    sources: {},
-    quality: { AAPL: { quality_pass: true } },
-    benchmark: { symbol: "SPY", quality_pass: true },
-    macro_context: { active: true, direction: "risk_on", move_pct: "0.75" },
-    discovery: {},
-    corporate_actions: [],
-    options_confirmation: {},
-  });
+  const prompt = buildAutonomyPrompt(trajectory, [event], promptMarket, {}, promptEvaluation);
   assert.match(prompt, /untrusted data/);
   assert.match(prompt, /Execution mode is ASK APPROVAL/);
   assert.match(prompt, /place_stock_order or place_option_order so TrueForge pauses/);
-  assert.match(prompt, /evaluate_trajectory exactly once/);
-  assert.match(prompt, /Use sandbox exec only when evaluate_trajectory fails/);
+  assert.match(prompt, /already called evaluate_trajectory deterministically/);
   assert.match(prompt, /sandbox output is supplementary evidence/);
   assert.match(prompt, /DECISION_JSON/);
   assert.match(prompt, /hard_contradiction/);
@@ -136,25 +142,16 @@ test("approval prompt keeps news untrusted and routes candidates to human approv
   assert.match(prompt, /regular market hours only/);
   assert.match(prompt, /macro_price/);
   assert.match(prompt, /price_confirmation/);
-  assert.match(prompt, /research_limit 8/);
   assert.match(prompt, /"direction":"risk_on"/);
-});
-
-test("auto paper prompt delegates challenged execution to the direct Alpaca runner", () => {
-  const prompt = buildAutonomyPrompt({ ...trajectory, execution_mode: "auto_paper" }, []);
-  assert.match(prompt, /Execution mode is AUTO PAPER/);
-  assert.match(prompt, /trusted local runner sends the selected order directly/);
-  assert.match(prompt, /return PROPOSE or PARK/);
-  assert.match(prompt, /Never call cancel_all_orders, cancel_order_by_id, close_all_positions, close_position/);
 });
 
 test("precomputed trajectory evidence cannot be skipped by the model", () => {
   const prompt = buildAutonomyPrompt(
-    { ...trajectory, execution_mode: "auto_paper" },
+    trajectory,
     [],
-    undefined,
+    promptMarket,
     {},
-    { execution_authority: false, decision: "PROPOSE_RESEARCH", research_candidates: ["AAPL"], symbols: {} },
+    promptEvaluation,
   );
   assert.match(prompt, /already called evaluate_trajectory deterministically/);
   assert.match(prompt, /Do not call it again/);
@@ -164,7 +161,7 @@ test("precomputed trajectory evidence cannot be skipped by the model", () => {
 
 test("bounded action resolution parks malformed output but trusts broker submission evidence", () => {
   assert.equal(resolveBoundedAction("analysis without a contract line", [], false), "PARK");
-  assert.equal(resolveBoundedAction("ignored", ["ready\nACTION: PROPOSE"], false), "PROPOSE");
+  assert.equal(resolveBoundedAction("ignored", ["ready\nACTION: PROPOSE"], false), "PARK");
   assert.equal(resolveBoundedAction("ACTION: PARK", [], true), "SUBMITTED");
 });
 
@@ -189,7 +186,7 @@ test("bare and fenced JSON are accepted while prose is preserved as fallback rea
   assert.equal(parseModelDecision(json)?.candidate, "AVGO");
   assert.equal(parseModelDecision(`\`\`\`json\n${json}\n\`\`\``)?.action, "PROPOSE");
   assert.equal(
-    fallbackModelReason(["Risk critic rejected AVGO because SPY context conflicts.\nACTION: PARK"]),
+    fallbackModelReason(["Risk critic rejected AVGO because SPY context conflicts."]),
     "Risk critic rejected AVGO because SPY context conflicts.",
   );
 });
@@ -210,12 +207,12 @@ test("prompt bounds stale alert context before it reaches the model", () => {
     published_at: new Date(Date.now() - index * 60_000).toISOString(),
     headline: `headline-${index}`,
   }));
-  const prompt = buildAutonomyPrompt(trajectory, alerts);
+  const prompt = buildAutonomyPrompt(trajectory, alerts, promptMarket, {}, promptEvaluation);
   assert.match(prompt, /headline-0/);
   assert.doesNotMatch(prompt, /headline-24(?:"|\\)/);
 });
 
-test("background tool audit allows bounded repeated research but rejects writes and execution without evaluation", () => {
+test("background tool audit rejects repeated research and execution without evaluation", () => {
   assert.equal(auditBackgroundToolCalls([{
     function: { name: "exec", arguments: "{\"code\":\"print(42)\"}" },
   }, {
@@ -230,12 +227,12 @@ test("background tool audit allows bounded repeated research but rejects writes 
   assert.throws(() => auditBackgroundToolCalls([{
     function: { name: "call_tool", arguments: '{"name":"place_stock_order"}' },
   }]), /requires a prior evaluate_trajectory/);
-  assert.equal(auditBackgroundToolCalls([{
+  assert.throws(() => auditBackgroundToolCalls([{
     function: { name: "call_tool", arguments: '{"name":"evaluate_trajectory"}' },
-  }], 1), 2);
+  }], 1), /duplicate evaluate_trajectory/);
   assert.throws(() => auditBackgroundToolCalls([{
     function: { name: "evaluate_trajectory", arguments: "{}" },
-  }], 3), /exceeded three/);
+  }], 1), /duplicate evaluate_trajectory/);
 });
 
 test("forward outcomes settle each horizon once from durable baseline prices", () => {
@@ -324,7 +321,7 @@ test("non-execution-ready IPO discovery remains observation-only", () => {
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0]?.symbol, "NEWC");
   assert.equal(candidates[0]?.mandate_status, "OUTSIDE_MANDATE");
-  const prompt = buildAutonomyPrompt(trajectory, [], market);
+  const prompt = buildAutonomyPrompt(trajectory, [], market, {}, promptEvaluation);
   assert.match(prompt, /IPO_CANDIDATE: SYMBOL/);
   assert.match(prompt, /OUTSIDE_MANDATE/);
   assert.match(prompt, /OBSERVATION_ONLY/);

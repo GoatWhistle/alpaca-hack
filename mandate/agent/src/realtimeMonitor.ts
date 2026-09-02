@@ -50,7 +50,7 @@ export class AlpacaRealtimeMonitor {
   private trajectory: Trajectory;
   private lastStatusEmitMs = 0;
   private lastMarketWakeMs = 0;
-  private status: { news: StreamStatus; market: StreamStatus; lastEventAt?: string } = {
+  private status: StreamState = {
     news: "disabled",
     market: "disabled",
   };
@@ -71,6 +71,7 @@ export class AlpacaRealtimeMonitor {
 
   start(): void {
     if (this.trajectory.monitoring_mode !== "realtime") return;
+    if (this.newsSocket || this.marketSocket) return;
     if (!process.env.ALPACA_API_KEY || !process.env.ALPACA_SECRET_KEY) {
       this.status = { news: "degraded", market: "degraded" };
       this.emitStatus();
@@ -83,8 +84,12 @@ export class AlpacaRealtimeMonitor {
 
   stop(): void {
     this.stopped = true;
-    this.newsSocket?.close();
-    this.marketSocket?.close();
+    const newsSocket = this.newsSocket;
+    const marketSocket = this.marketSocket;
+    this.newsSocket = undefined;
+    this.marketSocket = undefined;
+    newsSocket?.close();
+    marketSocket?.close();
   }
 
   updateTrajectory(trajectory: Trajectory): void {
@@ -95,7 +100,6 @@ export class AlpacaRealtimeMonitor {
     if (!changed) return;
     this.stop();
     if (trajectory.monitoring_mode === "realtime") {
-      this.stopped = false;
       this.start();
     } else {
       this.status = { news: "disabled", market: "disabled" };
@@ -113,8 +117,11 @@ export class AlpacaRealtimeMonitor {
     this.setStatus("news", "connecting");
     const socket = this.socketFactory("wss://stream.data.alpaca.markets/v1beta1/news");
     this.newsSocket = socket;
-    socket.addEventListener("open", () => this.authenticate(socket));
+    socket.addEventListener("open", () => {
+      if (socket === this.newsSocket) this.authenticate(socket);
+    });
     socket.addEventListener("message", (event) => {
+      if (socket !== this.newsSocket) return;
       const payload = this.decode(event.data);
       for (const item of records(payload)) {
         if (item.T === "success" && item.msg === "authenticated") {
@@ -133,8 +140,10 @@ export class AlpacaRealtimeMonitor {
         this.onWake("news");
       }
     });
-    socket.addEventListener("error", () => this.setStatus("news", "degraded"));
-    socket.addEventListener("close", () => this.reconnect("news"));
+    socket.addEventListener("error", () => {
+      if (socket === this.newsSocket) this.setStatus("news", "degraded");
+    });
+    socket.addEventListener("close", () => this.reconnect("news", socket));
   }
 
   private connectMarket(): void {
@@ -142,8 +151,11 @@ export class AlpacaRealtimeMonitor {
     const feed = this.trajectory.market_data_feed === "sip" ? "sip" : "iex";
     const socket = this.socketFactory(`wss://stream.data.alpaca.markets/v2/${feed}`);
     this.marketSocket = socket;
-    socket.addEventListener("open", () => this.authenticate(socket));
+    socket.addEventListener("open", () => {
+      if (socket === this.marketSocket) this.authenticate(socket);
+    });
     socket.addEventListener("message", (event) => {
+      if (socket !== this.marketSocket) return;
       const payload = this.decode(event.data);
       const shouldWakeForBar = containsMarketBar(payload);
       for (const item of records(payload)) {
@@ -166,8 +178,10 @@ export class AlpacaRealtimeMonitor {
         this.onWake("market");
       }
     });
-    socket.addEventListener("error", () => this.setStatus("market", "degraded"));
-    socket.addEventListener("close", () => this.reconnect("market"));
+    socket.addEventListener("error", () => {
+      if (socket === this.marketSocket) this.setStatus("market", "degraded");
+    });
+    socket.addEventListener("close", () => this.reconnect("market", socket));
   }
 
   private authenticate(socket: WebSocket): void {
@@ -189,14 +203,18 @@ export class AlpacaRealtimeMonitor {
     }
   }
 
-  private reconnect(stream: "news" | "market"): void {
+  private reconnect(stream: "news" | "market", socket: WebSocket): void {
+    const current = stream === "news" ? this.newsSocket : this.marketSocket;
+    if (socket !== current) return;
     if (this.stopped || this.trajectory.monitoring_mode !== "realtime") return;
+    if (stream === "news") this.newsSocket = undefined;
+    else this.marketSocket = undefined;
     this.setStatus(stream, "degraded");
     const delay = Math.min(30_000, 1000 * 2 ** Math.min(this.reconnectAttempts[stream]++, 5));
     setTimeout(() => {
       if (this.stopped) return;
-      if (stream === "news") this.connectNews();
-      else this.connectMarket();
+      if (stream === "news" && this.newsSocket === undefined) this.connectNews();
+      if (stream === "market" && this.marketSocket === undefined) this.connectMarket();
     }, delay);
   }
 
