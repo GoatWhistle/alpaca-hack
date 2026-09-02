@@ -138,7 +138,7 @@ export function App() {
           {view === "news" && <NewsView items={news} />}
           {view === "ipo" && <IpoView snapshot={snapshot} error={error} nowMs={state.nowMs} />}
           {view === "diagnostics" && <DiagnosticsView snapshot={snapshot} />}
-          {view === "agent" && <AgentWorkspace />}
+          {view === "agent" && <AgentWorkspace snapshot={snapshot} error={error} />}
         </ErrorBoundary>
       </div>
 

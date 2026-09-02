@@ -68,6 +68,28 @@ def _starting_equity() -> Decimal:
     return value if value.is_finite() and value > 0 else DEFAULT_STARTING_EQUITY
 
 
+def _position_exit_policy(asset_class: str) -> dict[str, str]:
+    if asset_class == "us_option":
+        return {
+            "stop": f"-{os.environ.get('MANDATE_OPTION_STOP_LOSS_PCT', '25')}% unrealized P&L",
+            "target": f"+{os.environ.get('MANDATE_OPTION_PROFIT_TARGET_PCT', '40')}% unrealized P&L",
+            "time_stop": f"{os.environ.get('MANDATE_OPTION_TIME_STOP_MINUTES', '180')}m in the dead band",
+            "expiry": f"close at DTE <= {os.environ.get('MANDATE_OPTION_EXIT_DTE', '2')}",
+            "flatten": "mandatory 15:50 ET session flatten",
+            "review": "every scheduled pass and realtime risk wake",
+        }
+    return {
+        "stop": f"{os.environ.get('MANDATE_EXIT_STOP_ATR', '0.90')}x ATR14 adverse move",
+        "target": f"{os.environ.get('MANDATE_EXIT_TARGET_ATR', '1.50')}x ATR14 favorable move",
+        "time_stop": (
+            f"{os.environ.get('MANDATE_EXIT_TIME_STOP_MINUTES', '45')}m if still within "
+            f"{os.environ.get('MANDATE_EXIT_DEAD_POSITION_ATR', '0.25')}x ATR14 of entry"
+        ),
+        "flatten": "mandatory 15:50 ET session flatten",
+        "review": "every scheduled pass and realtime risk wake",
+    }
+
+
 def _pending_order(item: dict[str, Any]) -> dict[str, Any]:
     """Project a raw Alpaca order onto the fields the console renders."""
     legs = item.get("legs")
@@ -215,6 +237,7 @@ class AlpacaPaperReader:
                 "avg_entry_price": item.get("avg_entry_price"),
                 "unrealized_pl": item.get("unrealized_pl"),
                 "unrealized_plpc": item.get("unrealized_plpc"),
+                "exit_policy": _position_exit_policy(str(item.get("asset_class") or "us_equity")),
             }
             if item.get("qty_available") is not None:
                 position["qty_available"] = str(item.get("qty_available"))

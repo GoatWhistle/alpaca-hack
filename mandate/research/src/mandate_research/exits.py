@@ -335,6 +335,10 @@ def run_exit_evaluation(
         atr14=atr14,
         first_seen=stored.get("first_seen", {}) if isinstance(stored.get("first_seen"), dict) else {},
         now=checked_at,
+        stop_atr=os.environ.get("MANDATE_EXIT_STOP_ATR", "0.90"),
+        target_atr=os.environ.get("MANDATE_EXIT_TARGET_ATR", "1.50"),
+        time_stop_minutes=int(os.environ.get("MANDATE_EXIT_TIME_STOP_MINUTES", "45")),
+        dead_position_atr=os.environ.get("MANDATE_EXIT_DEAD_POSITION_ATR", "0.25"),
     )
     _write_tracking(active_path, {"first_seen": result["first_seen"]})
     return result

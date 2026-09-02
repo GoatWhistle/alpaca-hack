@@ -31,7 +31,7 @@ CLIENT_ORDER_PREFIX = "mandate-direct-"
 MANDATE_ROOT = Path(__file__).resolve().parents[3]
 EXIT_ACTION_KINDS = {"exit", "option_exit", "option_exit_mleg"}
 OPTION_ACTION_KINDS = {"option_entry", "option_spread_entry", "option_exit", "option_exit_mleg"}
-TRADE_PLAN_SCHEMA = "trade.plan.v1"
+TRADE_PLAN_SCHEMA = "trade.plan.v2"
 CRITIC_NAMES = frozenset({"risk", "market", "execution"})
 MAX_PLAN_STEPS = 3
 
@@ -321,11 +321,11 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
     """Validate a model plan and resolve only its candidate IDs to canonical symbols."""
     if decision.get("schema") == TRADE_PLAN_SCHEMA:
         required_root = {
-            "schema", "cycle_id", "reason", "action", "steps", "critic_coverage",
+            "schema", "cycle_id", "reason", "action", "hypotheses", "steps", "critic_coverage",
             "critic_resolutions", "memory_events",
         }
         if set(decision) != required_root:
-            raise ValueError("trade plan root fields do not match trade.plan.v1")
+            raise ValueError("trade plan root fields do not match trade.plan.v2")
         action = decision.get("action")
         if action not in {"PARK", "EXECUTE_PLAN"}:
             raise ValueError("trade plan action must be PARK or EXECUTE_PLAN")
@@ -338,6 +338,38 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
         if cycle_id != canonical_cycle_id:
             raise ValueError("trade plan cycle_id does not match the canonical evaluation cycle")
         reason = _required_text(decision.get("reason"), "trade plan reason")
+        hypotheses = decision.get("hypotheses")
+        if not isinstance(hypotheses, list) or len(hypotheses) > 5:
+            raise ValueError("trade plan hypotheses must contain at most five items")
+        if action == "EXECUTE_PLAN" and not hypotheses:
+            raise ValueError("EXECUTE_PLAN requires at least one trade hypothesis")
+        hypothesis_candidates: set[str] = set()
+        for index, raw_hypothesis in enumerate(hypotheses):
+            hypothesis = _object(raw_hypothesis, f"trade hypothesis {index}")
+            if set(hypothesis) != {
+                "candidate_id", "thesis", "confidence", "supports", "contradicts", "invalidation",
+            }:
+                raise ValueError("trade hypothesis fields do not match trade.plan.v2")
+            candidate_id = _required_text(
+                hypothesis.get("candidate_id"), f"trade hypothesis {index} candidate_id", maximum=120,
+            )
+            if candidate_id in hypothesis_candidates:
+                raise ValueError("trade hypothesis candidate_ids must be unique")
+            hypothesis_candidates.add(candidate_id)
+            _required_text(hypothesis.get("thesis"), f"trade hypothesis {index} thesis", maximum=240)
+            _required_text(
+                hypothesis.get("invalidation"), f"trade hypothesis {index} invalidation", maximum=240,
+            )
+            if hypothesis.get("confidence") not in {"low", "medium", "high"}:
+                raise ValueError("trade hypothesis confidence must be low, medium, or high")
+            supports = hypothesis.get("supports")
+            contradicts = hypothesis.get("contradicts")
+            if not isinstance(supports, list) or not 1 <= len(supports) <= 12:
+                raise ValueError("trade hypothesis supports must contain 1-12 evidence refs")
+            if not isinstance(contradicts, list) or len(contradicts) > 8:
+                raise ValueError("trade hypothesis contradicts must contain at most 8 evidence refs")
+            for evidence_ref in [*supports, *contradicts]:
+                _required_text(evidence_ref, f"trade hypothesis {index} evidence ref", maximum=300)
         raw_steps = decision.get("steps")
         if not isinstance(raw_steps, list):
             raise ValueError("trade plan steps must be a list")
@@ -355,7 +387,7 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
         for index, raw_resolution in enumerate(resolutions):
             resolution = _object(raw_resolution, f"critic resolution {index}")
             if set(resolution) != {"critic", "resolution", "reason"}:
-                raise ValueError("critic resolution fields do not match trade.plan.v1")
+                raise ValueError("critic resolution fields do not match trade.plan.v2")
             critic = str(resolution.get("critic"))
             if critic not in CRITIC_NAMES or critic in resolved:
                 raise ValueError("critic resolutions must be unique")
@@ -369,7 +401,7 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
         for index, raw_memory in enumerate(memory_events):
             memory = _object(raw_memory, f"memory event {index}")
             if set(memory) != {"hypothesis", "evidence_refs", "ttl_hours"}:
-                raise ValueError("memory event fields do not match trade.plan.v1")
+                raise ValueError("memory event fields do not match trade.plan.v2")
             _required_text(memory.get("hypothesis"), f"memory event {index} hypothesis")
             if not isinstance(memory.get("evidence_refs"), list) or not memory["evidence_refs"]:
                 raise ValueError("memory event evidence_refs must be non-empty")
@@ -378,6 +410,12 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
             ttl_hours = memory.get("ttl_hours")
             if isinstance(ttl_hours, bool) or not isinstance(ttl_hours, int) or not 1 <= ttl_hours <= 168:
                 raise ValueError("memory event ttl_hours must be between 1 and 168")
+        catalog: dict[str, str] | None = None
+        catalog_source = "trade_candidates"
+        if hypothesis_candidates:
+            catalog, catalog_source = _canonical_trade_candidates(evaluation)
+            if any(candidate_id not in catalog for candidate_id in hypothesis_candidates):
+                raise ValueError("trade hypothesis references an unknown candidate_id")
         if action == "PARK":
             return {
                 "schema": TRADE_PLAN_SCHEMA,
@@ -387,14 +425,15 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
                 "reason": reason,
                 "steps": [],
             }
-        catalog, catalog_source = _canonical_trade_candidates(evaluation)
+        if catalog is None:
+            catalog, catalog_source = _canonical_trade_candidates(evaluation)
         steps: list[dict[str, Any]] = []
         candidate_ids: set[str] = set()
         symbols: set[str] = set()
         for index, raw in enumerate(raw_steps):
             step = _object(raw, f"trade plan step {index}")
             if set(step) != {"candidate_id", "reason", "evidence_refs"}:
-                raise ValueError("trade plan step fields do not match trade.plan.v1")
+                raise ValueError("trade plan step fields do not match trade.plan.v2")
             candidate_id = _required_text(
                 step.get("candidate_id"), f"trade plan step {index} candidate_id", maximum=120,
             )
@@ -413,6 +452,8 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
                 raise ValueError(f"unknown trade plan candidate_id: {candidate_id}")
             if symbol in symbols:
                 raise ValueError(f"trade plan resolves multiple IDs to {symbol}")
+            if candidate_id not in hypothesis_candidates:
+                raise ValueError(f"trade plan candidate_id lacks a hypothesis: {candidate_id}")
             candidate_ids.add(candidate_id)
             symbols.add(symbol)
             steps.append({
@@ -1144,13 +1185,38 @@ def execute_with_lifecycle(
         "kind": action["kind"],
         "candidate": action["symbol"],
         "underlying": _action_underlying(action),
+        "side": action["side"],
         "plan_schema": action.get("plan_schema"),
         "plan_cycle_id": action.get("plan_cycle_id"),
         "plan_candidate_id": action.get("plan_candidate_id"),
         "plan_evidence_refs": action.get("plan_evidence_refs"),
         "reason": action["rationale"],
+        "exit_policy": _entry_exit_policy(action),
         "order": payload,
         "result": current,
+    }
+
+
+def _entry_exit_policy(action: dict[str, Any]) -> dict[str, str] | None:
+    kind = str(action.get("kind") or "")
+    if kind in EXIT_ACTION_KINDS:
+        return None
+    if kind in {"option_entry", "option_spread_entry"}:
+        return {
+            "stop": f"-{os.environ.get('MANDATE_OPTION_STOP_LOSS_PCT', '25')}% unrealized P&L",
+            "target": f"+{os.environ.get('MANDATE_OPTION_PROFIT_TARGET_PCT', '40')}% unrealized P&L",
+            "time_stop": f"{os.environ.get('MANDATE_OPTION_TIME_STOP_MINUTES', '180')}m in the dead band",
+            "expiry": f"close at DTE <= {os.environ.get('MANDATE_OPTION_EXIT_DTE', '2')}",
+            "flatten": "mandatory 15:50 ET session flatten",
+        }
+    return {
+        "stop": f"{os.environ.get('MANDATE_EXIT_STOP_ATR', '0.90')}x ATR14 adverse move",
+        "target": f"{os.environ.get('MANDATE_EXIT_TARGET_ATR', '1.50')}x ATR14 favorable move",
+        "time_stop": (
+            f"{os.environ.get('MANDATE_EXIT_TIME_STOP_MINUTES', '45')}m if still within "
+            f"{os.environ.get('MANDATE_EXIT_DEAD_POSITION_ATR', '0.25')}x ATR14 of entry"
+        ),
+        "flatten": "mandatory 15:50 ET session flatten",
     }
 
 
@@ -1174,6 +1240,7 @@ def _journal(execution: dict[str, Any]) -> None:
             "execution": "direct_alpaca",
             "candidate": execution.get("candidate"),
             "kind": execution.get("kind"),
+            "side": execution.get("side"),
             "status": execution.get("status"),
             "filled_qty": execution.get("filled_qty"),
             "replacements": execution.get("replacements"),
@@ -1181,6 +1248,7 @@ def _journal(execution: dict[str, Any]) -> None:
             "plan_cycle_id": execution.get("plan_cycle_id"),
             "plan_candidate_id": execution.get("plan_candidate_id"),
             "plan_evidence_refs": execution.get("plan_evidence_refs"),
+            "exit_policy": execution.get("exit_policy"),
             "order": execution.get("order"),
             "broker_order_id": _object(execution.get("result", {}), "broker result").get("id"),
         },

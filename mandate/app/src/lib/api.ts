@@ -50,6 +50,7 @@ export function isTraderTimelineEvent(item: unknown, after = -1): item is Trader
     && ((item as TraderTimelineEvent).session_id === null
       || typeof (item as TraderTimelineEvent).session_id === "string")
     && typeof (item as TraderTimelineEvent).summary === "string"
+    && (item as TraderTimelineEvent).summary.length <= 4_000
     && typeof (item as TraderTimelineEvent).details === "object"
     && (item as TraderTimelineEvent).details !== null;
 }

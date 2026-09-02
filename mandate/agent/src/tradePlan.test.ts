@@ -5,10 +5,18 @@ import { parseTradePlan } from "./tradePlan.js";
 
 function validPayload(): Record<string, unknown> {
   return {
-    schema: "trade.plan.v1",
+    schema: "trade.plan.v2",
     cycle_id: "cycle-1",
     reason: "AAPL has the strongest deterministic evidence.",
     action: "EXECUTE_PLAN",
+    hypotheses: [{
+      candidate_id: "entry-1-AAPL",
+      thesis: "Aligned momentum can continue while liquidity stays elevated.",
+      confidence: "medium",
+      supports: ["evaluation.trade_candidates.0.evidence"],
+      contradicts: ["scorecard.momentum"],
+      invalidation: "Price confirmation or relative volume falls below its gate.",
+    }],
     steps: [{
       reason: "Momentum and liquidity gates agree.",
       candidate_id: "entry-1-AAPL",
@@ -36,7 +44,26 @@ test("strict parser accepts the exact canonical root", () => {
   const plan = parseTradePlan(line(validPayload()), "cycle-1", ["entry-1-AAPL"]);
   assert.equal(plan?.action, "EXECUTE_PLAN");
   assert.equal(plan?.steps[0]?.candidate_id, "entry-1-AAPL");
+  assert.equal(plan?.hypotheses[0]?.confidence, "medium");
   assert.equal(plan?.memory_events[0]?.ttl_hours, 24);
+});
+
+test("hypotheses are bounded, candidate-linked, and carry explicit invalidation", () => {
+  const unknown = validPayload();
+  (unknown.hypotheses as Record<string, unknown>[])[0]!.candidate_id = "entry-2-MSFT";
+  assert.equal(parseTradePlan(line(unknown), "cycle-1", ["entry-1-AAPL"]), null);
+  const missing = validPayload();
+  missing.hypotheses = [];
+  assert.equal(parseTradePlan(line(missing), "cycle-1", ["entry-1-AAPL"]), null);
+  const invalidConfidence = validPayload();
+  (invalidConfidence.hypotheses as Record<string, unknown>[])[0]!.confidence = "certain";
+  assert.equal(parseTradePlan(line(invalidConfidence), "cycle-1", ["entry-1-AAPL"]), null);
+  const uncoveredStep = validPayload();
+  (uncoveredStep.steps as Record<string, unknown>[])[0]!.candidate_id = "entry-2-MSFT";
+  assert.equal(
+    parseTradePlan(line(uncoveredStep), "cycle-1", ["entry-1-AAPL", "entry-2-MSFT"]),
+    null,
+  );
 });
 
 test("strict parser rejects extra keys, wrong cycle and unknown candidates", () => {

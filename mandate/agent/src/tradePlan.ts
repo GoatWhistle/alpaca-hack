@@ -27,11 +27,21 @@ export type MemoryEvent = {
   ttl_hours: number;
 };
 
+export type TradeHypothesis = {
+  candidate_id: string;
+  thesis: string;
+  confidence: "low" | "medium" | "high";
+  supports: string[];
+  contradicts: string[];
+  invalidation: string;
+};
+
 export type TradePlan = {
-  schema: "trade.plan.v1";
+  schema: "trade.plan.v2";
   cycle_id: string;
   reason: string;
   action: "PARK" | "EXECUTE_PLAN";
+  hypotheses: TradeHypothesis[];
   steps: TradePlanStep[];
   critic_coverage: CriticName[];
   critic_resolutions: CriticResolution[];
@@ -64,6 +74,12 @@ function evidenceList(value: unknown): string[] | null {
   return items.every((item): item is string => item !== null) ? items : null;
 }
 
+function optionalEvidenceList(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length > 8) return null;
+  const items = value.map((item) => boundedText(item, 300));
+  return items.every((item): item is string => item !== null) ? items : null;
+}
+
 function rootPayload(text: string): Record<string, unknown> | null {
   const lines = text.trim().split(/\r?\n/u).filter((line) => line.trim());
   const marked = lines.filter((line) => line.startsWith("TRADE_PLAN_JSON:"));
@@ -83,15 +99,45 @@ export function parseTradePlan(
 ): TradePlan | null {
   const payload = rootPayload(text);
   if (!payload || !exactKeys(payload, [
-    "schema", "cycle_id", "reason", "action", "steps", "critic_coverage", "critic_resolutions", "memory_events",
+    "schema", "cycle_id", "reason", "action", "hypotheses", "steps",
+    "critic_coverage", "critic_resolutions", "memory_events",
   ])) return null;
-  if (payload.schema !== "trade.plan.v1"
+  if (payload.schema !== "trade.plan.v2"
     || payload.cycle_id !== expectedCycleId
     || (payload.action !== "PARK" && payload.action !== "EXECUTE_PLAN")) return null;
   const reason = boundedText(payload.reason);
   if (!reason || !Array.isArray(payload.steps) || payload.steps.length > 3) return null;
 
   const allowed = new Set(allowedCandidates);
+  if (!Array.isArray(payload.hypotheses)
+    || payload.hypotheses.length < 1 || payload.hypotheses.length > 5) return null;
+  const hypotheses: TradeHypothesis[] = [];
+  const hypothesisCandidates = new Set<string>();
+  for (const rawHypothesis of payload.hypotheses) {
+    const hypothesis = record(rawHypothesis);
+    if (!hypothesis || !exactKeys(hypothesis, [
+      "candidate_id", "thesis", "confidence", "supports", "contradicts", "invalidation",
+    ])) return null;
+    const candidateId = typeof hypothesis.candidate_id === "string"
+      ? hypothesis.candidate_id.trim()
+      : "";
+    const thesis = boundedText(hypothesis.thesis, 240);
+    const invalidation = boundedText(hypothesis.invalidation, 240);
+    const supports = evidenceList(hypothesis.supports);
+    const contradicts = optionalEvidenceList(hypothesis.contradicts);
+    if (!allowed.has(candidateId) || hypothesisCandidates.has(candidateId)
+      || !thesis || !invalidation || !supports || !contradicts
+      || !["low", "medium", "high"].includes(String(hypothesis.confidence))) return null;
+    hypothesisCandidates.add(candidateId);
+    hypotheses.push({
+      candidate_id: candidateId,
+      thesis,
+      confidence: hypothesis.confidence as TradeHypothesis["confidence"],
+      supports,
+      contradicts,
+      invalidation,
+    });
+  }
   const seenSymbols = new Set<string>();
   const steps: TradePlanStep[] = [];
   for (const rawStep of payload.steps) {
@@ -106,7 +152,8 @@ export function parseTradePlan(
     steps.push({ reason: stepReason, candidate_id: candidateId, evidence_refs: evidenceRefs });
   }
   if ((payload.action === "PARK" && steps.length !== 0)
-    || (payload.action === "EXECUTE_PLAN" && steps.length === 0)) return null;
+    || (payload.action === "EXECUTE_PLAN" && steps.length === 0)
+    || steps.some((step) => !hypothesisCandidates.has(step.candidate_id))) return null;
 
   if (!Array.isArray(payload.critic_coverage)
     || payload.critic_coverage.length !== CRITIC_NAMES.length) return null;
@@ -146,10 +193,11 @@ export function parseTradePlan(
   }
 
   return {
-    schema: "trade.plan.v1",
+    schema: "trade.plan.v2",
     cycle_id: expectedCycleId,
     reason,
     action: payload.action,
+    hypotheses,
     steps,
     critic_coverage: criticCoverage,
     critic_resolutions: criticResolutions,
@@ -159,10 +207,11 @@ export function parseTradePlan(
 
 export function parkedPlan(cycleId: string, reason: string): TradePlan {
   return {
-    schema: "trade.plan.v1",
+    schema: "trade.plan.v2",
     cycle_id: cycleId,
     reason,
     action: "PARK",
+    hypotheses: [],
     steps: [],
     critic_coverage: [...CRITIC_NAMES],
     critic_resolutions: CRITIC_NAMES.map((critic) => ({

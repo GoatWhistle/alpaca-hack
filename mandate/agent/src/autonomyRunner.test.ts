@@ -8,6 +8,7 @@ import {
   appendTraderMemory,
   buildAutonomyPrompt,
   criticTimeoutSeconds,
+  criticsAllowEntries,
   detectNewEvents,
   enforcePlanSafety,
   isStaleTraderSessionError,
@@ -36,6 +37,16 @@ test("critic timeout allows parallel advisors enough time and stays bounded", ()
   assert.equal(criticTimeoutSeconds({ MANDATE_CRITIC_TIMEOUT_SECONDS: "45" }), 45);
   assert.equal(criticTimeoutSeconds({ MANDATE_CRITIC_TIMEOUT_SECONDS: "120" }), 60);
   assert.equal(criticTimeoutSeconds({ MANDATE_CRITIC_TIMEOUT_SECONDS: "bad" }), 20);
+});
+
+test("entry plans fail closed unless all three critics completed exactly once", () => {
+  const completed = (["risk", "market", "execution"] as const).map((critic) => ({
+    critic, status: "completed" as const, model: "fixture", summary: "ok",
+  }));
+  assert.equal(criticsAllowEntries(completed), true);
+  assert.equal(criticsAllowEntries([{ ...completed[0]!, status: "timeout" }, ...completed.slice(1)]), false);
+  assert.equal(criticsAllowEntries(completed.slice(1)), false);
+  assert.equal(criticsAllowEntries([...completed, completed[0]!]), false);
 });
 
 const trajectory: Trajectory = {
@@ -121,7 +132,7 @@ test("planner prompt contains full candidates, critics, and only the canonical c
     trajectory, [event], market, {}, { cycle_id: "cycle-1" }, "cycle-1",
     candidates, critics, activeMemory,
   );
-  assert.match(prompt, /trade\.plan\.v1/u);
+  assert.match(prompt, /trade\.plan\.v2/u);
   assert.match(prompt, /entry-1-AAPL/u);
   assert.match(prompt, /relative volume remains elevated/u);
   assert.match(prompt, /untrusted data/u);
@@ -150,10 +161,17 @@ test("an explicit empty candidate catalog does not fall back to research symbols
 
 test("final safety gate preserves only executable regular-hours quality plans", () => {
   assert.equal(enforcePlanSafety("EXECUTE_PLAN", trajectory, market, ["AAPL"]), "EXECUTE_PLAN");
-  assert.equal(enforcePlanSafety("EXECUTE_PLAN", trajectory, {
+  assert.equal(enforcePlanSafety("EXECUTE_PLAN", {
+    ...trajectory,
+    symbols: [...trajectory.symbols, "NVDA"],
+  }, {
     ...market,
     quality: { ...market.quality, NVDA: { quality_pass: true } },
   }, ["NVDA"]), "EXECUTE_PLAN");
+  assert.equal(enforcePlanSafety("EXECUTE_PLAN", trajectory, {
+    ...market,
+    quality: { ...market.quality, NVDA: { quality_pass: true } },
+  }, ["NVDA"]), "PARK");
   assert.equal(enforcePlanSafety("EXECUTE_PLAN", trajectory, { ...market, market_is_open: false }, ["AAPL"]), "PARK");
   assert.equal(enforcePlanSafety("EXECUTE_PLAN", trajectory, { ...market, quality: {} }, ["AAPL"]), "PARK");
   assert.equal(enforcePlanSafety("PARK", trajectory, market, ["AAPL"]), "PARK");
@@ -166,7 +184,7 @@ test("trading date follows America/New_York rather than process timezone", () =>
 
 test("stale persisted sessions are recognized narrowly", () => {
   assert.equal(isStaleTraderSessionError(new Error("session 123 not found (404)")), true);
-  assert.equal(isStaleTraderSessionError(new Error("trader violated trade.plan.v1")), false);
+  assert.equal(isStaleTraderSessionError(new Error("trader violated trade.plan.v2")), false);
 });
 
 test("memory is append-only and only unexpired hypotheses are loaded", async () => {

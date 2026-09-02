@@ -63,6 +63,152 @@ function json(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function boundedString(value: unknown, limit = 500): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  return text ? text.slice(0, limit) : null;
+}
+
+function markdownText(value: unknown, limit = 500): string | null {
+  const text = boundedString(value, limit);
+  return text?.replace(/([\\`*_[\]{}()<>#+.!|-])/gu, "\\$1") ?? null;
+}
+
+function stringList(value: unknown, limit = 12): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const text = boundedString(item, 300);
+    return text ? [text] : [];
+  }).slice(0, limit);
+}
+
+function evidenceRefs(value: unknown): string {
+  const refs = stringList(value).map((item) => `\`${item.replace(/\s+/gu, " ").replaceAll("`", "")}\``);
+  return refs.length > 0 ? refs.join(", ") : "none";
+}
+
+function capJournal(journal: string): string {
+  const maximum = 20_000;
+  return journal.length <= maximum
+    ? journal
+    : `${journal.slice(0, maximum)}\n\n…journal truncated; full contract remains in the tool result.`;
+}
+
+function decisionJournal(plan: Record<string, unknown>, fallback: string): string {
+  const decision = markdownText(plan.action, 40) ?? "UNKNOWN";
+  const reason = markdownText(plan.reason, 800) ?? markdownText(fallback, 800) ?? "No reason supplied.";
+  const sections = [`**Decision · ${decision}**`, reason];
+
+  const hypotheses = Array.isArray(plan.hypotheses) ? plan.hypotheses.slice(0, 5) : [];
+  if (hypotheses.length > 0) {
+    const rendered = hypotheses.map((value, index) => {
+      const hypothesis = record(value);
+      const candidate = markdownText(hypothesis.candidate_id, 80) ?? `candidate ${index + 1}`;
+      const confidence = markdownText(hypothesis.confidence, 20) ?? "unknown";
+      const thesis = markdownText(hypothesis.thesis, 500) ?? "No thesis supplied.";
+      const invalidation = markdownText(hypothesis.invalidation, 500) ?? "Not supplied.";
+      return [
+        `**${index + 1}. ${candidate} · confidence ${confidence}**`,
+        thesis,
+        `- Supports: ${evidenceRefs(hypothesis.supports)}`,
+        `- Contradicts: ${evidenceRefs(hypothesis.contradicts)}`,
+        `- Invalidated when: ${invalidation}`,
+      ].join("\n");
+    });
+    sections.push(`### Hypotheses\n\n${rendered.join("\n\n")}`);
+  }
+
+  const steps = Array.isArray(plan.steps) ? plan.steps.slice(0, 3) : [];
+  if (steps.length > 0) {
+    const rendered = steps.map((value, index) => {
+      const step = record(value);
+      const candidate = markdownText(step.candidate_id, 80) ?? `candidate ${index + 1}`;
+      const stepReason = markdownText(step.reason, 500) ?? "No reason supplied.";
+      return `${index + 1}. **${candidate}** — ${stepReason}\n   Evidence: ${evidenceRefs(step.evidence_refs)}`;
+    });
+    sections.push(`### Candidate plan\n\n${rendered.join("\n")}`);
+  }
+
+  const resolutions = Array.isArray(plan.critic_resolutions)
+    ? plan.critic_resolutions.slice(0, 3)
+    : [];
+  if (resolutions.length > 0) {
+    const rendered = resolutions.map((value) => {
+      const resolution = record(value);
+      const critic = markdownText(resolution.critic, 40) ?? "critic";
+      const outcome = markdownText(resolution.resolution, 40) ?? "unknown";
+      const resolutionReason = markdownText(resolution.reason, 500) ?? "No reason supplied.";
+      return `- **${critic} · ${outcome}** — ${resolutionReason}`;
+    });
+    sections.push(`### Critic synthesis\n\n${rendered.join("\n")}`);
+  }
+
+  const memories = Array.isArray(plan.memory_events) ? plan.memory_events.slice(0, 5) : [];
+  if (memories.length > 0) {
+    const rendered = memories.map((value) => {
+      const memory = record(value);
+      const hypothesis = markdownText(memory.hypothesis, 500) ?? "Unnamed hypothesis";
+      const ttl = typeof memory.ttl_hours === "number" ? `${memory.ttl_hours}h` : "bounded";
+      return `- ${hypothesis} · TTL ${ttl}\n  Evidence: ${evidenceRefs(memory.evidence_refs)}`;
+    });
+    sections.push(`### Durable memory\n\n${rendered.join("\n")}`);
+  }
+
+  return capJournal(sections.join("\n\n"));
+}
+
+function executionJournal(event: TraderTimelineEvent): string {
+  const result = record(event.details.result);
+  const executions = Array.isArray(result.executions) ? result.executions.slice(0, 24) : [];
+  if (executions.length === 0) {
+    return `**Trade activity · ${event.status}**\n\n${markdownText(event.summary, 4_000) ?? "No summary supplied."}`;
+  }
+  const cards = executions.map((value, index) => {
+    const execution = record(value);
+    const order = record(execution.order);
+    const broker = record(execution.result);
+    const side = (markdownText(order.side, 20) ?? markdownText(execution.side, 20) ?? "order").toUpperCase();
+    const symbol = markdownText(order.symbol, 40)
+      ?? markdownText(execution.candidate, 40)
+      ?? markdownText(execution.underlying, 40)
+      ?? `action ${index + 1}`;
+    const kind = markdownText((boundedString(execution.kind, 40) ?? "trade").replaceAll("_", " "), 40) ?? "trade";
+    const status = markdownText(execution.status, 40) ?? "unknown";
+    const filled = markdownText(execution.filled_qty, 40) ?? "0";
+    const requested = markdownText(order.qty, 40) ?? "—";
+    const limit = markdownText(order.limit_price, 60) ?? "—";
+    const average = markdownText(broker.filled_avg_price, 60);
+    const occurredAt = markdownText(broker.filled_at, 80) ?? markdownText(broker.submitted_at, 80);
+    const rationale = markdownText(execution.reason, 800) ?? "No execution rationale supplied.";
+    const candidate = boundedString(execution.plan_candidate_id, 100)
+      ?.replace(/\s+/gu, " ").replaceAll("`", "") ?? null;
+    const policy = record(execution.exit_policy);
+    const policyItems = Object.entries(policy).flatMap(([label, raw]) => {
+      const text = markdownText(raw, 300);
+      const safeLabel = markdownText(label.replaceAll("_", " "), 80) ?? "rule";
+      return text ? [`${safeLabel}: ${text}`] : [];
+    }).slice(0, 6);
+    const lines = [
+      `**${index + 1}. ${side} ${symbol} · ${status}**`,
+      `${kind} · filled ${filled}/${requested} · ${average ? `avg ${average}` : `limit ${limit}`}${occurredAt ? ` · ${occurredAt}` : ""}`,
+      `- Why: ${rationale}`,
+    ];
+    if (candidate) lines.push(`- Candidate: \`${candidate.replaceAll("`", "")}\``);
+    if (policyItems.length > 0) {
+      lines.push(`- Exit plan: ${policyItems.join(" · ")}`);
+    } else if (!kind.includes("exit") && Number(filled) > 0) {
+      lines.push("- Exit plan: managed by the hard-risk engine; exact thresholds were not attached to this legacy fill.");
+    }
+    return lines.join("\n");
+  });
+  const errors = stringList(result.errors, 3).map((error) => markdownText(error, 300) ?? "Unknown warning");
+  const suffix = errors.length > 0
+    ? `\n\n### Execution warnings\n\n${errors.map((error) => `- ${error}`).join("\n")}`
+    : "";
+  const summary = markdownText(event.summary, 4_000) ?? "No summary supplied.";
+  return capJournal(`**Trade activity · ${event.status}**\n\n${summary}\n\n### Orders\n\n${cards.join("\n\n")}${suffix}`);
+}
+
 function safeForPublicChat(value: unknown, depth = 0): unknown {
   if (depth > 6) return "[truncated]";
   if (typeof value === "string") return value.length > 2_000 ? `${value.slice(0, 2_000)}…` : value;
@@ -81,7 +227,9 @@ function safeForPublicChat(value: unknown, depth = 0): unknown {
 
 function toolName(event: TraderTimelineEvent): string {
   const explicit = event.details.tool;
-  if (typeof explicit === "string" && explicit) return explicit;
+  if (typeof explicit === "string" && explicit.trim()) {
+    return explicit.trim().replace(/[^a-zA-Z0-9_.:-]/gu, "-").slice(0, 120);
+  }
   if (event.kind === "risk_exit") return "risk.evaluate_open_positions";
   if (event.kind === "plan") return "trader.create_plan";
   if (event.kind === "critics") {
@@ -94,9 +242,9 @@ function toolName(event: TraderTimelineEvent): string {
 
 function toolCallId(event: TraderTimelineEvent, name = toolName(event)): string {
   const cycle = typeof event.details.cycle_id === "string"
-    ? event.details.cycle_id
+    ? event.details.cycle_id.slice(0, 160)
     : `event-${event.sequence}`;
-  return `call-${cycle}-${name}`.replace(/[^a-zA-Z0-9_.:-]/gu, "-");
+  return `call-${cycle}-${name}`.replace(/[^a-zA-Z0-9_.:-]/gu, "-").slice(0, 240);
 }
 
 function toolCallEvent(event: TraderTimelineEvent, name = toolName(event)): NativeTurnEvent {
@@ -145,7 +293,7 @@ function modelTextEvent(event: TraderTimelineEvent, content: string, suffix = "m
     type: "model.message",
     id: eventId(event, suffix),
     threadId: ROOT_THREAD_ID,
-    content,
+    content: capJournal(content),
     finishReason: "stop",
     createdAt: event.at,
   };
@@ -165,14 +313,14 @@ export function timelineEventToTurnEvents(event: TraderTimelineEvent): NativeTur
   if (event.kind === "execution") {
     return [
       toolResponseEvent(event),
-      modelTextEvent(event, `**Execution · ${event.status}**\n\n${event.summary}`, "execution-summary"),
+      modelTextEvent(event, executionJournal(event), "execution-summary"),
     ];
   }
   if (event.kind === "risk_exit") {
     return [
       toolCallEvent(event),
       toolResponseEvent(event),
-      modelTextEvent(event, `**Risk pass · ${event.status}**\n\n${event.summary}`, "risk-summary"),
+      modelTextEvent(event, executionJournal(event), "risk-summary"),
     ];
   }
   if (event.kind === "reasoning") {
@@ -187,30 +335,29 @@ export function timelineEventToTurnEvents(event: TraderTimelineEvent): NativeTur
         threadId: ROOT_THREAD_ID,
         content: null,
         // This is the model's explicit bounded rationale, never hidden scratchpad/CoT.
-        reasoningContent: event.summary,
+        reasoningContent: event.summary.slice(0, 4_000),
         createdAt: event.at,
       },
       modelTextEvent(
         event,
-        `**${source === "trader_model" ? "Trader rationale" : "Gate rationale"}**\n\n${event.summary}`,
+        `**${source === "trader_model" ? "Trader rationale" : "Gate rationale"}**\n\n${markdownText(event.summary, 4_000) ?? "No rationale supplied."}`,
         "reasoning-summary",
       ),
     ];
   }
   if (event.kind === "plan") {
     const plan = record(event.details.plan);
-    const decision = typeof plan.action === "string" ? plan.action : event.status.toUpperCase();
     return [
       toolResponseEvent(event, "trader.create_plan"),
       modelTextEvent(
         event,
-        `**Decision · ${decision}**\n\n${event.summary}\n\n\`\`\`json\n${json(plan)}\n\`\`\``,
+        decisionJournal(plan, event.summary),
         "decision",
       ),
     ];
   }
   const label = event.kind === "trigger" ? "Trigger" : "Session";
-  return [modelTextEvent(event, `**${label} · ${event.status}**\n\n${event.summary}`)];
+  return [modelTextEvent(event, `**${label} · ${event.status}**\n\n${markdownText(event.summary, 4_000) ?? "No summary supplied."}`)];
 }
 
 async function loadTimeline(tradingDate?: string, signal?: AbortSignal): Promise<TraderTimelineEvent[]> {
@@ -442,8 +589,6 @@ async function* readTimelineStream(
         signal,
       });
       if (!response.ok || !response.body) throw new Error(`Trader stream returned ${response.status}`);
-      consecutiveFailures = 0;
-      options.onHealthChange?.(true);
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -461,12 +606,18 @@ async function* readTimelineStream(
           const data = lines.filter((line) => line.startsWith("data:"))
             .map((line) => line.slice(5).trimStart()).join("\n");
           if (type === "stream_error") throw new Error("Trader stream reported a journal error");
+          if (lines.some((line) => line.trim() === ": keepalive")) {
+            consecutiveFailures = 0;
+            options.onHealthChange?.(true);
+          }
           if (type === "trader_event" && data) {
             const value = JSON.parse(data) as unknown;
             if (!isTraderTimelineEvent(value, cursor) || value.trading_date !== tradingDate) {
               throw new Error("Trader stream violated its event contract");
             }
             cursor = value.sequence;
+            consecutiveFailures = 0;
+            options.onHealthChange?.(true);
             yield value;
           }
           boundary = buffer.indexOf("\n\n");

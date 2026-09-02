@@ -12,6 +12,8 @@ import {
   newYorkTradingDate,
   traderDaySessionId,
 } from "./traderChatServer";
+import type { Snapshot } from "../../lib/api";
+import { TradingBookStrip } from "./TradingBookStrip";
 
 function OperatorForkLayout({ className }: { className?: string }) {
   return (
@@ -88,7 +90,13 @@ const OperatorRuntime = memo(function OperatorRuntime({ onError }: { onError: ()
   );
 });
 
-export const AgentWorkspace = memo(function AgentWorkspace() {
+export const AgentWorkspace = memo(function AgentWorkspace({
+  snapshot,
+  error,
+}: {
+  snapshot: Snapshot | null;
+  error: string | null;
+}) {
   const [tradingDate, setTradingDate] = useState(newYorkTradingDate);
   const [traderDegraded, setTraderDegraded] = useState(false);
   const [chatDegraded, setChatDegraded] = useState(false);
@@ -117,6 +125,8 @@ export const AgentWorkspace = memo(function AgentWorkspace() {
           <span>advisory fork</span>
         </div>
       </header>
+
+      <TradingBookStrip snapshot={snapshot} live={snapshot?.source === "live" && !error} />
 
       <div className="trader-room-grid">
         <section className="trader-stream-pane" aria-label="Autonomous trader stream">

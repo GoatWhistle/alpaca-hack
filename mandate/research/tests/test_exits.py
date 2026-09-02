@@ -178,6 +178,23 @@ def test_run_exit_evaluation_persists_first_seen(tmp_path: Path) -> None:
     assert json.loads(tracking.read_text(encoding="utf-8"))["first_seen"]["NVDA"] == NOW.isoformat()
 
 
+def test_run_exit_evaluation_uses_the_same_env_policy_shown_by_ui(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MANDATE_EXIT_STOP_ATR", "0.50")
+    monkeypatch.setenv("MANDATE_EXIT_TARGET_ATR", "2.00")
+    monkeypatch.setenv("MANDATE_EXIT_TIME_STOP_MINUTES", "90")
+    monkeypatch.setenv("MANDATE_EXIT_DEAD_POSITION_ATR", "0.10")
+    result = run_exit_evaluation(
+        [_position("AAPL", "10", "100")],
+        now=NOW,
+        inputs=lambda _symbols: ({"AAPL": "99.4"}, {"AAPL": "1"}),
+        tracking_path=tmp_path / "tracking.json",
+    )
+    assert result["proposals"][0]["reason"] == "long_stop"
+    assert "0.50xATR" in result["proposals"][0]["rationale"]
+
+
 def test_exit_atr_fetch_has_an_explicit_history_window(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALPACA_API_KEY", "paper-key")
     monkeypatch.setenv("ALPACA_SECRET_KEY", "paper-secret")

@@ -32,10 +32,21 @@ def _plan_evaluation(*symbols: str) -> dict:
 
 def _plan(*candidate_ids: str, action: str = "EXECUTE_PLAN") -> dict:
     return {
-        "schema": "trade.plan.v1",
+        "schema": "trade.plan.v2",
         "cycle_id": "cycle-20260902-1400",
         "action": action,
         "reason": "ranked canonical candidates",
+        "hypotheses": [
+            {
+                "candidate_id": candidate_id,
+                "thesis": f"bounded thesis for {candidate_id}",
+                "confidence": "medium",
+                "supports": [f"evaluation.trade_candidates.{candidate_id}"],
+                "contradicts": [],
+                "invalidation": "quality or confirmation gate fails",
+            }
+            for candidate_id in candidate_ids
+        ],
         "steps": [
             {
                 "candidate_id": candidate_id,
@@ -66,9 +77,9 @@ def test_trade_plan_maps_only_ids_to_canonical_evaluation_in_plan_order() -> Non
 @pytest.mark.parametrize(
     ("decision", "message"),
     [
-        (_plan("candidate-1", "candidate-1"), "duplicate trade plan candidate_id"),
+        (_plan("candidate-1", "candidate-1"), "candidate_ids must be unique"),
         ({**_plan("candidate-1"), "steps": [{"candidate_id": "candidate-1", "reason": "", "evidence_refs": ["x"]}]}, "reason"),
-        (_plan("not-canonical"), "unknown trade plan candidate_id"),
+        (_plan("not-canonical"), "unknown candidate_id"),
         (_plan("candidate-1", "candidate-2", "candidate-3", "candidate-4"), "requires 1-3 steps"),
         ({**_plan(action="PARK"), "reason": "no edge", "steps": [_plan("candidate-1")["steps"][0]]}, "cannot contain steps"),
     ],
@@ -84,6 +95,13 @@ def test_trade_plan_rejects_model_supplied_order_fields() -> None:
     plan["steps"][0]["qty"] = "999999"
     with pytest.raises(ValueError, match="step fields"):
         execution.select_entries(_plan_evaluation("AAPL"), plan)
+
+
+def test_trade_plan_requires_a_hypothesis_for_every_selected_candidate() -> None:
+    plan = _plan("candidate-1", "candidate-2")
+    plan["hypotheses"] = plan["hypotheses"][:1]
+    with pytest.raises(ValueError, match="lacks a hypothesis"):
+        execution.select_entries(_plan_evaluation("AAPL", "MSFT"), plan)
 
 
 def test_trade_plan_park_requires_reason_and_selects_nothing() -> None:
@@ -388,12 +406,29 @@ def test_order_lifecycle_reprices_then_reports_real_fill(monkeypatch: pytest.Mon
     assert result["filled_qty"] == "10"
     assert result["deduplicated"] is False
     assert result["replacements"] == 1
+    assert result["exit_policy"] == {
+        "stop": "0.90x ATR14 adverse move",
+        "target": "1.50x ATR14 favorable move",
+        "time_stop": "45m if still within 0.25x ATR14 of entry",
+        "flatten": "mandatory 15:50 ET session flatten",
+    }
+
+
+def test_exit_policy_is_exact_for_options_and_absent_for_closing_orders() -> None:
+    assert execution._entry_exit_policy({"kind": "option_entry"}) == {
+        "stop": "-25% unrealized P&L",
+        "target": "+40% unrealized P&L",
+        "time_stop": "180m in the dead band",
+        "expiry": "close at DTE <= 2",
+        "flatten": "mandatory 15:50 ET session flatten",
+    }
+    assert execution._entry_exit_policy({"kind": "exit"}) is None
 
 
 def test_plan_client_order_id_is_stable_across_index_and_canonical_repricing() -> None:
     action = {
         "kind": "entry", "symbol": "AAPL", "side": "buy", "qty": "10",
-        "limit_price": "100", "plan_schema": "trade.plan.v1",
+        "limit_price": "100", "plan_schema": "trade.plan.v2",
         "plan_cycle_id": "cycle-1", "plan_candidate_id": "candidate-1",
     }
     first = execution._client_order_id(action, "first-check", 0)
@@ -430,7 +465,7 @@ def test_ordered_plan_stops_after_partial_fill(monkeypatch: pytest.MonkeyPatch) 
     actions = [{
         "kind": "entry", "symbol": symbol, "side": "buy", "qty": "10",
         "limit_price": "100", "rationale": "test", "plan_candidate_id": candidate_id,
-        "plan_cycle_id": "cycle-1", "plan_schema": "trade.plan.v1",
+        "plan_cycle_id": "cycle-1", "plan_schema": "trade.plan.v2",
     } for symbol, candidate_id in (
         ("AAPL", "candidate-1"), ("MSFT", "candidate-2"), ("NVDA", "candidate-3"),
     )]
@@ -456,7 +491,7 @@ def test_ordered_plan_stops_before_submit_on_live_conflict(monkeypatch: pytest.M
     action = {
         "kind": "entry", "symbol": "AAPL", "side": "buy", "qty": "10",
         "limit_price": "100", "rationale": "test", "plan_candidate_id": "candidate-1",
-        "plan_cycle_id": "cycle-1", "plan_schema": "trade.plan.v1",
+        "plan_cycle_id": "cycle-1", "plan_schema": "trade.plan.v2",
     }
     results, errors, halt = execution._run_plan_actions(
         Broker(), [action], checked_at="checked", start_index=0,
