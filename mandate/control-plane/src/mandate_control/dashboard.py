@@ -20,13 +20,15 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from mandate_control.autonomy import AutonomyStore
-from mandate_control.demo import DemoStore
 from mandate_control.env import load_workspace_env
 
 
 DEFAULT_TRUEFORGE_URL = "http://localhost:8790"
 DEFAULT_RESEARCH_URL = "http://127.0.0.1:8020/mcp"
 SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+APPROVABLE_TOOL_NAMES = frozenset({"append_trader_memory"})
+TIMELINE_KINDS = frozenset({"critics", "plan", "execution", "risk_exit", "session"})
+TIMELINE_STATUSES = frozenset({"ok", "parked", "submitted", "degraded"})
 
 
 class BrokerReader(Protocol):
@@ -231,6 +233,8 @@ def _pending_approvals(
                     tool_name = str(function.get("name", ""))
                     arguments = _parse_tool_arguments(function.get("arguments"))
                     break
+                if tool_name not in APPROVABLE_TOOL_NAMES:
+                    continue
                 items.append(
                     {
                         "session_id": session_id,
@@ -410,6 +414,72 @@ def _read_journal(path: Path, *, limit: int = 100) -> list[dict[str, Any]]:
     return entries
 
 
+def _read_timeline(path: Path, *, after: int = 0, limit: int = 200) -> dict[str, Any]:
+    """Read the append-only trader projection with a stable sequence cursor."""
+    if not path.exists():
+        entries: list[dict[str, Any]] = []
+    else:
+        try:
+            content = path.read_text(encoding="utf-8")
+            lines = content.splitlines()
+        except OSError as exc:
+            raise RuntimeError(f"cannot read trader timeline: {type(exc).__name__}") from exc
+        entries = []
+        previous_sequence = 0
+        required = {
+            "schema", "sequence", "at", "trading_date", "kind", "status",
+            "session_id", "summary", "details",
+        }
+        for line_number, line in enumerate(lines, start=1):
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError as exc:
+                if line_number == len(lines) and not content.endswith("\n"):
+                    break
+                raise RuntimeError(f"invalid trader timeline at line {line_number}") from exc
+            valid = (
+                isinstance(entry, dict)
+                and set(entry) == required
+                and entry.get("schema") == "trader.timeline.v1"
+                and isinstance(entry.get("sequence"), int)
+                and not isinstance(entry.get("sequence"), bool)
+                and entry["sequence"] > previous_sequence
+                and entry.get("kind") in TIMELINE_KINDS
+                and entry.get("status") in TIMELINE_STATUSES
+                and isinstance(entry.get("summary"), str)
+                and bool(entry["summary"].strip())
+                and isinstance(entry.get("details"), dict)
+                and (entry.get("session_id") is None or isinstance(entry.get("session_id"), str))
+                and isinstance(entry.get("trading_date"), str)
+                and re.fullmatch(r"\d{4}-\d{2}-\d{2}", entry["trading_date"]) is not None
+                and isinstance(entry.get("at"), str)
+            )
+            if not valid:
+                raise RuntimeError(f"invalid trader timeline contract at line {line_number}")
+            try:
+                parsed_at = datetime.fromisoformat(entry["at"].replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise RuntimeError(f"invalid trader timeline timestamp at line {line_number}") from exc
+            if parsed_at.tzinfo is None or parsed_at.utcoffset() is None:
+                raise RuntimeError(f"invalid trader timeline timestamp at line {line_number}")
+            previous_sequence = entry["sequence"]
+            entries.append(entry)
+    items: list[dict[str, Any]] = []
+    for entry in entries:
+        sequence = entry.get("sequence")
+        if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence <= after:
+            continue
+        items.append(entry)
+        if len(items) >= limit:
+            break
+    next_after = items[-1]["sequence"] if items else after
+    return {
+        "schema": "trader.timeline.page.v1",
+        "items": items,
+        "next_after": next_after,
+    }
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -560,7 +630,13 @@ def _default_paths() -> tuple[Path, ...]:
     outcomes_path = Path(
         os.environ.get("MANDATE_FORWARD_OUTCOMES_PATH", mandate_root / "logs" / "forward-outcomes.json")
     )
-    return dist, mandate_path, journal_path, trajectory_path, runtime_path, alerts_path, market_path, outcomes_path
+    timeline_path = Path(
+        os.environ.get("MANDATE_TRADER_TIMELINE_PATH", mandate_root / "logs" / "trader-timeline.jsonl")
+    )
+    return (
+        dist, mandate_path, journal_path, trajectory_path, runtime_path,
+        alerts_path, market_path, outcomes_path, timeline_path,
+    )
 
 
 def create_dashboard(
@@ -575,7 +651,7 @@ def create_dashboard(
     alerts_path: Path | None = None,
     market_path: Path | None = None,
     outcomes_path: Path | None = None,
-    demo_path: Path | None = None,
+    timeline_path: Path | None = None,
     service_urls: dict[str, str] | None = None,
 ) -> Starlette:
     (
@@ -587,6 +663,7 @@ def create_dashboard(
         default_alerts,
         default_market,
         default_outcomes,
+        default_timeline,
     ) = _default_paths()
     urls = service_urls or {
         "trueforge": os.environ.get("TRUEFORGE_BASE_URL", DEFAULT_TRUEFORGE_URL),
@@ -600,22 +677,13 @@ def create_dashboard(
     active_alerts = alerts_path or default_alerts
     active_market = market_path or default_market
     active_outcomes = outcomes_path or default_outcomes
+    active_timeline = timeline_path or default_timeline
     reader = broker or AlpacaPaperReader(active_mandate, active_journal)
     active_approvals = approvals_reader or TrueForgeApprovalsReader(
         urls["trueforge"],
         api_key=os.environ.get("TRUEFORGE_API_KEY", ""),
-        agent_name=os.environ.get("MANDATE_AGENT_NAME", ""),
+        agent_name=os.environ.get("MANDATE_OPERATOR_AGENT_NAME", "mandate-operator-agent"),
     )
-    active_demo = DemoStore(
-        demo_path
-        or Path(
-            os.environ.get(
-                "MANDATE_DEMO_STATE_PATH",
-                default_mandate.parent.parent / "logs" / "demo-state.json",
-            )
-        )
-    )
-
     async def snapshot(request: Request) -> Response:
         payload = await build_snapshot(
             broker=reader,
@@ -630,43 +698,25 @@ def create_dashboard(
             outcomes_path=active_outcomes,
         )
         return JSONResponse(
-            _wire_payload(
-                active_demo.overlay(
-                    payload,
-                    force_sanitized=request.headers.get("x-operator-user", "") == "demo",
-                )
-            ),
+            _wire_payload(payload),
             headers={"Cache-Control": "no-store"},
         )
 
-    async def update_demo(request: Request) -> Response:
-        if request.headers.get("content-type", "").split(";", 1)[0] != "application/json":
-            return JSONResponse({"error": "application/json required"}, status_code=415)
+    async def trader_timeline(request: Request) -> Response:
         try:
-            payload = await request.json()
-        except json.JSONDecodeError:
-            return JSONResponse({"error": "invalid JSON"}, status_code=400)
-        if not isinstance(payload, dict) or payload.get("confirmed") is not True:
-            return JSONResponse({"error": "explicit confirmation required"}, status_code=409)
-        enabled = payload.get("enabled")
-        if not isinstance(enabled, bool):
-            return JSONResponse({"error": "enabled must be a boolean"}, status_code=400)
-        trajectory = _read_json(active_trajectory)
+            after = int(request.query_params.get("after", "0"))
+            limit = int(request.query_params.get("limit", "200"))
+        except ValueError:
+            return JSONResponse({"error": "after and limit must be integers"}, status_code=400)
+        if after < 0 or not 1 <= limit <= 500:
+            return JSONResponse({"error": "after must be nonnegative and limit must be 1..500"}, status_code=400)
         try:
-            state = active_demo.set_enabled(
-                enabled,
-                execution_mode=str(trajectory.get("execution_mode", "approval")),
-            )
-        except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=409)
-        return JSONResponse(_wire_payload(state), headers={"Cache-Control": "no-store"})
+            page = _read_timeline(active_timeline, after=after, limit=limit)
+        except RuntimeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+        return JSONResponse(_wire_payload(page), headers={"Cache-Control": "no-store"})
 
     async def update_trajectory(request: Request) -> Response:
-        if request.headers.get("x-operator-user", "") == "demo":
-            return JSONResponse(
-                {"error": "demo profile cannot change the production trajectory"},
-                status_code=403,
-            )
         if request.headers.get("content-type", "").split(";", 1)[0] != "application/json":
             return JSONResponse({"error": "application/json required"}, status_code=415)
         try:
@@ -676,18 +726,13 @@ def create_dashboard(
         if not isinstance(payload, dict) or payload.pop("confirmed", False) is not True:
             return JSONResponse({"error": "explicit confirmation required"}, status_code=409)
         allowed_fields = {
-            "enabled", "execution_mode", "symbols", "news_poll_seconds", "analysis_interval_minutes", "risk_posture",
+            "enabled", "symbols", "news_poll_seconds", "analysis_interval_minutes", "risk_posture",
             "thesis", "monitoring_mode", "market_data_feed", "discovery_enabled", "discovery_top",
             "regular_hours_only", "max_spread_bps", "min_relative_volume",
             "monitor_corporate_actions", "options_confirmation",
         }
         if set(payload) - allowed_fields:
             return JSONResponse({"error": "unsupported trajectory field"}, status_code=400)
-        if payload.get("execution_mode") == "auto_paper" and active_demo.read().get("enabled"):
-            return JSONResponse(
-                {"error": "stop the simulated safety rehearsal before enabling auto paper"},
-                status_code=409,
-            )
         mandate = _read_yaml(active_mandate)
         universe = mandate.get("universe", [])
         try:
@@ -714,25 +759,25 @@ def create_dashboard(
         thread_id = str(payload.get("thread_id", ""))
         approve = payload.get("approve")
         reason = str(payload.get("reason", "")).strip()
-        if request.headers.get("x-operator-user", "") == "demo" and session_id != "demo-safety":
-            return JSONResponse(
-                {"error": "demo profile can respond only to rehearsal approvals"},
-                status_code=403,
-            )
-        if session_id == "demo-safety":
-            if not isinstance(approve, bool):
-                return JSONResponse({"error": "approve must be a boolean"}, status_code=400)
-            try:
-                state = active_demo.respond(tool_call_id, approve)
-            except ValueError as exc:
-                return JSONResponse({"error": str(exc)}, status_code=409)
-            return JSONResponse(_wire_payload(state), headers={"Cache-Control": "no-store"})
         if not SESSION_ID_PATTERN.match(session_id):
             return JSONResponse({"error": "valid session_id required"}, status_code=400)
         if not tool_call_id or len(tool_call_id) > 256 or not thread_id or len(thread_id) > 256:
             return JSONResponse({"error": "tool_call_id and thread_id required"}, status_code=400)
         if not isinstance(approve, bool):
             return JSONResponse({"error": "approve must be a boolean"}, status_code=400)
+        current = await active_approvals.read()
+        matching = next((
+            item for item in current.get("items", [])
+            if isinstance(item, dict)
+            and item.get("session_id") == session_id
+            and item.get("tool_call_id") == tool_call_id
+            and item.get("thread_id") == thread_id
+        ), None)
+        if matching is None or matching.get("tool_name") not in APPROVABLE_TOOL_NAMES:
+            return JSONResponse(
+                {"error": "only a currently pending trader-memory change can be approved"},
+                status_code=409,
+            )
         body = _approval_turn_body(
             thread_id=thread_id, tool_call_id=tool_call_id, approve=approve, reason=reason
         )
@@ -777,8 +822,8 @@ def create_dashboard(
 
     routes = [
         Route("/api/snapshot", snapshot),
+        Route("/api/trader/timeline", trader_timeline),
         Route("/api/trajectory", update_trajectory, methods=["POST"]),
-        Route("/api/demo", update_demo, methods=["POST"]),
         Route("/api/approvals/respond", respond_approval, methods=["POST"]),
         Route("/{path:path}", index),
     ]

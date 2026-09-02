@@ -12,8 +12,8 @@ from mandate_research.signals import (
     mean_reversion_signal,
     momentum_signal,
     news_price_confirmation_signal,
+    news_gate_passed,
     rsi_reversion_signal,
-    score_news,
     volatility_adjusted_momentum_signal,
 )
 
@@ -64,7 +64,7 @@ def test_breakout_requires_price_and_volume_confirmation() -> None:
     assert weak_volume.direction is Direction.FLAT
 
 
-def test_news_score_respects_symbol_and_balances_words() -> None:
+def test_news_gate_respects_symbol() -> None:
     event = NewsEvent(
         "alpaca",
         "1",
@@ -72,29 +72,29 @@ def test_news_score_respects_symbol_and_balances_words() -> None:
         "AAPL beats estimates",
         "Growth offsets one loss",
         ("AAPL",),
-        metadata={"llm_score": "0.8", "llm_confidence": "0.75"},
+        metadata={"llm_gate_decision": "PASS", "llm_gate_reason": "Material issuer update"},
     )
-    assert score_news(event, symbol="AAPL") > Decimal("0")
-    assert score_news(event, symbol="MSFT") == Decimal("0")
+    assert news_gate_passed(event, symbol="AAPL") is True
+    assert news_gate_passed(event, symbol="MSFT") is False
 
 
-def test_news_signal_requires_matching_price_direction() -> None:
+def test_news_signal_takes_direction_only_from_price() -> None:
     positive = NewsEvent(
         "alpaca",
         "1",
         datetime(2026, 8, 26, 13, 30, tzinfo=timezone.utc),
         "AAPL beats estimates and raises guidance",
         symbols=("AAPL",),
-        metadata={"llm_score": "0.8", "llm_confidence": "0.9"},
+        metadata={"llm_gate_decision": "PASS", "llm_gate_reason": "Material issuer update"},
     )
     confirmed = news_price_confirmation_signal(
         bars(["100", "101", "102", "103"]), [positive], symbol="AAPL", lookback=3
     )
-    contradicted = news_price_confirmation_signal(
+    falling = news_price_confirmation_signal(
         bars(["103", "102", "101", "100"]), [positive], symbol="AAPL", lookback=3
     )
     assert confirmed.direction is Direction.BUY
-    assert contradicted.direction is Direction.FLAT
+    assert falling.direction is Direction.SELL
 
 
 def test_future_news_is_excluded_from_signal() -> None:
@@ -104,7 +104,7 @@ def test_future_news_is_excluded_from_signal() -> None:
         datetime(2026, 8, 26, 15, tzinfo=timezone.utc),
         "AAPL beats estimates and raises guidance",
         symbols=("AAPL",),
-        metadata={"llm_score": "0.8", "llm_confidence": "0.9"},
+        metadata={"llm_gate_decision": "PASS", "llm_gate_reason": "Material issuer update"},
     )
     result = news_price_confirmation_signal(
         bars(["100", "101", "102", "103"]), [future], symbol="AAPL", lookback=3
@@ -119,13 +119,28 @@ def test_stale_news_is_excluded_from_signal() -> None:
         datetime(2026, 8, 25, 12, tzinfo=timezone.utc),
         "AAPL beats estimates and raises guidance",
         symbols=("AAPL",),
-        metadata={"llm_score": "0.8", "llm_confidence": "0.9"},
+        metadata={"llm_gate_decision": "PASS", "llm_gate_reason": "Material issuer update"},
     )
     result = news_price_confirmation_signal(
         bars(["100", "101", "102", "103"]), [stale], symbol="AAPL", lookback=3
     )
     assert result.direction is Direction.FLAT
-    assert result.rationale == "no recent news"
+    assert result.rationale == "no recent passed news"
+
+
+def test_skipped_news_cannot_confirm_price() -> None:
+    skipped = NewsEvent(
+        "alpaca",
+        "skip",
+        datetime(2026, 8, 26, 13, 30, tzinfo=timezone.utc),
+        "Generic market commentary",
+        symbols=("AAPL",),
+        metadata={"llm_gate_decision": "SKIP", "llm_gate_reason": "Not material"},
+    )
+    result = news_price_confirmation_signal(
+        bars(["100", "101", "102", "103"]), [skipped], symbol="AAPL", lookback=3
+    )
+    assert result.direction is Direction.FLAT
 
 
 def test_invalid_signal_thresholds_are_rejected() -> None:

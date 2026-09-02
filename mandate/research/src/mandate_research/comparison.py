@@ -26,7 +26,7 @@ DEFAULT_PARAMETERS: dict[str, dict[str, Any]] = {
     "momentum": {"lookback": 5, "threshold_pct": Decimal("0.35")},
     "mean_reversion": {"lookback": 20, "z_threshold": Decimal("1.6")},
     "breakout_volume": {"lookback": 20, "min_volume_ratio": Decimal("1.3")},
-    "news_price_confirmation": {"lookback": 3, "news_threshold": Decimal("0.18")},
+    "news_price_confirmation": {"lookback": 3, "min_passed_events": 1},
     "rsi_reversion": {"period": 14, "oversold": Decimal("32"), "overbought": Decimal("68")},
     "macd_trend": {"fast": 12, "slow": 26, "signal": 9, "threshold_pct": Decimal("0.015")},
     "volatility_adjusted_momentum": {"lookback": 20, "threshold": Decimal("0.18")},
@@ -48,9 +48,9 @@ PARAMETER_GRID: dict[str, list[dict[str, Any]]] = {
         for ratio in (Decimal("1.25"), Decimal("1.5"), Decimal("2"))
     ],
     "news_price_confirmation": [
-        {"lookback": lookback, "news_threshold": threshold}
+        {"lookback": lookback, "min_passed_events": minimum}
         for lookback in (2, 3, 5)
-        for threshold in (Decimal("0.15"), Decimal("0.25"), Decimal("0.4"))
+        for minimum in (1, 2, 3)
     ],
 }
 
@@ -93,7 +93,7 @@ def _news(item: dict[str, Any]) -> NewsEvent:
         url=str(item["url"]) if item.get("url") else None,
         metadata={
             key: str(item[key])
-            for key in ("llm_score", "llm_confidence", "llm_reason", "llm_event_type", "llm_horizon")
+            for key in ("llm_gate_decision", "llm_gate_reason")
             if item.get(key) is not None
         },
     )

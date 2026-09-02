@@ -17,7 +17,6 @@ class Trajectory(BaseModel):
 
     version: int = Field(default=1, ge=1)
     enabled: bool = True
-    execution_mode: Literal["approval", "auto_paper"] = "auto_paper"
     symbols: list[str] = Field(default_factory=lambda: [
         "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AMD", "AVGO", "ORCL",
         "IBM", "PLTR", "CRM", "ANET", "TSM", "ASML", "ARM", "BABA", "BIDU", "SPY",
@@ -76,6 +75,10 @@ class AutonomyStore:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError("autonomy trajectory is unreadable") from exc
+        # One-way migration from the removed manual/automatic execution mode.
+        # Paper execution is now always automatic; trajectory only controls
+        # research and monitoring preferences.
+        payload.pop("execution_mode", None)
         trajectory = Trajectory.model_validate(payload)
         if set(payload) != set(trajectory.model_dump(mode="json")):
             self._write(trajectory)
@@ -87,7 +90,6 @@ class AutonomyStore:
         mandate_symbols: list[str],
         updated_by: str,
         enabled: bool | None = None,
-        execution_mode: str | None = None,
         symbols: list[str] | None = None,
         news_poll_seconds: int | None = None,
         analysis_interval_minutes: int | None = None,
@@ -111,7 +113,6 @@ class AutonomyStore:
         }
         for key, value in {
             "enabled": enabled,
-            "execution_mode": execution_mode,
             "symbols": symbols,
             "news_poll_seconds": news_poll_seconds,
             "analysis_interval_minutes": analysis_interval_minutes,

@@ -1,4 +1,3 @@
-import { ExecutionToggle, type ExecutionMode } from "../components/ExecutionToggle";
 import { Icon } from "../components/Icon";
 import { SourceBadge } from "../components/SourceBadge";
 import { Wordmark } from "../components/Wordmark";
@@ -39,17 +38,11 @@ interface TopBarProps {
   refreshing: boolean;
   manualRefresh: boolean;
   approvalCount: number;
-  executionMode: ExecutionMode;
-  executionBusy: boolean;
-  demoActive: boolean;
-  demoBusy: boolean;
   showRefreshControls: boolean;
   onOpenSettings: () => void;
   onTogglePause: () => void;
   onRefresh: () => void;
   onFocusApprovals: () => void;
-  onToggleExecution: () => void;
-  onToggleDemo: () => void;
 }
 
 export function TopBar({
@@ -64,17 +57,11 @@ export function TopBar({
   refreshing,
   manualRefresh,
   approvalCount,
-  executionMode,
-  executionBusy,
-  demoActive,
-  demoBusy,
   showRefreshControls,
   onOpenSettings,
   onTogglePause,
   onRefresh,
   onFocusApprovals,
-  onToggleExecution,
-  onToggleDemo,
 }: TopBarProps) {
   return (
     <div className="mandate-chrome topbar-shell">
@@ -89,20 +76,6 @@ export function TopBar({
           {services.length > 0 && <ServiceHealth services={services} />}
         </div>
         <div className="top-actions">
-          <ExecutionToggle
-            mode={executionMode}
-            busy={executionBusy}
-            disabled={source === null}
-            onToggle={onToggleExecution}
-          />
-          <button
-            className={`simulation-toggle${demoActive ? " simulation-toggle--active" : ""}`}
-            onClick={onToggleDemo}
-            disabled={demoBusy}
-            title={demoActive ? "Stop the safety rehearsal" : "Start a manual-approval rehearsal"}
-          >
-            {demoActive ? "REHEARSAL" : "REHEARSE"}
-          </button>
           <span
             className={`freshness${paused || hidden || stale ? " stale" : ""}`}
             title={hidden ? "Auto-refresh paused while the tab is hidden" : undefined}
@@ -113,9 +86,9 @@ export function TopBar({
             <button
               className="approval-badge"
               onClick={onFocusApprovals}
-              title={`${approvalCount} agent decision${approvalCount > 1 ? "s" : ""} awaiting approval`}
+              title={`${approvalCount} memory change${approvalCount > 1 ? "s" : ""} awaiting approval`}
             >
-              {approvalCount} awaiting approval
+              {approvalCount} memory approval{approvalCount > 1 ? "s" : ""}
             </button>
           )}
           <button

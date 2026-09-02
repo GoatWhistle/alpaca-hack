@@ -5,8 +5,7 @@ import { WorkspaceTabs, type View } from "./app/WorkspaceTabs";
 import { ErrorBoundary } from "./app/ErrorBoundary";
 import { useBrowserIdentity } from "./app/useBrowserIdentity";
 import { freshnessLabel, isStale, useSnapshot } from "./app/useSnapshot";
-import { readExecutionMode } from "./components/ExecutionToggle";
-import { respondToApproval, setDemoMode, updateTrajectory } from "./lib/api";
+import { respondToApproval } from "./lib/api";
 import { TrajectoryDrawer } from "./settings/TrajectoryDrawer";
 import { DashboardView } from "./views/dashboard/DashboardView";
 import type { ApprovalAction } from "./views/dashboard/decision/DecisionCard";
@@ -28,9 +27,6 @@ export function App() {
   const [view, setView] = useState<View>("overview");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [approvalActions, setApprovalActions] = useState<Record<string, ApprovalAction>>({});
-  const [executionBusy, setExecutionBusy] = useState(false);
-  const [executionError, setExecutionError] = useState<string | null>(null);
-  const [demoBusy, setDemoBusy] = useState(false);
   const state = useSnapshot();
   const { snapshot, error, refresh } = state;
 
@@ -44,33 +40,9 @@ export function App() {
   const universe = Array.isArray(mandate.universe) ? mandate.universe.map(String) : [];
 
   const trajectory = snapshot?.autonomy.trajectory ?? {};
-  const executionMode = readExecutionMode(trajectory);
-  const demoActive = snapshot?.demo.enabled ?? false;
 
   const degraded = Boolean(error) || (snapshot !== null && snapshot.source !== "live");
   useBrowserIdentity(view, approvals.count, degraded);
-
-  const toggleExecution = useCallback(async () => {
-    const target = executionMode === "auto_paper" ? "approval" : "auto_paper";
-    if (target === "auto_paper" && !window.confirm(
-      "Enable automatic PAPER order submission? Every order still passes the mandate checks "
-      + "and cannot exceed a limit, but it will no longer wait for your approval.",
-    )) return;
-    setExecutionBusy(true);
-    setExecutionError(null);
-    try {
-      await updateTrajectory({
-        execution_mode: target,
-      });
-      await refresh();
-    } catch (reason) {
-      setExecutionError(
-        reason instanceof Error ? reason.message : "Could not change execution mode",
-      );
-    } finally {
-      setExecutionBusy(false);
-    }
-  }, [executionMode, refresh]);
 
   const selectView = useCallback(
     (next: View) => {
@@ -84,24 +56,6 @@ export function App() {
     },
     [view],
   );
-
-  const toggleDemo = useCallback(async () => {
-    if (!demoActive && executionMode !== "approval") {
-      setExecutionError("The safety rehearsal is available only in manual approval mode.");
-      return;
-    }
-    setDemoBusy(true);
-    setExecutionError(null);
-    try {
-      await setDemoMode(!demoActive);
-      await refresh();
-      selectView("overview");
-    } catch (reason) {
-      setExecutionError(reason instanceof Error ? reason.message : "Could not change rehearsal mode");
-    } finally {
-      setDemoBusy(false);
-    }
-  }, [demoActive, executionMode, refresh, selectView]);
 
   const handleRespond = useCallback(
     async (item: Record<string, unknown>, approve: boolean) => {
@@ -148,17 +102,11 @@ export function App() {
         refreshing={state.refreshing}
         manualRefresh={state.manualRefresh}
         approvalCount={approvals.count}
-        executionMode={executionMode}
-        executionBusy={executionBusy}
-        demoActive={demoActive}
-        demoBusy={demoBusy}
         showRefreshControls={view !== "agent"}
         onOpenSettings={() => setSettingsOpen(true)}
         onTogglePause={() => state.setPaused((value) => !value)}
         onRefresh={() => void refresh(true)}
         onFocusApprovals={() => selectView("overview")}
-        onToggleExecution={() => void toggleExecution()}
-        onToggleDemo={() => void toggleDemo()}
       />
 
       <WorkspaceTabs view={view} newsCount={news.length} ipoCount={ipoCount} onSelect={selectView} />
@@ -168,7 +116,7 @@ export function App() {
           {view === "overview" && (
             <DashboardView
               snapshot={snapshot}
-              error={executionError ?? error}
+              error={error}
               news={news}
               decisionItems={decisionItems}
               hidden={state.hidden}

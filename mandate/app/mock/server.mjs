@@ -11,7 +11,6 @@ const UNIVERSE = [
 const state = {
   approvalsResolved: new Set(),
   trajectoryVersion: 7,
-  executionMode: "auto_paper",
   analysisIntervalMinutes: 3,
   degraded: process.env.MANDATE_MOCK_DEGRADED === "true",
   decided: [],
@@ -292,7 +291,6 @@ function autonomyState() {
     trajectory: {
       version: state.trajectoryVersion,
       enabled: true,
-      execution_mode: state.executionMode,
       symbols: UNIVERSE,
       news_poll_seconds: 30,
       analysis_interval_minutes: state.analysisIntervalMinutes,
@@ -398,28 +396,12 @@ function approvals() {
       thread_id: "thread_5a0c19",
       session_title: "Autonomy cycle · NVDA supply headline",
       created_at: minutesAgo(3),
-      tool_name: "place_stock_order",
+      tool_name: "append_trader_memory",
       arguments: {
-        symbol: "NVDA",
-        side: "buy",
-        qty: "13",
-        order_type: "limit",
-        limit_price: "183.40",
-        instrument: "equity",
-        intent_id: "nvda-supply-confirm-11",
-        rationale: "Blackwell supply headline scored +0.72 with 0.88 confidence and is confirmed by price momentum and relative volume 1.4x. ATR14 sizing capped at 13 shares by remaining position headroom of 2.37%.",
-      },
-    },
-    {
-      tool_call_id: "call_c14e88f2",
-      session_id: "01m13mvc90zx3qg4tr6nxd4sb9",
-      thread_id: "thread_9b71de",
-      session_title: "Operator chat · cadence change",
-      created_at: minutesAgo(12),
-      tool_name: "update_trajectory",
-      arguments: {
-        rationale: "Operator asked to slow the full analysis cadence to 20 minutes for the rest of the session.",
-        analysis_interval_minutes: 20,
+        memory_key: "opening-gap-confirmation",
+        hypothesis: "Require two price confirmations after an opening gap above 3%.",
+        evidence_refs_json: "[\"operator:postmortem:42\"]",
+        ttl_hours: 24,
       },
     },
   ];
@@ -428,36 +410,31 @@ function approvals() {
 }
 
 function applyDecision(item, approve) {
-  const args = item.arguments ?? {};
-  const isOrder = item.tool_name === "place_stock_order";
   const entry = {
     at: new Date().toISOString(),
-    action: isOrder ? "submit_order" : item.tool_name,
-    outcome: approve ? "submitted" : "denied",
+    action: item.tool_name,
+    outcome: approve ? "approved" : "denied",
     rationale: approve
-      ? "Authorized by the operator at the console; Alpaca accepted the direct paper order."
-      : "Refused by the operator at the console. The agent must replan.",
+      ? "Operator approved the bounded memory hypothesis."
+      : "Operator kept the current trader memory unchanged.",
     details: { operator_decision: true },
   };
-  if (isOrder) {
-    entry.details.order = {
-      symbol: args.symbol,
-      side: args.side,
-      qty: String(args.qty ?? ""),
-      order_type: args.order_type,
-      limit_price: String(args.limit_price ?? ""),
-      instrument: "equity",
-    };
-    if (args.intent_id) entry.details.intent_id = args.intent_id;
-  } else {
-    entry.details.intended_action = `${item.tool_name} requested by the operator chat`;
-  }
   state.decided.push(entry);
-  if (approve && item.tool_name === "update_trajectory"
-      && typeof args.analysis_interval_minutes === "number") {
-    state.analysisIntervalMinutes = args.analysis_interval_minutes;
-    state.trajectoryVersion += 1;
-  }
+}
+
+function traderTimeline() {
+  const kinds = ["session", "critics", "plan", "execution"];
+  return kinds.map((kind, index) => ({
+    schema: "trader.timeline.v1",
+    sequence: index + 1,
+    at: minutesAgo((kinds.length - index) * 2),
+    trading_date: new Date().toISOString().slice(0, 10),
+    kind,
+    status: kind === "execution" ? "submitted" : "ok",
+    session_id: "mock-trader-session",
+    summary: `${kind} contract emitted by the mock automatic trader`,
+    details: {},
+  }));
 }
 
 function degradedSnapshot() {
@@ -543,6 +520,16 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
   if (request.method === "OPTIONS") return send(response, 204, {});
   if (url.pathname === "/api/snapshot") return send(response, 200, snapshot());
+  if (url.pathname === "/api/trader/timeline") {
+    const after = Number(url.searchParams.get("after") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 200);
+    const items = traderTimeline().filter((item) => item.sequence > after).slice(0, limit);
+    return send(response, 200, {
+      schema: "trader.timeline.page.v1",
+      items,
+      next_after: items.at(-1)?.sequence ?? after,
+    });
+  }
   if (url.pathname === "/api/mock/degraded") {
     state.degraded = url.searchParams.get("on") === "true";
     return send(response, 200, { degraded: state.degraded });
@@ -550,14 +537,10 @@ const server = createServer(async (request, response) => {
   if (url.pathname === "/api/trajectory" && request.method === "POST") {
     const body = await readBody(request);
     if (!body.confirmed) return send(response, 400, { error: "confirmation is required" });
-    if (body.execution_mode === "approval" || body.execution_mode === "auto_paper") {
-      state.executionMode = body.execution_mode;
-    }
     state.trajectoryVersion += 1;
     return send(response, 200, {
       trajectory: { ...autonomyState().trajectory },
       mandate_unchanged: true,
-      execution_policy: state.executionMode,
     });
   }
   if (url.pathname === "/api/approvals/respond" && request.method === "POST") {

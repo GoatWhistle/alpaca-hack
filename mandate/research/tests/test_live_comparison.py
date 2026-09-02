@@ -60,11 +60,10 @@ def fake_source_fetch(url: str, headers: dict[str, str]) -> bytes:
     raise AssertionError(f"unexpected source URL {url}")
 
 
-def fake_news_scorer(events, *, symbol: str) -> list[dict]:
+def fake_news_gate(events, *, symbol: str) -> list[dict]:
     assert all(NOW - timedelta(hours=24) <= event.published_at <= NOW for event in events)
     return [{
-        "available": True, "score": "0.8", "confidence": "0.9", "reason": "material guidance",
-        "event_type": "guidance", "horizon": "multiday", "novelty_48h": "0.8",
+        "available": True, "reason": "material guidance", "decision": "PASS",
     } for _event in events]
 
 
@@ -78,12 +77,14 @@ def test_live_comparison_uses_real_shape_and_all_strategies(
         fetcher=fake_fetch,
         source_fetcher=fake_source_fetch,
         fee_bps="2",
-        news_scorer=fake_news_scorer,
+        news_gate=fake_news_gate,
     )
 
     assert result["data"]["source"] == "alpaca-iex"
     assert result["data"]["bars"] == 60
-    assert result["data"]["news"] == 3
+    assert result["data"]["news_collected"] == 3
+    assert result["data"]["news_passed"] == 3
+    assert result["data"]["news_llm_gated"] == 3
     assert result["data"]["requested_at"] == NOW.isoformat()
     assert set(result["data"]["news_sources"]) == {
         "alpaca",
@@ -135,7 +136,7 @@ def test_live_comparison_follows_bounded_bar_pagination(
         now=NOW,
         fetcher=paged_fetch,
         source_fetcher=fake_source_fetch,
-        news_scorer=fake_news_scorer,
+        news_gate=fake_news_gate,
     )
     assert result["data"]["bars"] == 60
     assert result["as_of"] == (NOW - timedelta(hours=1)).isoformat()

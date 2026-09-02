@@ -1,0 +1,22 @@
+[Unit]
+Description=Alpaca Hack isolated TrueForge agent server
+After=network-online.target alpaca-hack-research.service
+Wants=network-online.target alpaca-hack-research.service
+
+[Service]
+Type=simple
+User=alpaca-hack
+Group=alpaca-hack
+WorkingDirectory=/opt/alpaca-hack/mandate/trueforge
+EnvironmentFile=/etc/alpaca-hack/alpaca-hack.env
+Environment=HOME=/opt/alpaca-hack
+Environment=PORT=8890
+Environment=NODE_ENV=production
+ExecStart=/opt/alpaca-hack/mandate/trueforge/node_modules/.bin/trueforge --port 8890
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

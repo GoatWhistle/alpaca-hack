@@ -4,11 +4,10 @@ import type { ApprovalAction } from "./DecisionCard";
 interface ApprovalControlProps {
   action: ApprovalAction | undefined;
   live: boolean;
-  isOrder: boolean;
   onRespond: (approve: boolean) => void;
 }
 
-export function ApprovalControl({ action, live, isOrder, onRespond }: ApprovalControlProps) {
+export function ApprovalControl({ action, live, onRespond }: ApprovalControlProps) {
   if (action?.outcome) {
     return (
       <p className={`approval-outcome approval-outcome--${action.outcome}`} role="status">
@@ -22,7 +21,7 @@ export function ApprovalControl({ action, live, isOrder, onRespond }: ApprovalCo
     return (
       <p className="approval-blocked">
         <Icon name="blocked" />
-        Cannot be submitted while the paper broker is unreachable. The order stays queued.
+        The approval channel is unavailable while the local control plane is degraded.
       </p>
     );
   }
@@ -38,7 +37,7 @@ export function ApprovalControl({ action, live, isOrder, onRespond }: ApprovalCo
         <span className="approval-button-mark" aria-hidden="true"><Icon name="check" /></span>
         <span className="approval-button-text">
           <b>Approve</b>
-          <small>{isOrder ? "Submits the paper order" : "Lets the agent proceed"}</small>
+          <small>Applies the memory change</small>
         </span>
       </button>
 
@@ -51,7 +50,7 @@ export function ApprovalControl({ action, live, isOrder, onRespond }: ApprovalCo
         <span className="approval-button-mark" aria-hidden="true"><Icon name="close" /></span>
         <span className="approval-button-text">
           <b>Deny</b>
-          <small>{isOrder ? "Agent replans" : "Agent stands down"}</small>
+          <small>Keeps current memory</small>
         </span>
       </button>
     </div>

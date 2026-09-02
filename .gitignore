@@ -4,6 +4,10 @@ logs/*
 !logs/.gitkeep
 mandate/logs/*.jsonl
 mandate/logs/*.json
+mandate/logs/*.sqlite3
+mandate/logs/*.sqlite3-shm
+mandate/logs/*.sqlite3-wal
+mandate/logs/*.lock
 __pycache__/
 *.pyc
 .venv/

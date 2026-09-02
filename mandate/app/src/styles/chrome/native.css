@@ -112,7 +112,6 @@ html {
 }
 
 .approval-button:disabled,
-.execution-toggle:disabled,
 .icon-button:disabled {
   cursor: not-allowed;
 }

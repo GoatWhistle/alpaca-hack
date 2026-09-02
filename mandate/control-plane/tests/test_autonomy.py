@@ -15,7 +15,6 @@ def test_trajectory_persists_valid_bounded_changes(tmp_path: Path) -> None:
         mandate_symbols=["AAPL", "MSFT"],
         updated_by="chat:operator",
         symbols=[" msft "],
-        execution_mode="auto_paper",
         analysis_interval_minutes=30,
         risk_posture="defensive",
         thesis="  Wait for two confirming signals.  ",
@@ -26,13 +25,26 @@ def test_trajectory_persists_valid_bounded_changes(tmp_path: Path) -> None:
 
     assert updated.version == initial.version + 1
     assert updated.symbols == ["MSFT"]
-    assert updated.execution_mode == "auto_paper"
     assert updated.analysis_interval_minutes == 30
     assert updated.thesis == "Wait for two confirming signals."
     assert updated.monitoring_mode == "polling"
     assert updated.discovery_top == 20
     assert updated.max_spread_bps == 25
     assert store.read() == updated
+
+
+def test_trajectory_migrates_removed_execution_mode(tmp_path: Path) -> None:
+    path = tmp_path / "trajectory.json"
+    path.write_text(
+        json.dumps({"version": 3, "enabled": True, "execution_mode": "approval"}),
+        encoding="utf-8",
+    )
+    store = AutonomyStore(path, tmp_path / "alerts.jsonl")
+
+    trajectory = store.read()
+
+    assert "execution_mode" not in trajectory.model_dump()
+    assert "execution_mode" not in json.loads(path.read_text(encoding="utf-8"))
 
 
 def test_trajectory_can_expand_the_live_opportunity_universe(tmp_path: Path) -> None:

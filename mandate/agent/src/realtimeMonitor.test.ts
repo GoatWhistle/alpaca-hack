@@ -51,7 +51,7 @@ test("stale sockets cannot reconnect or wake after a trajectory update", () => {
   const sockets: FakeSocket[] = [];
   const wakes: string[] = [];
   const trajectory: Trajectory = {
-    version: 1, enabled: true, execution_mode: "auto_paper", symbols: ["AAPL"],
+    version: 1, enabled: true, symbols: ["AAPL"],
     news_poll_seconds: 60, analysis_interval_minutes: 3, monitoring_mode: "realtime",
     market_data_feed: "iex", discovery_enabled: true, discovery_top: 10,
     regular_hours_only: true, max_spread_bps: 35, min_relative_volume: 0.25,

@@ -44,7 +44,6 @@ export function DashboardView({
 
   const mandate = (snapshot?.mandate.mandate ?? {}) as Record<string, unknown>;
   const limits = (mandate.limits ?? {}) as Record<string, unknown>;
-  const headroom = snapshot?.mandate.headroom ?? {};
   const usage = snapshot?.mandate.usage ?? {};
   const account = snapshot?.session.account ?? {};
   const runtime = snapshot?.autonomy.runtime ?? {};
@@ -80,8 +79,6 @@ export function DashboardView({
         {decisionItems.length > 0 ? (
           <DecisionQueue
             items={decisionItems}
-            headroom={headroom}
-            limits={limits}
             actions={approvalActions}
             live={live}
             hidden={hidden}

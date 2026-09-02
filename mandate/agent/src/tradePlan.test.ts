@@ -1,0 +1,87 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { parseTradePlan } from "./tradePlan.js";
+
+function validPayload(): Record<string, unknown> {
+  return {
+    schema: "trade.plan.v1",
+    cycle_id: "cycle-1",
+    reason: "AAPL has the strongest deterministic evidence.",
+    action: "EXECUTE_PLAN",
+    steps: [{
+      reason: "Momentum and liquidity gates agree.",
+      candidate_id: "entry-1-AAPL",
+      evidence_refs: ["evaluation.trade_candidates.0.evidence"],
+    }],
+    critic_coverage: ["risk", "market", "execution"],
+    critic_resolutions: [
+      { critic: "risk", resolution: "ACCEPTED", reason: "Risk evidence supports the bounded entry." },
+      { critic: "market", resolution: "ACCEPTED", reason: "The regime is aligned." },
+      { critic: "execution", resolution: "OVERRIDDEN", reason: "The quoted spread remains inside the hard gate." },
+    ],
+    memory_events: [{
+      hypothesis: "Relative volume may remain elevated into the next session.",
+      evidence_refs: ["evaluation.trade_candidates.0.evidence.relative_volume"],
+      ttl_hours: 24,
+    }],
+  };
+}
+
+function line(payload: Record<string, unknown>): string {
+  return `TRADE_PLAN_JSON: ${JSON.stringify(payload)}`;
+}
+
+test("strict parser accepts the exact canonical root", () => {
+  const plan = parseTradePlan(line(validPayload()), "cycle-1", ["entry-1-AAPL"]);
+  assert.equal(plan?.action, "EXECUTE_PLAN");
+  assert.equal(plan?.steps[0]?.candidate_id, "entry-1-AAPL");
+  assert.equal(plan?.memory_events[0]?.ttl_hours, 24);
+});
+
+test("strict parser rejects extra keys, wrong cycle and unknown candidates", () => {
+  assert.equal(parseTradePlan(line({ ...validPayload(), symbol: "AAPL" }), "cycle-1", ["entry-1-AAPL"]), null);
+  assert.equal(parseTradePlan(line(validPayload()), "another-cycle", ["entry-1-AAPL"]), null);
+  assert.equal(parseTradePlan(line(validPayload()), "cycle-1", ["entry-2-MSFT"]), null);
+});
+
+test("strict parser requires all three critic resolutions exactly once", () => {
+  const missing = validPayload();
+  missing.critic_resolutions = (missing.critic_resolutions as unknown[]).slice(0, 2);
+  assert.equal(parseTradePlan(line(missing), "cycle-1", ["entry-1-AAPL"]), null);
+  const duplicate = validPayload();
+  duplicate.critic_coverage = ["risk", "risk", "execution"];
+  assert.equal(parseTradePlan(line(duplicate), "cycle-1", ["entry-1-AAPL"]), null);
+});
+
+test("PARK has no steps and EXECUTE_PLAN has one to three unique steps", () => {
+  const parked = validPayload();
+  parked.action = "PARK";
+  parked.steps = [];
+  assert.equal(parseTradePlan(line(parked), "cycle-1", ["entry-1-AAPL"])?.action, "PARK");
+
+  const tooMany = validPayload();
+  tooMany.steps = Array.from({ length: 4 }, (_, index) => ({
+    reason: "ranked", candidate_id: `candidate-${index}`, evidence_refs: ["evaluation"],
+  }));
+  assert.equal(parseTradePlan(line(tooMany), "cycle-1", ["candidate-0", "candidate-1", "candidate-2", "candidate-3"]), null);
+});
+
+test("memory events are structured, bounded to five, and expire within seven days", () => {
+  for (const ttl of [0, 169, 1.5]) {
+    const payload = validPayload();
+    payload.memory_events = [{ hypothesis: "test", evidence_refs: ["evaluation"], ttl_hours: ttl }];
+    assert.equal(parseTradePlan(line(payload), "cycle-1", ["entry-1-AAPL"]), null);
+  }
+  const payload = validPayload();
+  payload.memory_events = Array.from({ length: 6 }, () => ({
+    hypothesis: "test", evidence_refs: ["evaluation"], ttl_hours: 1,
+  }));
+  assert.equal(parseTradePlan(line(payload), "cycle-1", ["entry-1-AAPL"]), null);
+});
+
+test("the marked object must be the single final non-empty line", () => {
+  const canonical = line(validPayload());
+  assert.equal(parseTradePlan(`${canonical}\nafter`, "cycle-1", ["entry-1-AAPL"]), null);
+  assert.equal(parseTradePlan(`${canonical}\n${canonical}`, "cycle-1", ["entry-1-AAPL"]), null);
+});

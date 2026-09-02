@@ -41,8 +41,8 @@ def test_analyze_compares_all_strategies_and_filters_future_news() -> None:
                     "published_at": bars[-2]["timestamp"],
                     "headline": "Profit growth beat",
                     "symbols": [" AAPL ", ""],
-                    "llm_score": "0.8",
-                    "llm_confidence": "0.9",
+                    "llm_gate_decision": "PASS",
+                    "llm_gate_reason": "Material filing",
                 },
                 {
                     "source": "rss",
@@ -89,8 +89,8 @@ def test_analyze_keeps_last_eligible_revision_at_cutoff() -> None:
                     "published_at": bars[-2]["timestamp"],
                     "headline": "Profit growth",
                     "symbols": ["AAPL"],
-                    "llm_score": "0.8",
-                    "llm_confidence": "0.9",
+                    "llm_gate_decision": "PASS",
+                    "llm_gate_reason": "Material update",
                 },
                 {
                     "source": "wire",

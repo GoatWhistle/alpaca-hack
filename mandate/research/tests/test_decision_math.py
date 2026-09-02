@@ -9,7 +9,7 @@ def _comparison(symbol: str, news: str = "buy", momentum: str = "buy") -> dict:
     strategies = {
         "momentum": momentum,
         "mean_reversion": "flat",
-        "breakout_volume": "flat",
+        "breakout_volume": momentum,
         "news_price_confirmation": news,
         "regime_ensemble": news if news == momentum else "flat",
     }
@@ -59,15 +59,14 @@ def test_summary_replaces_repeated_liquidity_and_alignment_math() -> None:
             },
         },
     }
+    comparisons = {"AAPL": _comparison("AAPL"), "MSFT": _comparison("MSFT")}
     result = summarize_trajectory_math(
-        symbols=["AAPL", "MSFT"],
-        monitoring=monitoring,
-        comparisons={"AAPL": _comparison("AAPL"), "MSFT": _comparison("MSFT")},
+        symbols=["AAPL", "MSFT"], monitoring=monitoring, comparisons=comparisons,
     )
     assert result["research_candidates"] == ["AAPL"]
     assert result["decision"] == "PROPOSE_RESEARCH"
     assert result["execution_authority"] is False
-    assert result["symbols"]["AAPL"]["direction_counts"] == {"buy": 3, "flat": 2}
+    assert result["symbols"]["AAPL"]["direction_counts"] == {"buy": 4, "flat": 1}
     assert result["symbols"]["MSFT"]["blocked_by"] == ["quality_gate"]
 
 
@@ -88,6 +87,32 @@ def test_summary_fails_closed_for_large_or_missing_session_move() -> None:
     assert result["decision"] == "PARK"
     assert "single_symbol_move_gate" in result["symbols"]["AAPL"]["blocked_by"]
     assert "missing_session_move" in result["symbols"]["MSFT"]["blocked_by"]
+
+
+def test_news_path_requires_two_price_votes_in_the_news_direction() -> None:
+    monitoring = {
+        "market_is_open": True,
+        "benchmark": {"quality_pass": True},
+        "quality": {"AAPL": {
+            "last": "101", "spread_bps": "2", "relative_volume": "0.8",
+            "session_change_pct": "1.2", "quality_pass": True,
+        }},
+    }
+    comparison = _comparison("AAPL", news="buy", momentum="buy")
+    comparison["signals"]["breakout_volume"]["direction"] = "flat"
+    result = summarize_trajectory_math(
+        symbols=["AAPL"], monitoring=monitoring, comparisons={"AAPL": comparison},
+    )
+    assert result["symbols"]["AAPL"]["news_price_aligned"] is False
+    assert result["research_candidates"] == []
+
+    comparison["signals"]["macd_trend"] = {
+        "direction": "buy", "strength": "0.5", "rationale": "second price vote",
+    }
+    confirmed = summarize_trajectory_math(
+        symbols=["AAPL"], monitoring=monitoring, comparisons={"AAPL": comparison},
+    )
+    assert confirmed["symbols"]["AAPL"]["news_price_aligned"] is True
 
 
 def test_macro_price_alignment_can_produce_candidate_without_company_news() -> None:

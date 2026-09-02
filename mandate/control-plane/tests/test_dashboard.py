@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -182,8 +182,8 @@ def _approval_fixtures() -> tuple[dict, dict, dict]:
             {
                 "id": "call-1",
                 "function": {
-                    "name": "place_stock_order",
-                    "arguments": '{"symbol":"NVDA","side":"buy","qty":"3"}',
+                    "name": "append_trader_memory",
+                    "arguments": '{"memory_key":"gap","hypothesis":"confirm gaps"}',
                 },
             }
         ],
@@ -208,10 +208,16 @@ def test_pending_approvals_resolve_tool_name_and_arguments() -> None:
     items = _pending_approvals([_session("s-1")], events, {})
     assert len(items) == 1
     assert items[0]["tool_call_id"] == "call-1"
-    assert items[0]["tool_name"] == "place_stock_order"
-    assert items[0]["arguments"] == {"symbol": "NVDA", "side": "buy", "qty": "3"}
+    assert items[0]["tool_name"] == "append_trader_memory"
+    assert items[0]["arguments"] == {"memory_key": "gap", "hypothesis": "confirm gaps"}
     assert items[0]["thread_id"] == "thread-1"
     assert items[0]["session_id"] == "s-1"
+
+
+def test_pending_approvals_hide_non_memory_tools() -> None:
+    model, _approval, events = _approval_fixtures()
+    model["tool_calls"][0]["function"]["name"] = "place_stock_order"
+    assert _pending_approvals([_session("s-1")], events, {}) == []
 
 
 def test_pending_approvals_exclude_answered_and_executed_calls() -> None:
@@ -314,6 +320,10 @@ def test_respond_approval_forwards_human_decision_to_trueforge(tmp_path: Path, m
     journal = tmp_path / "session.jsonl"
     app = create_dashboard(
         broker=FakeBroker(),
+        approvals_reader=FakeApprovals({"count": 1, "items": [{
+            "session_id": "s-1", "tool_call_id": "c1", "thread_id": "thread-1",
+            "tool_name": "append_trader_memory",
+        }]}),
         dist_path=tmp_path,
         mandate_path=mandate,
         journal_path=journal,
@@ -351,108 +361,63 @@ def test_respond_approval_forwards_human_decision_to_trueforge(tmp_path: Path, m
         assert _StubClient.last_json["previous_turn_id"] == "auto"
 
 
-def test_simulated_rehearsal_requires_manual_approval_and_never_calls_broker(
-    tmp_path: Path, monkeypatch
-) -> None:
-    now = [datetime(2026, 8, 30, 15, 0, tzinfo=timezone.utc)]
-    monkeypatch.setattr("mandate_control.demo._utcnow", lambda: now[0])
+def test_respond_approval_rejects_non_memory_tool(tmp_path: Path) -> None:
     mandate = tmp_path / "mandate.yaml"
-    mandate.write_text("name: test\nuniverse: [AAPL, NVDA, SPY]\nlimits: {}\n", encoding="utf-8")
-    journal = tmp_path / "session.jsonl"
-    trajectory = tmp_path / "trajectory.json"
-    trajectory.write_text(json.dumps({"execution_mode": "approval"}), encoding="utf-8")
-    demo = tmp_path / "demo.json"
+    mandate.write_text("name: test\nuniverse: [AAPL]\nlimits: {}\n", encoding="utf-8")
     app = create_dashboard(
         broker=FakeBroker(),
-        approvals_reader=FakeApprovals({"count": 0, "items": []}),
+        approvals_reader=FakeApprovals({"count": 1, "items": [{
+            "session_id": "s-1", "tool_call_id": "order-1", "thread_id": "thread-1",
+            "tool_name": "place_stock_order",
+        }]}),
+        dist_path=tmp_path,
+        mandate_path=mandate,
+        journal_path=tmp_path / "journal.jsonl",
+        service_urls={"trueforge": "http://local:8790", "broker": "http://local:8010"},
+    )
+    with TestClient(app) as client:
+        response = client.post("/api/approvals/respond", json={
+            "session_id": "s-1", "tool_call_id": "order-1", "thread_id": "thread-1",
+            "approve": True, "confirmed": True,
+        })
+    assert response.status_code == 409
+
+
+def test_trader_timeline_is_cursor_paginated(tmp_path: Path) -> None:
+    mandate = tmp_path / "mandate.yaml"
+    mandate.write_text("name: test\nuniverse: [AAPL]\nlimits: {}\n", encoding="utf-8")
+    journal = tmp_path / "session.jsonl"
+    timeline = tmp_path / "trader-timeline.jsonl"
+    timeline.write_text(
+        "\n".join(
+            json.dumps({
+                "schema": "trader.timeline.v1",
+                "sequence": sequence,
+                "at": f"2026-09-02T12:00:0{sequence}+00:00",
+                "trading_date": "2026-09-02",
+                "kind": "plan",
+                "status": "ok",
+                "session_id": "session-1",
+                "summary": f"cycle {sequence}",
+                "details": {},
+            })
+            for sequence in range(1, 5)
+        ) + "\n",
+        encoding="utf-8",
+    )
+    app = create_dashboard(
+        broker=FakeBroker(),
         dist_path=tmp_path,
         mandate_path=mandate,
         journal_path=journal,
-        trajectory_path=trajectory,
-        demo_path=demo,
+        timeline_path=timeline,
         service_urls={"trueforge": "http://local:8790", "broker": "http://local:8010"},
     )
     with TestClient(app) as client:
-        assert client.post("/api/demo", json={"enabled": True}).status_code == 409
-        assert client.post("/api/demo", json={"enabled": True, "confirmed": True}).status_code == 200
-        snapshot = client.get("/api/snapshot").json()
-        assert snapshot["demo"] == {"enabled": True, "kind": "simulated", "complete": False}
-        assert snapshot["approvals"]["count"] == 1
-        pending = snapshot["approvals"]["items"][0]
-        assert pending["session_id"] == "demo-safety"
-        approved = client.post(
-            "/api/approvals/respond",
-            json={
-                "session_id": "demo-safety",
-                "tool_call_id": pending["tool_call_id"],
-                "thread_id": pending["thread_id"],
-                "approve": True,
-                "confirmed": True,
-            },
-        )
-        assert approved.status_code == 200
-        after = client.get("/api/snapshot").json()
-        assert Decimal(after["session"]["account"]["daily_pnl"]) == 0
-        assert "NVDA" in after["session"]["positions"]
-        assert after["session"]["journal"][0]["outcome"] == "submitted"
-        now[0] += timedelta(seconds=30)
-        moving = client.get("/api/snapshot").json()
-        moving_pnl = Decimal(moving["session"]["account"]["daily_pnl"])
-        assert moving_pnl > 0
-        now[0] += timedelta(seconds=30)
-        settled = client.get("/api/snapshot").json()
-        assert Decimal(settled["session"]["account"]["daily_pnl"]) > moving_pnl
-        blocked_auto = client.post(
-            "/api/trajectory",
-            json={"execution_mode": "auto_paper", "confirmed": True},
-        )
-        assert blocked_auto.status_code == 409
-
-
-def test_simulated_rehearsal_cannot_start_in_auto_mode(tmp_path: Path) -> None:
-    mandate = tmp_path / "mandate.yaml"
-    mandate.write_text("name: test\nuniverse: [AAPL]\nlimits: {}\n", encoding="utf-8")
-    trajectory = tmp_path / "trajectory.json"
-    trajectory.write_text(json.dumps({"execution_mode": "auto_paper"}), encoding="utf-8")
-    app = create_dashboard(
-        broker=FakeBroker(),
-        dist_path=tmp_path,
-        mandate_path=mandate,
-        journal_path=tmp_path / "journal.jsonl",
-        trajectory_path=trajectory,
-        demo_path=tmp_path / "demo.json",
-        service_urls={"trueforge": "http://local:8790", "broker": "http://local:8010"},
-    )
-    with TestClient(app) as client:
-        response = client.post("/api/demo", json={"enabled": True, "confirmed": True})
-        assert response.status_code == 409
-        assert "manual approval" in response.json()["error"]
-
-
-def test_demo_profile_cannot_change_production_trajectory(tmp_path: Path) -> None:
-    mandate = tmp_path / "mandate.yaml"
-    mandate.write_text("name: test\nuniverse: [AAPL]\nlimits: {}\n", encoding="utf-8")
-    trajectory = tmp_path / "trajectory.json"
-    trajectory.write_text(json.dumps({"execution_mode": "approval"}), encoding="utf-8")
-    app = create_dashboard(
-        broker=FakeBroker(),
-        dist_path=tmp_path,
-        mandate_path=mandate,
-        journal_path=tmp_path / "journal.jsonl",
-        trajectory_path=trajectory,
-        demo_path=tmp_path / "demo.json",
-        service_urls={"trueforge": "http://local:8790", "broker": "http://local:8010"},
-    )
-    with TestClient(app) as client:
-        snapshot = client.get("/api/snapshot", headers={"X-Operator-User": "demo"}).json()
-        assert snapshot["agent_url"] == ""
-        assert all(service["url"] == "" for service in snapshot["services"])
-        assert snapshot["session"]["positions"] == {}
-        assert snapshot["session"]["journal"] == []
-        response = client.post(
-            "/api/trajectory",
-            headers={"X-Operator-User": "demo"},
-            json={"execution_mode": "auto_paper", "confirmed": True},
-        )
-        assert response.status_code == 403
-        assert json.loads(trajectory.read_text(encoding="utf-8"))["execution_mode"] == "approval"
+        first = client.get("/api/trader/timeline?limit=2")
+        assert first.status_code == 200
+        assert [item["sequence"] for item in first.json()["items"]] == [1, 2]
+        assert first.json()["next_after"] == 2
+        second = client.get("/api/trader/timeline?after=2&limit=2")
+        assert [item["sequence"] for item in second.json()["items"]] == [3, 4]
+        assert client.get("/api/trader/timeline?after=-1").status_code == 400

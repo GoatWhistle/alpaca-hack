@@ -16,13 +16,22 @@ from mandate_research.live_sources import (
     _fetch,
     collect_official_news,
 )
-from mandate_research.llm_news import MAX_ITEMS as MAX_LLM_BATCH_ITEMS, score_news_batch_llm
+from mandate_research.llm_news import MAX_ITEMS as MAX_LLM_BATCH_ITEMS, gate_news_batch_llm
 from mandate_research.news import MAX_FEED_BYTES, deduplicate, parse_alpaca_news
+from mandate_research.news_graph import NewsGraphStore
 
 
 ALPACA_BARS_ENDPOINT = "https://data.alpaca.markets/v2/stocks/{symbol}/bars"
 JsonFetcher = Callable[[str, dict[str, str]], dict[str, Any]]
-NewsScorer = Callable[..., list[dict[str, Any]]]
+NewsGate = Callable[..., list[dict[str, Any]]]
+
+
+def _default_news_graph_path() -> str:
+    mandate_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    return os.environ.get(
+        "MANDATE_NEWS_GRAPH_PATH",
+        os.path.join(mandate_root, "logs", "news-graph.sqlite3"),
+    )
 
 
 def _fetch_json(url: str, headers: dict[str, str]) -> dict[str, Any]:
@@ -73,7 +82,8 @@ def compare_live_signals(
     fetcher: JsonFetcher = _fetch_json,
     source_fetcher: Fetcher = _fetch,
     fee_bps: str = "1",
-    news_scorer: NewsScorer = score_news_batch_llm,
+    news_gate: NewsGate = gate_news_batch_llm,
+    news_store: NewsGraphStore | None = None,
 ) -> dict[str, Any]:
     normalized = symbol.strip().upper()
     if not normalized:
@@ -115,25 +125,33 @@ def compare_live_signals(
         event for event in deduplicate([*alpaca_events, *official_events])
         if news_cutoff <= event.published_at <= checked_at
     ]
-    scored_events = []
-    scoring_available = 0
+    collected_events = events
+    passed_events = []
+    gate_errors = 0
+    active_store = news_store
+    if active_store is None and news_gate is gate_news_batch_llm:
+        active_store = NewsGraphStore(_default_news_graph_path())
     for start_index in range(0, len(events), MAX_LLM_BATCH_ITEMS):
         chunk = events[start_index : start_index + MAX_LLM_BATCH_ITEMS]
-        scores = news_scorer(chunk, symbol=normalized)
-        if len(scores) != len(chunk):
-            raise ValueError("news scorer must return exactly one result per event")
-        for event, score in zip(chunk, scores):
-            if score.get("available") is True:
-                scoring_available += 1
-            scored_events.append(replace(event, metadata={
+        decisions = (
+            news_gate(chunk, symbol=normalized, store=active_store)
+            if active_store is not None
+            else news_gate(chunk, symbol=normalized)
+        )
+        if len(decisions) != len(chunk):
+            raise ValueError("news gate must return exactly one result per event")
+        for event, decision in zip(chunk, decisions):
+            if decision.get("schema") == "news.gate.error.v1":
+                gate_errors += 1
+                continue
+            if decision.get("decision") != "PASS":
+                continue
+            passed_events.append(replace(event, metadata={
                 **event.metadata,
-                "llm_score": str(score.get("score", "0")),
-                "llm_confidence": str(score.get("confidence", "0")),
-                "llm_reason": str(score.get("reason", "")),
-                "llm_event_type": str(score.get("event_type", "other")),
-                "llm_horizon": str(score.get("horizon", "intraday")),
+                "llm_gate_reason": str(decision.get("reason", "")),
+                "llm_gate_decision": "PASS",
             }))
-    events = scored_events
+    events = passed_events
     payload = {
         "symbol": normalized,
         "fee_bps": fee_bps,
@@ -159,11 +177,8 @@ def compare_live_signals(
                 "summary": event.summary,
                 "symbols": event.symbols,
                 "url": event.url,
-                "llm_score": event.metadata.get("llm_score", "0"),
-                "llm_confidence": event.metadata.get("llm_confidence", "0"),
-                "llm_reason": event.metadata.get("llm_reason", ""),
-                "llm_event_type": event.metadata.get("llm_event_type", "other"),
-                "llm_horizon": event.metadata.get("llm_horizon", "intraday"),
+                "llm_gate_reason": event.metadata.get("llm_gate_reason", ""),
+                "llm_gate_decision": event.metadata.get("llm_gate_decision", "PASS"),
             }
             for event in events
         ],
@@ -173,8 +188,11 @@ def compare_live_signals(
         "data": {
             "source": "alpaca-iex",
             "bars": len(raw_bars),
-            "news": len(events),
-            "news_llm_scored": scoring_available,
+            "news_collected": len(collected_events),
+            "news_passed": len(events),
+            "news_skipped": len(collected_events) - len(events) - gate_errors,
+            "news_llm_gated": len(collected_events) - gate_errors,
+            "news_gate_errors": gate_errors,
             "news_sources": {
                 "alpaca": {"status": "ok", "events": len(alpaca_events)},
                 **official_sources,

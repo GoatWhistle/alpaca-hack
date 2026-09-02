@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -10,8 +11,10 @@ from mcp.types import ToolAnnotations
 
 from mandate_research.live_comparison import compare_live_signals as compare_live
 from mandate_research.live_sources import probe_live_sources as probe_live
-from mandate_research.llm_news import score_news_llm as score_llm
+from mandate_research.llm_news import gate_news_llm as gate_llm
 from mandate_research.monitoring import collect_market_monitoring as collect_monitoring
+from mandate_research.news_graph import NewsGraphStore
+from mandate_research.trader_memory import append_operator_memory, read_active_memory
 from mandate_research.decision_math import evaluate_trajectory as evaluate_math
 from mandate_research.exits import run_exit_evaluation as run_exits_default
 from mandate_research.env import load_workspace_env
@@ -23,6 +26,12 @@ READ_ONLY = ToolAnnotations(
     idempotentHint=True,
     openWorldHint=True,
 )
+APPROVAL_WRITE = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
 
 
 def create_server(
@@ -31,8 +40,10 @@ def create_server(
     probe: Callable[..., dict[str, Any]] = probe_live,
     monitor: Callable[..., dict[str, Any]] = collect_monitoring,
     evaluate: Callable[..., dict[str, Any]] = evaluate_math,
-    score: Callable[..., dict[str, Any]] = score_llm,
+    gate: Callable[..., dict[str, Any]] = gate_llm,
     run_exits: Callable[..., dict[str, Any]] = run_exits_default,
+    news_store_path: str | Path | None = None,
+    trader_memory_path: str | Path | None = None,
     host: str = "127.0.0.1",
     port: int = 8020,
 ) -> FastMCP:
@@ -47,6 +58,21 @@ def create_server(
         port=port,
         streamable_http_path="/mcp",
     )
+    resolved_news_store = Path(
+        news_store_path
+        or os.environ.get(
+            "MANDATE_NEWS_GRAPH_PATH",
+            Path(__file__).resolve().parents[3] / "logs" / "news-graph.sqlite3",
+        )
+    )
+    news_store: NewsGraphStore | None = None
+    active_memory_path = Path(
+        trader_memory_path
+        or os.environ.get(
+            "MANDATE_TRADER_MEMORY_PATH",
+            Path(__file__).resolve().parents[3] / "logs" / "trader-memory.jsonl",
+        )
+    )
 
     @mcp.tool(annotations=READ_ONLY)
     def probe_news_sources(symbol: str = "AAPL") -> dict[str, Any]:
@@ -59,9 +85,56 @@ def create_server(
         return compare(symbol=symbol, fee_bps=fee_bps)
 
     @mcp.tool(annotations=READ_ONLY)
-    def score_news_llm(headline: str, summary: str = "", symbol: str = "AAPL") -> dict[str, Any]:
-        """Convert untrusted news into a bounded structured market-impact score; never execution authority."""
-        return score(headline=headline, summary=summary, symbol=symbol)
+    def gate_news_llm(
+        headline: str,
+        source: str,
+        external_id: str,
+        published_at: str,
+        summary: str = "",
+        symbol: str = "AAPL",
+    ) -> dict[str, Any]:
+        """Return news.gate.response.v1 or a distinct news.gate.error.v1."""
+        nonlocal news_store
+        if gate is gate_llm:
+            news_store = news_store or NewsGraphStore(resolved_news_store)
+            return gate(
+                headline=headline, source=source, external_id=external_id,
+                published_at=published_at, summary=summary, symbol=symbol, store=news_store,
+            )
+        return gate(
+            headline=headline, source=source, external_id=external_id,
+            published_at=published_at, summary=summary, symbol=symbol,
+        )
+
+    @mcp.tool(annotations=READ_ONLY)
+    def list_trader_memory() -> dict[str, Any]:
+        """List only unexpired append-only trader hypotheses."""
+        return {
+            "schema": "trader.memory.page.v1",
+            "items": read_active_memory(active_memory_path),
+        }
+
+    @mcp.tool(annotations=APPROVAL_WRITE)
+    def append_trader_memory(
+        memory_key: str,
+        hypothesis: str,
+        evidence_refs_json: str,
+        ttl_hours: int = 24,
+    ) -> dict[str, Any]:
+        """Append an idempotent operator hypothesis; requires external human approval."""
+        try:
+            evidence_refs = json.loads(evidence_refs_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("evidence_refs_json must be a JSON array") from exc
+        if not isinstance(evidence_refs, list):
+            raise ValueError("evidence_refs_json must be a JSON array")
+        return append_operator_memory(
+            active_memory_path,
+            memory_key=memory_key,
+            hypothesis=hypothesis,
+            evidence_refs=[str(value) for value in evidence_refs],
+            ttl_hours=ttl_hours,
+        )
 
     @mcp.tool(annotations=READ_ONLY)
     def get_market_monitoring(

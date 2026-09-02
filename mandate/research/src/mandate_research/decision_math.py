@@ -214,7 +214,7 @@ def summarize_trajectory_math(
                     "quality_pass": item.get("quality_pass") is True,
                 },
                 "direction_counts": {}, "strategies": {}, "risk": {},
-                "news_scoring": {"events": None, "llm_scored": None},
+                "news_gate": {"collected": None, "passed": None, "skipped": None, "llm_gated": None, "errors": None},
                 "effective_strategy_weights": {},
                 "sizing": {"available": False, "reason": "research_funnel"},
                 "news_price_aligned": False, "macro_price_aligned": False,
@@ -263,7 +263,7 @@ def summarize_trajectory_math(
         price_news_aligned = (
             news_direction in {"buy", "sell"}
             and news_direction == ensemble_direction
-            and news_direction in price_directions
+            and sum(direction == news_direction for direction in price_directions) >= 2
         )
         macro_signal_direction = {
             "risk_on": "buy",
@@ -294,6 +294,9 @@ def summarize_trajectory_math(
         data = comparison.get("data", {}) if isinstance(comparison.get("data"), dict) else {}
         features = comparison.get("features", {}) if isinstance(comparison.get("features"), dict) else {}
         reasons: list[str] = []
+        gate_error_count = int(data.get("news_gate_errors") or 0)
+        if gate_error_count:
+            reasons.append("news_gate_error")
         if regular_hours_only and not market_is_open:
             reasons.append("outside_regular_hours")
         if not quality_pass:
@@ -362,9 +365,12 @@ def summarize_trajectory_math(
             "direction_counts": counts,
             "strategies": strategies,
             "risk": risk,
-            "news_scoring": {
-                "events": data.get("news"),
-                "llm_scored": data.get("news_llm_scored"),
+            "news_gate": {
+                "collected": data.get("news_collected"),
+                "passed": data.get("news_passed"),
+                "skipped": data.get("news_skipped"),
+                "llm_gated": data.get("news_llm_gated"),
+                "errors": data.get("news_gate_errors"),
             },
             "effective_strategy_weights": effective_weights,
             "sizing": sizing,

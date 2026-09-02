@@ -1,15 +1,33 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildAgentSpec } from "./agentSpec.js";
+import { buildCriticSpec, buildOperatorSpec, buildTraderSpec } from "./agentSpec.js";
 
 
-test("writes pause for approval and research is provided by MCP", () => {
-  const spec = buildAgentSpec("instructions");
-  const alpaca = spec.mcpServers?.[0];
+test("the automatic trader has planning authority but no tools", () => {
+  const spec = buildTraderSpec("instructions", "zai/trader-model");
   assert.equal("skills" in spec, false);
-  assert.equal(alpaca?.name, "alpaca");
-  assert.ok(alpaca?.enableTools?.includes("place_stock_order"));
-  assert.ok(alpaca?.requireApprovalForTools?.includes("place_stock_order"));
-  assert.deepEqual(spec.mcpServers?.map((server) => server.name), ["alpaca", "mandate-research"]);
+  assert.equal(spec.model.name, "zai/trader-model");
+  assert.deepEqual(spec.mcpServers, []);
+  assert.equal(spec.config?.sandbox?.enabled, false);
+  assert.equal(spec.config?.dynamicSubAgents?.enabled, false);
+});
+
+test("critics use their configured model and have no execution authority", () => {
+  const spec = buildCriticSpec("risk only", "zai/risk-model");
+  assert.equal(spec.model.name, "zai/risk-model");
+  assert.deepEqual(spec.mcpServers, []);
+  assert.equal(spec.config?.iterationLimit, 2);
+  assert.equal(spec.config?.sandbox?.enabled, false);
+});
+
+test("operator can only read or approval-gate trader memory", () => {
+  const spec = buildOperatorSpec("operator", "zai/operator-model");
+  assert.equal(spec.model.name, "zai/operator-model");
+  assert.deepEqual(spec.mcpServers?.[0]?.enableTools, [
+    "list_trader_memory", "append_trader_memory",
+  ]);
+  assert.deepEqual(spec.mcpServers?.[0]?.requireApprovalForTools, ["append_trader_memory"]);
+  assert.equal(spec.config?.dynamicSubAgents?.enabled, false);
+  assert.equal(spec.config?.sandbox?.enabled, false);
 });

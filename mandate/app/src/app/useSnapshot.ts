@@ -44,10 +44,9 @@ export function useSnapshot(): SnapshotState {
 
   useEffect(() => {
     if (paused || hidden) return;
-    const interval = snapshot?.demo.enabled ? 2_000 : REFRESH_MS;
-    const timer = window.setInterval(() => void refresh(), interval);
+    const timer = window.setInterval(() => void refresh(), REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [paused, hidden, refresh, snapshot?.demo.enabled]);
+  }, [paused, hidden, refresh]);
 
   useEffect(() => {
     const onVisibility = () => setHidden(document.visibilityState === "hidden");

@@ -1,0 +1,7 @@
+{
+  "name": "@mandate/trueforge-runtime",
+  "private": true,
+  "dependencies": {
+    "@truefoundry/trueforge": "0.1.4"
+  }
+}

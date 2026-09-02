@@ -8,40 +8,102 @@ import pytest
 from mandate_research import execution
 
 
-def test_select_entries_use_challenged_candidate_without_mandate_layer() -> None:
-    evaluation = {
-        "research_candidates": ["AAPL"],
+def _plan_evaluation(*symbols: str) -> dict:
+    return {
+        "checked_at": "2026-09-02T14:00:00Z",
+        "cycle_id": "cycle-20260902-1400",
+        "research_candidates": list(symbols),
+        "trade_candidates": [
+            {"candidate_id": f"candidate-{index + 1}", "symbol": symbol, "side": "untrusted"}
+            for index, symbol in enumerate(symbols)
+        ],
         "symbols": {
-            "AAPL": {
+            symbol: {
                 "research_candidate": True,
                 "signal_path": "price_confirmation",
                 "strategies": {"regime_ensemble": {"direction": "buy", "strength": "0.8"}},
-                "sizing": {"available": True, "qty": 10},
-                "market": {"last": "100"},
+                "sizing": {"available": True, "qty": str(10 + index)},
+                "market": {"last": str(100 + index)},
             }
+            for index, symbol in enumerate(symbols)
         },
     }
-    orders = execution.select_entries(
-        evaluation,
-        {"action": "PROPOSE", "candidate": "AAPL", "hard_contradiction": False},
-        limit=1,
-    )
-    assert orders == [{
-        "kind": "entry",
-        "symbol": "AAPL",
-        "side": "buy",
-        "qty": "10",
-        "limit_price": "100.12",
-        "last": "100",
-        "rationale": "direct price_confirmation entry; ensemble strength 0.8 after LLM challenge",
-    }]
 
 
-def test_hard_contradiction_still_parks() -> None:
+def _plan(*candidate_ids: str, action: str = "EXECUTE_PLAN") -> dict:
+    return {
+        "schema": "trade.plan.v1",
+        "cycle_id": "cycle-20260902-1400",
+        "action": action,
+        "reason": "ranked canonical candidates",
+        "steps": [
+            {
+                "candidate_id": candidate_id,
+                "reason": f"evidence supports {candidate_id}",
+                "evidence_refs": [f"evaluation.trade_candidates.{candidate_id}"],
+            }
+            for candidate_id in candidate_ids
+        ],
+        "critic_coverage": ["risk", "market", "execution"],
+        "critic_resolutions": [
+            {"critic": critic, "resolution": "ACCEPTED", "reason": "bounded evidence"}
+            for critic in ("risk", "market", "execution")
+        ],
+        "memory_events": [],
+    }
+
+
+def test_trade_plan_maps_only_ids_to_canonical_evaluation_in_plan_order() -> None:
+    evaluation = _plan_evaluation("AAPL", "MSFT")
+    entries = execution.select_entries(evaluation, _plan("candidate-2", "candidate-1"))
+    assert [entry["symbol"] for entry in entries] == ["MSFT", "AAPL"]
+    assert [entry["side"] for entry in entries] == ["buy", "buy"]
+    assert [entry["qty"] for entry in entries] == ["11", "10"]
+    assert [entry["limit_price"] for entry in entries] == ["101.13", "100.12"]
+    assert [entry["plan_candidate_id"] for entry in entries] == ["candidate-2", "candidate-1"]
+
+
+@pytest.mark.parametrize(
+    ("decision", "message"),
+    [
+        (_plan("candidate-1", "candidate-1"), "duplicate trade plan candidate_id"),
+        ({**_plan("candidate-1"), "steps": [{"candidate_id": "candidate-1", "reason": "", "evidence_refs": ["x"]}]}, "reason"),
+        (_plan("not-canonical"), "unknown trade plan candidate_id"),
+        (_plan("candidate-1", "candidate-2", "candidate-3", "candidate-4"), "requires 1-3 steps"),
+        ({**_plan(action="PARK"), "reason": "no edge", "steps": [_plan("candidate-1")["steps"][0]]}, "cannot contain steps"),
+    ],
+)
+def test_trade_plan_rejects_invalid_steps(decision: dict, message: str) -> None:
+    evaluation = _plan_evaluation("AAPL", "MSFT", "NVDA", "AMD")
+    with pytest.raises(ValueError, match=message):
+        execution.select_entries(evaluation, decision)
+
+
+def test_trade_plan_rejects_model_supplied_order_fields() -> None:
+    plan = _plan("candidate-1")
+    plan["steps"][0]["qty"] = "999999"
+    with pytest.raises(ValueError, match="step fields"):
+        execution.select_entries(_plan_evaluation("AAPL"), plan)
+
+
+def test_trade_plan_park_requires_reason_and_selects_nothing() -> None:
+    evaluation = _plan_evaluation("AAPL")
+    assert execution.select_entries(evaluation, _plan(action="PARK")) == []
     assert execution.select_entries(
-        {"research_candidates": [], "symbols": {}},
-        {"action": "PARK", "candidate": None, "hard_contradiction": True},
+        {"cycle_id": "cycle-20260902-1400"},
+        _plan(action="PARK"),
     ) == []
+    with pytest.raises(ValueError, match="reason"):
+        execution.select_entries(evaluation, {**_plan(action="PARK"), "reason": ""})
+
+
+def test_trade_plan_cycle_id_must_match_canonical_evaluation() -> None:
+    evaluation = _plan_evaluation("AAPL")
+    with pytest.raises(ValueError, match="cycle_id does not match"):
+        execution.select_entries(
+            evaluation,
+            {**_plan("candidate-1"), "cycle_id": "model-invented-retry-id"},
+        )
 
 
 def test_closed_market_never_constructs_a_broker(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,7 +114,7 @@ def test_closed_market_never_constructs_a_broker(monkeypatch: pytest.MonkeyPatch
     )
     result = execution.execute(
         {"market_is_open": False},
-        {"action": "PROPOSE", "candidate": "AAPL", "hard_contradiction": False},
+        _plan(action="PARK"),
     )
     assert result["action"] == "PARK"
     assert result["submitted"] is False
@@ -92,6 +154,33 @@ def test_malformed_position_does_not_block_other_exits(monkeypatch: pytest.Monke
     assert execution.select_exits({"symbols": {}}, positions)[0]["symbol"] == "MSFT"
 
 
+def test_unevaluated_position_marks_exit_pass_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(execution, "run_exit_evaluation", lambda _positions: {
+        "proposals": [],
+        "unevaluated": [{"symbol": "AAPL", "reason": "missing_price_or_atr"}],
+    })
+    health: dict = {}
+    assert execution.select_exits(
+        {"symbols": {}},
+        [{"symbol": "AAPL", "qty": "1", "avg_entry_price": "100", "asset_class": "us_equity"}],
+        health=health,
+    ) == []
+    assert health == {
+        "healthy": False,
+        "issues": [{"symbol": "AAPL", "reason": "missing_price_or_atr"}],
+    }
+
+
+def test_option_risk_reserve_uses_conservative_cost_basis() -> None:
+    assert execution._option_risk_reserve({
+        "symbol": "AAPL260918C00100000",
+        "market_value": "1000",
+        "cost_basis": "10000",
+    }) == execution.Decimal("10000")
+    with pytest.raises(ValueError, match="cannot determine option risk"):
+        execution._option_risk_reserve({"symbol": "AAPL260918C00100000"})
+
+
 def test_package_move_preserves_mandate_and_state_roots(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
@@ -100,23 +189,6 @@ def test_package_move_preserves_mandate_and_state_roots(
     monkeypatch.delenv("MANDATE_EXECUTION_STATE_PATH", raising=False)
     assert execution._mandate_limits()["max_daily_loss_pct"] == execution.Decimal("10")
     assert execution._execution_state_path() == execution.MANDATE_ROOT / "logs/execution-state.json"
-
-
-def test_spy_and_existing_option_underlying_are_not_selected() -> None:
-    evaluation = {
-        "research_candidates": ["SPY", "AAPL"],
-        "symbols": {
-            symbol: {
-                "research_candidate": True,
-                "signal_path": "price_confirmation",
-                "strategies": {"regime_ensemble": {"direction": "buy", "strength": "0.8"}},
-                "sizing": {"available": True, "qty": 10},
-                "market": {"last": "100"},
-            } for symbol in ("SPY", "AAPL")
-        },
-    }
-    decision = {"action": "PROPOSE", "candidate": "SPY", "candidates": ["SPY", "AAPL"], "hard_contradiction": False}
-    assert execution.select_entries(evaluation, decision, existing_symbols={"AAPL"}) == []
 
 
 def test_option_builder_prefers_defined_risk_debit_spread(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -264,8 +336,13 @@ def test_open_market_cycle_blocks_entries_after_daily_stop(
     monkeypatch.setenv("MANDATE_EXECUTION_STATE_PATH", str(tmp_path / "execution-state.json"))
     monkeypatch.setenv("MANDATE_JOURNAL_PATH", str(tmp_path / "journal.jsonl"))
     result = execution.execute(
-        {"market_is_open": True, "checked_at": "2026-09-02T14:00:00Z", "symbols": {}},
-        {"action": "PROPOSE", "candidate": "AAPL", "hard_contradiction": False},
+        {
+            "market_is_open": True,
+            "checked_at": "2026-09-02T14:00:00Z",
+            "cycle_id": "cycle-20260902-1400",
+            "symbols": {},
+        },
+        _plan(action="PARK"),
     )
     assert result["action"] == "PARK"
     assert result["risk_gate"]["allow_entries"] is False
@@ -311,6 +388,170 @@ def test_order_lifecycle_reprices_then_reports_real_fill(monkeypatch: pytest.Mon
     assert result["filled_qty"] == "10"
     assert result["deduplicated"] is False
     assert result["replacements"] == 1
+
+
+def test_plan_client_order_id_is_stable_across_index_and_canonical_repricing() -> None:
+    action = {
+        "kind": "entry", "symbol": "AAPL", "side": "buy", "qty": "10",
+        "limit_price": "100", "plan_schema": "trade.plan.v1",
+        "plan_cycle_id": "cycle-1", "plan_candidate_id": "candidate-1",
+    }
+    first = execution._client_order_id(action, "first-check", 0)
+    second = execution._client_order_id(
+        {
+            **action, "kind": "option_entry", "symbol": "AAPL260911C00100000",
+            "underlying": "AAPL", "qty": "2", "limit_price": "4.20",
+        },
+        "second-check", 99,
+    )
+    assert first == second
+    assert len(first) <= 48
+
+
+def test_ordered_plan_stops_after_partial_fill(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Broker:
+        def positions(self) -> list[dict]:
+            return []
+
+    submitted: list[str] = []
+
+    def lifecycle(_broker, action: dict, **_kwargs) -> dict:
+        submitted.append(action["plan_candidate_id"])
+        filled = "5" if action["plan_candidate_id"] == "candidate-2" else action["qty"]
+        return {
+            "accepted": True, "filled": True, "status": "filled", "filled_qty": filled,
+            "kind": action["kind"], "candidate": action["symbol"],
+            "underlying": action["symbol"], "reason": action["rationale"],
+            "result": {}, "order": {},
+        }
+
+    monkeypatch.setattr(execution, "execute_with_lifecycle", lifecycle)
+    monkeypatch.setattr(execution, "_journal", lambda _value: None)
+    actions = [{
+        "kind": "entry", "symbol": symbol, "side": "buy", "qty": "10",
+        "limit_price": "100", "rationale": "test", "plan_candidate_id": candidate_id,
+        "plan_cycle_id": "cycle-1", "plan_schema": "trade.plan.v1",
+    } for symbol, candidate_id in (
+        ("AAPL", "candidate-1"), ("MSFT", "candidate-2"), ("NVDA", "candidate-3"),
+    )]
+    results, errors, halt = execution._run_plan_actions(
+        Broker(), actions, checked_at="checked", start_index=2,
+    )
+    assert submitted == ["candidate-1", "candidate-2"]
+    assert len(results) == 2
+    assert errors == []
+    assert halt == {"halted": True, "reason": "partial:candidate-2:filled", "skipped": 1}
+
+
+def test_ordered_plan_stops_before_submit_on_live_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Broker:
+        def positions(self) -> list[dict]:
+            return [{"symbol": "AAPL", "qty": "1", "asset_class": "us_equity"}]
+
+    monkeypatch.setattr(
+        execution,
+        "execute_with_lifecycle",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not submit")),
+    )
+    action = {
+        "kind": "entry", "symbol": "AAPL", "side": "buy", "qty": "10",
+        "limit_price": "100", "rationale": "test", "plan_candidate_id": "candidate-1",
+        "plan_cycle_id": "cycle-1", "plan_schema": "trade.plan.v1",
+    }
+    results, errors, halt = execution._run_plan_actions(
+        Broker(), [action], checked_at="checked", start_index=0,
+    )
+    assert results == []
+    assert errors == ["candidate-1 plan step: live position conflict for AAPL"]
+    assert halt["halted"] is True
+
+
+def test_whole_plan_risk_validation_reserves_order_budget() -> None:
+    actions = [{"symbol": symbol} for symbol in ("AAPL", "MSFT", "NVDA")]
+    gate = {"orders_today": 198, "max_orders_per_day": 200}
+    assert execution._whole_plan_risk_error(gate, actions, 3) == (
+        "whole plan exceeds order budget: 198+3>200"
+    )
+    assert execution._whole_plan_risk_error(gate, actions[:2], 3) == (
+        "plan resolved 2 of 3 canonical steps"
+    )
+
+
+def test_execute_prioritizes_hard_exits_before_ordered_plan(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    class Broker:
+        position_reads = 0
+
+        def account(self) -> dict:
+            return {
+                "equity": "100000", "last_equity": "100000", "buying_power": "100000",
+                "options_approved_level": 0,
+            }
+
+        def positions(self) -> list[dict]:
+            self.position_reads += 1
+            if self.position_reads == 1:
+                return [{
+                    "symbol": "AAPL", "asset_class": "us_equity", "qty": "1",
+                    "market_value": "100", "avg_entry_price": "100",
+                }]
+            return []
+
+        def orders(self, **_kwargs: object) -> list[dict]:
+            return []
+
+        def asset(self, symbol: str) -> dict:
+            assert symbol == "MSFT"
+            return {"tradable": True, "shortable": True, "easy_to_borrow": True}
+
+    sequence: list[str] = []
+    hard_exit = {
+        "kind": "exit", "symbol": "AAPL", "side": "sell", "qty": "1",
+        "limit_price": "99", "rationale": "automatic hard stop",
+    }
+
+    def run_exits(_broker, actions: list[dict], **_kwargs) -> tuple[list[dict], list[str]]:
+        assert actions == [hard_exit]
+        sequence.append("hard_exit")
+        return [{
+            "accepted": True, "filled": True, "status": "filled", "filled_qty": "1",
+            "kind": "exit", "candidate": "AAPL", "underlying": "AAPL",
+            "reason": "automatic hard stop", "result": {}, "order": {},
+        }], []
+
+    def run_plan(_broker, actions: list[dict], **_kwargs):
+        sequence.append("plan")
+        assert [action["plan_candidate_id"] for action in actions] == ["candidate-1"]
+        return [{
+            "accepted": True, "filled": True, "status": "filled", "filled_qty": actions[0]["qty"],
+            "kind": "entry", "candidate": "MSFT", "underlying": "MSFT",
+            "reason": actions[0]["rationale"], "result": {}, "order": {},
+        }], [], {"halted": False, "reason": None, "skipped": 0}
+
+    mandate = tmp_path / "mandate.yaml"
+    mandate.write_text(
+        "limits:\n  max_position_pct: 40\n  max_gross_exposure_pct: 100\n"
+        "  max_daily_loss_pct: 10\n  max_orders_per_day: 200\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(execution, "PaperBroker", Broker)
+    monkeypatch.setattr(execution, "_cancel_tagged_open_orders", lambda _broker: [])
+    monkeypatch.setattr(execution, "_after_flatten_window", lambda _now: False)
+    monkeypatch.setattr(execution, "select_exits", lambda *_args, **_kwargs: [hard_exit])
+    monkeypatch.setattr(execution, "select_option_exits", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(execution, "_run_actions", run_exits)
+    monkeypatch.setattr(execution, "_run_plan_actions", run_plan)
+    monkeypatch.setenv("MANDATE_OPTIONS_ENABLED", "false")
+    monkeypatch.setenv("MANDATE_PATH", str(mandate))
+    monkeypatch.setenv("MANDATE_EXECUTION_STATE_PATH", str(tmp_path / "execution-state.json"))
+    monkeypatch.setenv("MANDATE_JOURNAL_PATH", str(tmp_path / "journal.jsonl"))
+    evaluation = _plan_evaluation("MSFT")
+    evaluation["market_is_open"] = True
+    result = execution.execute(evaluation, _plan("candidate-1"))
+    assert sequence == ["hard_exit", "plan"]
+    assert result["submitted_count"] == 2
+    assert result["trade_plan"]["validated_steps"] == 1
 
 
 def test_portfolio_headroom_is_allocated_across_ranked_entries() -> None:

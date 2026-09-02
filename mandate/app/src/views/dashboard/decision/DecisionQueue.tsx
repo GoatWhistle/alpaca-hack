@@ -2,8 +2,6 @@ import { DecisionCard, type ApprovalAction } from "./DecisionCard";
 
 interface DecisionQueueProps {
   items: Record<string, unknown>[];
-  headroom: Record<string, unknown>;
-  limits: Record<string, unknown>;
   actions: Record<string, ApprovalAction>;
   live: boolean;
   hidden: boolean;
@@ -12,8 +10,6 @@ interface DecisionQueueProps {
 
 export function DecisionQueue({
   items,
-  headroom,
-  limits,
   actions,
   live,
   hidden,
@@ -58,8 +54,6 @@ export function DecisionQueue({
             key={toolCallId || String(item.created_at ?? "")}
             index={index}
             item={item}
-            headroom={headroom}
-            limits={limits}
             action={actions[toolCallId]}
             live={live}
             onRespond={onRespond}
@@ -81,8 +75,8 @@ export function StandingBy({ marketOpen }: { marketOpen: boolean }) {
       <b>Nothing awaits you</b>
       <p>
         {marketOpen
-          ? "The agent is scanning the market and routes manual-mode orders here before submission."
-          : "The market is closed. The agent researches but cannot propose an order outside regular hours."}
+          ? "Trading is automatic. Only explicit agent-memory changes require operator approval."
+          : "The market is closed. News context continues accumulating for the next session."}
       </p>
     </section>
   );

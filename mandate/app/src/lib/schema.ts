@@ -72,11 +72,6 @@ export const SnapshotSchema = z.object({
   session: SessionStateSchema,
   autonomy: AutonomySchema,
   approvals: ApprovalsSchema,
-  demo: z.object({
-    enabled: z.boolean(),
-    kind: z.literal("simulated"),
-    complete: z.boolean().optional().default(false),
-  }).optional().default({ enabled: false, kind: "simulated", complete: false }),
 });
 
 export type Snapshot = z.infer<typeof SnapshotSchema>;

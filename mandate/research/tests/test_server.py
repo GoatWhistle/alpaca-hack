@@ -8,20 +8,25 @@ from mandate_research.server import create_server
 def test_research_mcp_has_only_bounded_read_only_tools() -> None:
     server = create_server(
         compare=lambda **_: {}, probe=lambda **_: {}, monitor=lambda **_: {}, evaluate=lambda **_: {},
-        score=lambda **_: {}, run_exits=lambda _positions: {},
+        gate=lambda **_: {}, run_exits=lambda _positions: {},
     )
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
 
     assert set(tools) == {
         "probe_news_sources",
-        "score_news_llm",
+        "gate_news_llm",
+        "list_trader_memory",
+        "append_trader_memory",
         "compare_live_signals",
         "get_market_monitoring",
         "evaluate_trajectory",
         "evaluate_position_exits",
     }
     assert all(tool.annotations is not None for tool in tools.values())
-    assert all(tool.annotations.readOnlyHint is True for tool in tools.values())
+    assert all(
+        tool.annotations.readOnlyHint is (tool.name != "append_trader_memory")
+        for tool in tools.values()
+    )
     assert all(tool.annotations.destructiveHint is False for tool in tools.values())
 
 
@@ -40,11 +45,11 @@ def test_research_mcp_delegates_with_bounded_arguments() -> None:
         calls.append(("evaluate", kwargs))
         return {"kind": "decision-math"}
 
-    def score(**kwargs: object) -> dict[str, object]:
-        calls.append(("score", kwargs))
-        return {"kind": "llm-score"}
+    def gate(**kwargs: object) -> dict[str, object]:
+        calls.append(("gate", kwargs))
+        return {"kind": "llm-gate"}
 
-    server = create_server(compare=compare, probe=probe, evaluate=evaluate, score=score)
+    server = create_server(compare=compare, probe=probe, evaluate=evaluate, gate=gate)
     probe_result = asyncio.run(server.call_tool("probe_news_sources", {"symbol": "NVDA"}))
     compare_result = asyncio.run(
         server.call_tool("compare_live_signals", {"symbol": "AAPL", "fee_bps": "2"})
@@ -52,14 +57,17 @@ def test_research_mcp_delegates_with_bounded_arguments() -> None:
     evaluate_result = asyncio.run(
         server.call_tool("evaluate_trajectory", {"symbols": "AAPL,SPY", "fee_bps": "2"})
     )
-    score_result = asyncio.run(server.call_tool(
-        "score_news_llm", {"headline": "Beat but guidance cut", "symbol": "AAPL"}
+    gate_result = asyncio.run(server.call_tool(
+        "gate_news_llm", {
+            "headline": "Beat but guidance cut", "source": "wire", "external_id": "42",
+            "published_at": "2026-09-02T12:00:00Z", "symbol": "AAPL",
+        }
     ))
 
     assert probe_result[1] == {"kind": "probe"}
     assert compare_result[1] == {"kind": "comparison"}
     assert evaluate_result[1] == {"kind": "decision-math"}
-    assert score_result[1] == {"kind": "llm-score"}
+    assert gate_result[1] == {"kind": "llm-gate"}
     assert calls == [
         ("probe", {"symbol": "NVDA", "strict": False}),
         ("compare", {"symbol": "AAPL", "fee_bps": "2"}),
@@ -83,7 +91,10 @@ def test_research_mcp_delegates_with_bounded_arguments() -> None:
                 "compact_output": False,
             },
         ),
-        ("score", {"headline": "Beat but guidance cut", "summary": "", "symbol": "AAPL"}),
+        ("gate", {
+            "headline": "Beat but guidance cut", "source": "wire", "external_id": "42",
+            "published_at": "2026-09-02T12:00:00Z", "summary": "", "symbol": "AAPL",
+        }),
     ]
 
 
@@ -105,3 +116,20 @@ def test_position_exits_tool_parses_json_and_delegates() -> None:
 
     with pytest.raises(ToolError):
         asyncio.run(server.call_tool("evaluate_position_exits", {"positions_json": "{not json"}))
+
+
+def test_operator_memory_tools_share_the_append_only_contract(tmp_path) -> None:
+    path = tmp_path / "trader-memory.jsonl"
+    server = create_server(trader_memory_path=path)
+
+    appended = asyncio.run(server.call_tool("append_trader_memory", {
+        "memory_key": "gap-risk",
+        "hypothesis": "Wait for price confirmation after large opening gaps.",
+        "evidence_refs_json": '["operator:review:7"]',
+        "ttl_hours": 24,
+    }))
+    active = asyncio.run(server.call_tool("list_trader_memory", {}))
+
+    assert appended[1]["schema"] == "trader.memory.v1"
+    assert active[1]["schema"] == "trader.memory.page.v1"
+    assert active[1]["items"] == [appended[1]]

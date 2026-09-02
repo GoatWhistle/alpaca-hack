@@ -192,19 +192,10 @@ def volatility_adjusted_momentum_signal(
     return TradeSignal(direction, strength, f"vol-adjusted momentum {score:.3f}", bars[-1].timestamp)
 
 
-def score_news(event: NewsEvent, *, symbol: str) -> Decimal:
+def news_gate_passed(event: NewsEvent, *, symbol: str) -> bool:
     if event.symbols and symbol.upper() not in event.symbols:
-        return ZERO
-    try:
-        score = Decimal(event.metadata.get("llm_score", "0"))
-        confidence = Decimal(event.metadata.get("llm_confidence", "0"))
-    except (ArithmeticError, ValueError):
-        return ZERO
-    if not score.is_finite() or not confidence.is_finite():
-        return ZERO
-    if not -ONE <= score <= ONE or not ZERO <= confidence <= ONE:
-        return ZERO
-    return score * confidence
+        return False
+    return event.metadata.get("llm_gate_decision") == "PASS"
 
 
 def news_price_confirmation_signal(
@@ -213,33 +204,34 @@ def news_price_confirmation_signal(
     *,
     symbol: str,
     lookback: int = 3,
-    news_threshold: Decimal = Decimal("0.25"),
+    min_passed_events: int = 1,
     max_news_age: timedelta = timedelta(hours=24),
 ) -> TradeSignal:
     if not bars:
         raise ValueError("at least one bar is required")
-    if not ZERO <= news_threshold <= ONE:
-        raise ValueError("news_threshold must be between 0 and 1")
+    if min_passed_events < 1:
+        raise ValueError("min_passed_events must be positive")
     if max_news_age <= timedelta(0):
         raise ValueError("max_news_age must be positive")
     cutoff = bars[-1].timestamp
     earliest = cutoff - max_news_age
     eligible_events = deduplicate(
-        event for event in events if earliest <= event.published_at <= cutoff
+        event for event in events
+        if earliest <= event.published_at <= cutoff and news_gate_passed(event, symbol=symbol)
     )
     if not eligible_events:
-        return _flat(bars, "no recent news")
-    scores = [score_news(event, symbol=symbol) for event in eligible_events]
-    news_score = sum(scores, ZERO) / Decimal(len(scores))
+        return _flat(bars, "no recent passed news")
+    if len(eligible_events) < min_passed_events:
+        return _flat(
+            bars,
+            f"{len(eligible_events)} passed news events below minimum {min_passed_events}",
+        )
     price = momentum_signal(bars, lookback=lookback, threshold_pct=Decimal("0"))
-    news_direction = Direction.BUY if news_score > ZERO else Direction.SELL if news_score < ZERO else Direction.FLAT
-    if abs(news_score) < news_threshold:
-        return _flat(bars, f"news score {news_score:.3f} below threshold")
-    if news_direction is Direction.FLAT or price.direction is not news_direction:
-        return _flat(bars, f"news {news_score:.3f} lacks price confirmation")
+    if price.direction is Direction.FLAT:
+        return _flat(bars, "passed news lacks price direction")
     return TradeSignal(
-        news_direction,
-        min((abs(news_score) + price.strength) / Decimal("2"), ONE),
-        f"news score {news_score:.3f} confirmed by {price.rationale}",
+        price.direction,
+        price.strength,
+        f"{len(eligible_events)} passed news event(s) confirmed by {price.rationale}",
         bars[-1].timestamp,
     )
