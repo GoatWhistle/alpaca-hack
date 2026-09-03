@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
@@ -36,14 +37,28 @@ def _default_news_graph_path() -> str:
 
 def _fetch_json(url: str, headers: dict[str, str]) -> dict[str, Any]:
     timeout = max(2.0, min(20.0, float(os.environ.get("MANDATE_DATA_TIMEOUT_SECONDS", "8"))))
-    response = httpx.get(
-        url,
-        headers=headers,
-        timeout=timeout,
-        follow_redirects=False,
-        proxy=_alpaca_proxy(url),
-    )
-    response.raise_for_status()
+    response: httpx.Response | None = None
+    for attempt in range(2):
+        try:
+            response = httpx.get(
+                url,
+                headers=headers,
+                timeout=timeout,
+                follow_redirects=False,
+                proxy=_alpaca_proxy(url),
+            )
+            response.raise_for_status()
+            break
+        except httpx.HTTPError as exc:
+            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+            retryable = isinstance(exc, httpx.TransportError) or status in {408, 429} or (
+                status is not None and status >= 500
+            )
+            if attempt == 1 or not retryable:
+                raise
+            time.sleep(0.25)
+    if response is None:  # pragma: no cover - the bounded loop always returns or raises
+        raise RuntimeError("market data request produced no response")
     if len(response.content) > MAX_FEED_BYTES:
         raise ValueError(f"payload exceeds {MAX_FEED_BYTES} bytes")
     decoded = response.json()

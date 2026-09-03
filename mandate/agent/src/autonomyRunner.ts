@@ -70,6 +70,7 @@ export type NewsEvent = {
   symbols: string[];
   url: string | null;
   content_hash: string;
+  gate?: Record<string, unknown>;
 };
 
 type PollResult = {
@@ -182,7 +183,7 @@ type TimelineEvent = {
   sequence: number;
   at: string;
   trading_date: string;
-  kind: "trigger" | "reasoning" | "tool_call" | "tool_result"
+  kind: "trigger" | "news" | "reasoning" | "tool_call" | "tool_result"
     | "critics" | "plan" | "execution" | "risk_exit" | "session";
   status: "ok" | "parked" | "submitted" | "degraded";
   session_id: string | null;
@@ -255,7 +256,10 @@ export function detectNewEvents(events: NewsEvent[], cursor: Cursor | null): {
   const pendingByKey = new Map(
     [...(cursor.pending ?? []), ...newlyDiscovered].map((event) => [event.key, event]),
   );
-  const fresh = [...pendingByKey.values()]
+  const pending = [...pendingByKey.values()]
+    .sort((left, right) => Date.parse(left.published_at) - Date.parse(right.published_at))
+    .slice(-MAX_PENDING_NEWS);
+  const fresh = newlyDiscovered
     .sort((left, right) => Date.parse(left.published_at) - Date.parse(right.published_at))
     .slice(-MAX_PENDING_NEWS);
   const merged = [...cursor.seen, ...keys];
@@ -265,7 +269,7 @@ export function detectNewEvents(events: NewsEvent[], cursor: Cursor | null): {
     cursor: {
       initialized_at: cursor.initialized_at,
       seen: [...new Set(merged)].slice(-2000),
-      pending: fresh,
+      pending,
     },
     seeded: false,
   };
@@ -468,6 +472,23 @@ export function ipoDiscoveryCandidates(
       mandate_status: "OUTSIDE_MANDATE",
     }];
   }).slice(0, 3);
+}
+
+export function retainIpoDiscovery(
+  market: MarketResult,
+  previous: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const current = typeof market.discovery.ipos === "object" && market.discovery.ipos !== null
+    && !Array.isArray(market.discovery.ipos)
+    ? market.discovery.ipos as Record<string, unknown>
+    : undefined;
+  if (current) return current;
+  if (!previous) return undefined;
+  market.discovery = {
+    ...market.discovery,
+    ipos: { ...previous, cached_between_full_polls: true },
+  };
+  return previous;
 }
 
 export function buildOutcomeScorecard(records: OutcomeRecord[]): OutcomeScorecard {
@@ -1426,10 +1447,27 @@ async function main(): Promise<void> {
     ? Date.parse(runtime.last_analysis_at)
     : 0;
   if (!Number.isFinite(lastAnalysisMs)) lastAnalysisMs = 0;
+  // Fresh news may trigger analysis more often than the configured interval.
+  // Keep full market/IPO discovery on its own clock so a busy news tape cannot
+  // indefinitely starve it by continually resetting lastAnalysisMs.
+  let lastFullMarketPollMs = 0;
   let lastIpoSignal = "";
   let wakeResolver: (() => void) | undefined;
   let wakePromise = new Promise<void>((resolveWake) => { wakeResolver = resolveWake; });
   let pendingMarketWake = false;
+  let retainedIpoDiscovery: Record<string, unknown> | undefined;
+  const previousMarketValue = await readJson(marketPath);
+  if (previousMarketValue !== null) {
+    const previousMarket = object(previousMarketValue, "previous market monitoring");
+    const previousDiscovery = typeof previousMarket.discovery === "object"
+      && previousMarket.discovery !== null && !Array.isArray(previousMarket.discovery)
+      ? previousMarket.discovery as Record<string, unknown>
+      : {};
+    if (typeof previousDiscovery.ipos === "object" && previousDiscovery.ipos !== null
+      && !Array.isArray(previousDiscovery.ipos)) {
+      retainedIpoDiscovery = previousDiscovery.ipos as Record<string, unknown>;
+    }
+  }
   const wake = (reason: WakeReason): void => {
     if (reason === "market") pendingMarketWake = true;
     wakeResolver?.();
@@ -1461,17 +1499,22 @@ async function main(): Promise<void> {
     }
     try {
       const cycleStartedMs = Date.now();
-      const scheduledAnalysisDue = lastAnalysisMs === 0
-        || cycleStartedMs - lastAnalysisMs >= trajectory.analysis_interval_minutes * 60_000;
+      const fullMarketPollDue = lastFullMarketPollMs === 0
+        || cycleStartedMs - lastFullMarketPollMs >= trajectory.analysis_interval_minutes * 60_000;
       const [poll, market] = await Promise.all([
-        pollNews(trajectory), pollMarket(trajectory, scheduledAnalysisDue),
+        pollNews(trajectory), pollMarket(trajectory, fullMarketPollDue),
       ]);
+      if (fullMarketPollDue) lastFullMarketPollMs = cycleStartedMs;
+      retainedIpoDiscovery = retainIpoDiscovery(market, retainedIpoDiscovery);
       const marketExitWake = pendingMarketWake;
       pendingMarketWake = false;
       const activeSymbols = activeTradingSymbols(trajectory, market);
       const activeTrajectory: Trajectory = { ...trajectory, symbols: activeSymbols };
-      const realtimeNews = realtime.drainNews();
-      const combinedEvents = [...poll.events, ...realtimeNews, ...corporateActionEvents(market, activeSymbols)];
+      // Realtime news wakes the loop, while the REST poll remains the canonical
+      // LLM-gated source. Mixing the raw socket envelope into the cursor gives
+      // one story two IDs and can mark it seen before the gate has evaluated it.
+      realtime.drainNews();
+      const combinedEvents = [...poll.events, ...corporateActionEvents(market, activeSymbols)];
       poll.events = [...new Map(combinedEvents.map((event) => [event.key, event])).values()];
       await writeJsonAtomic(marketPath, market);
       const outcomeValue = await readJson(outcomesPath);
@@ -1486,6 +1529,7 @@ async function main(): Promise<void> {
       const passedPending = mergePassedPendingNews(
         cursor?.passed_pending ?? [], poll.passed_events, detected.fresh,
       );
+      const passedFresh = mergePassedPendingNews([], poll.passed_events, detected.fresh);
       const newsGateHealthy = poll.gate_errors.length === 0;
       const cycleCursor: Cursor = { ...detected.cursor, passed_pending: passedPending };
       await writeJsonAtomic(cursorPath, cycleCursor);
@@ -1577,10 +1621,10 @@ async function main(): Promise<void> {
           runtime = { ...runtime, heartbeat_at: new Date().toISOString() };
           void writeJsonAtomic(runtimePath, runtime);
         }, 15_000);
+        const cycleId = randomUUID();
         let result: CycleResult | null = null;
         try {
           const scorecard = buildOutcomeScorecard(outcomes);
-          const cycleId = randomUUID();
           const triggers = [
             ...(analysisDue ? ["scheduled_analysis"] : []),
             ...(detected.fresh.length > 0 ? ["fresh_news"] : []),
@@ -1588,8 +1632,30 @@ async function main(): Promise<void> {
           ];
           await appendTimeline(
             "trigger", "ok", `Analysis cycle started: ${triggers.join(", ") || "manual wake"}.`,
-            { cycle_id: cycleId, triggers, fresh_news: detected.fresh.length }, null,
+            {
+              cycle_id: cycleId,
+              triggers,
+              news_discovered: detected.fresh.length,
+              news_passed: passedFresh.length,
+            }, null,
           );
+          for (const event of passedFresh) {
+            const gate = typeof event.gate === "object" && event.gate !== null
+              && !Array.isArray(event.gate) ? event.gate : {};
+            await appendTimeline(
+              "news", "ok", event.headline,
+              {
+                cycle_id: cycleId,
+                decision: "PASS",
+                reason: typeof gate.reason === "string" ? gate.reason : "Passed the bounded news gate.",
+                source: event.source,
+                published_at: event.published_at,
+                symbols: event.symbols,
+                summary: event.summary,
+                url: event.url,
+              }, null,
+            );
+          }
           await appendTimeline(
             "tool_call", "ok", "Calling deterministic market research and broker snapshot.",
             {
@@ -1852,7 +1918,7 @@ async function main(): Promise<void> {
           pipeline_note: result.action === "SUBMITTED"
             ? "Order submitted; watching positions and fresh signals"
             : result.reason,
-          delivered_alerts: runtime.delivered_alerts + detected.fresh.length,
+          delivered_alerts: runtime.delivered_alerts + passedFresh.length,
         };
         outcomes.push({
           session_id: result.sessionId,
@@ -1862,12 +1928,12 @@ async function main(): Promise<void> {
           forward_returns_pct: {},
           strategy_directions: result.strategyDirections,
         });
-        if (detected.fresh.length > 0) {
+        if (passedFresh.length > 0) {
           await appendJsonLine(alertsPath, {
             at: new Date().toISOString(),
             kind: "delivery",
             status: "delivered",
-            count: detected.fresh.length,
+            count: passedFresh.length,
             session_id: result.sessionId,
             action: result.action,
           });

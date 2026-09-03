@@ -14,6 +14,7 @@ import {
   isStaleTraderSessionError,
   materializeTradeCandidates,
   mergePassedPendingNews,
+  retainIpoDiscovery,
   newYorkTradingDate,
   publicRunnerError,
   readActiveTraderMemory,
@@ -102,8 +103,25 @@ test("cursor seeds history, retains pending items, and does not duplicate delive
   const retry = detectNewEvents([event], {
     initialized_at: "x", seen: [event.key], pending: [event], passed_pending: [event],
   });
-  assert.deepEqual(retry.fresh, [event]);
+  assert.deepEqual(retry.fresh, []);
   assert.deepEqual(retry.newlyDiscovered, []);
+  assert.deepEqual(retry.cursor.pending, [event]);
+});
+
+test("lightweight market polls retain the last full IPO discovery result", () => {
+  const cached = { enabled: true, status: "ok", candidates: [{ symbol: "NEWC" }] };
+  const lightweight: MarketResult = { ...market, discovery: { enabled: false } };
+  assert.deepEqual(retainIpoDiscovery(lightweight, cached), cached);
+  assert.deepEqual(lightweight.discovery.ipos, {
+    ...cached,
+    cached_between_full_polls: true,
+  });
+  const refreshed: MarketResult = {
+    ...market, discovery: { ipos: { status: "degraded", candidates: [] } },
+  };
+  assert.deepEqual(retainIpoDiscovery(refreshed, cached), {
+    status: "degraded", candidates: [],
+  });
 });
 
 test("off-hours passed news remains pending across later empty polls", () => {

@@ -234,6 +234,24 @@ function executionJournal(event: TraderTimelineEvent): string {
   ].filter((section) => section !== "").join("\n\n"));
 }
 
+function newsJournal(event: TraderTimelineEvent): string {
+  const symbols = stringList(event.details.symbols, 12)
+    .map((symbol) => `\`${symbol.replaceAll("`", "")}\``)
+    .join(" ");
+  const headline = markdownText(event.summary, 1_000) ?? "Untitled news event";
+  const summary = markdownText(event.details.summary, 1_200);
+  const reason = markdownText(event.details.reason, 1_000) ?? "Passed the bounded news gate.";
+  const source = markdownText(event.details.source, 80) ?? "unknown source";
+  const published = markdownText(event.details.published_at, 80);
+  return capJournal([
+    `**News · PASS${symbols ? ` · ${symbols}` : ""}**`,
+    headline,
+    summary ?? "",
+    `**Why forwarded**\n\n${reason}`,
+    [source, published].filter(Boolean).join(" · "),
+  ].filter(Boolean).join("\n\n"));
+}
+
 function safeForPublicChat(value: unknown, depth = 0): unknown {
   if (depth > 6) return "[truncated]";
   if (typeof value === "string") return value.length > 2_000 ? `${value.slice(0, 2_000)}…` : value;
@@ -331,6 +349,7 @@ function modelTextEvent(event: TraderTimelineEvent, content: string, suffix = "m
  * involved.
  */
 export function timelineEventToTurnEvents(event: TraderTimelineEvent): NativeTurnEvent[] {
+  if (event.kind === "news") return [modelTextEvent(event, newsJournal(event), "news")];
   if (event.kind === "tool_call") return [toolCallEvent(event)];
   if (event.kind === "tool_result" || event.kind === "critics") {
     return [toolResponseEvent(event)];

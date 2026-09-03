@@ -30,7 +30,7 @@ DEFAULT_RESEARCH_URL = "http://127.0.0.1:8020/mcp"
 SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 APPROVABLE_TOOL_NAMES = frozenset({"append_trader_memory"})
 TIMELINE_KINDS = frozenset({
-    "trigger", "reasoning", "tool_call", "tool_result",
+    "trigger", "news", "reasoning", "tool_call", "tool_result",
     "critics", "plan", "execution", "risk_exit", "session",
 })
 TIMELINE_STATUSES = frozenset({"ok", "parked", "submitted", "degraded"})

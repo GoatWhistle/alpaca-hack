@@ -18,7 +18,7 @@ MAX_SUMMARY_CHARS = 400
 MAX_MEMORY_ITEMS = 8
 MAX_TIMELINE_BYTES = 512 * 1024
 TIMELINE_KINDS = {
-    "trigger", "reasoning", "tool_call", "tool_result",
+    "trigger", "news", "reasoning", "tool_call", "tool_result",
     "critics", "plan", "execution", "risk_exit", "session",
 }
 TIMELINE_STATUSES = {"ok", "parked", "submitted", "degraded"}

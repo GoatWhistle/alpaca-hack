@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import pytest
 
-from mandate_research.live_comparison import compare_live_signals
+from mandate_research import live_comparison
+from mandate_research.live_comparison import _fetch_json, compare_live_signals
 
 
 NOW = datetime(2026, 8, 27, 12, tzinfo=timezone.utc)
@@ -13,6 +15,40 @@ SEC = b"""<feed xmlns="http://www.w3.org/2005/Atom"><entry>
 </entry></feed>"""
 APPLE = b"""<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>apple-1</id>
 <title>Apple product update</title><updated>2026-08-27T09:30:00Z</updated></entry></feed>"""
+
+
+def test_market_get_retries_one_transient_transport_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MANDATE_USE_ALPACA_PROXY", "false")
+    request = httpx.Request("GET", "https://data.alpaca.markets/v2/test")
+    calls = 0
+
+    def get(*_args, **_kwargs) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.ConnectTimeout("transient", request=request)
+        return httpx.Response(200, request=request, json={"ok": True})
+
+    monkeypatch.setattr(live_comparison.httpx, "get", get)
+    monkeypatch.setattr(live_comparison.time, "sleep", lambda _seconds: None)
+    assert _fetch_json(str(request.url), {}) == {"ok": True}
+    assert calls == 2
+
+
+def test_market_get_does_not_retry_nontransient_http_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MANDATE_USE_ALPACA_PROXY", "false")
+    request = httpx.Request("GET", "https://data.alpaca.markets/v2/test")
+    calls = 0
+
+    def get(*_args, **_kwargs) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(404, request=request, json={"message": "not found"})
+
+    monkeypatch.setattr(live_comparison.httpx, "get", get)
+    with pytest.raises(httpx.HTTPStatusError):
+        _fetch_json(str(request.url), {})
+    assert calls == 1
 
 
 def fake_fetch(url: str, headers: dict[str, str]) -> dict:

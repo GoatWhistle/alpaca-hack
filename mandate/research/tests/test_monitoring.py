@@ -5,10 +5,17 @@ from typing import Any
 
 import pytest
 
-from mandate_research.monitoring import collect_market_monitoring
+from mandate_research.monitoring import _ipo_calendar_months, collect_market_monitoring
 
 
 NOW = datetime(2026, 8, 27, 15, 0, tzinfo=timezone.utc)
+
+
+def test_ipo_calendar_queries_every_month_in_the_lookback_window() -> None:
+    checked_at = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+    assert _ipo_calendar_months(checked_at, 45) == ["2026-09", "2026-08", "2026-07"]
+    year_boundary = datetime(2027, 1, 4, 12, tzinfo=timezone.utc)
+    assert _ipo_calendar_months(year_boundary, 45) == ["2027-01", "2026-12", "2026-11"]
 
 
 def test_collect_monitoring_computes_quality_and_falls_back_to_iex(monkeypatch: Any) -> None:

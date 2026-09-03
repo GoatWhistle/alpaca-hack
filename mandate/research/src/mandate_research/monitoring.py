@@ -23,6 +23,7 @@ NEW_YORK = ZoneInfo("America/New_York")
 MACRO_MOVE_THRESHOLD_PCT = Decimal("0.60")
 IPO_LOOKBACK_DAYS = 45
 MAX_IPO_CANDIDATES = 10
+MAX_ASSET_WORKERS = 4
 TICKER_PATTERN = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
 VOLUME_CURVE = (
     (0, Decimal("0.010")),
@@ -257,6 +258,17 @@ def _parse_priced_ipos(
     return sorted(candidates.values(), key=lambda item: (item["listing_date"], item["symbol"]), reverse=True)
 
 
+def _ipo_calendar_months(checked_at: datetime, lookback_days: int) -> list[str]:
+    start = (checked_at - timedelta(days=lookback_days)).date().replace(day=1)
+    end = checked_at.date().replace(day=1)
+    months: list[str] = []
+    cursor = start
+    while cursor <= end:
+        months.append(cursor.strftime("%Y-%m"))
+        cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return list(reversed(months))
+
+
 def _ipo_research(
     *,
     checked_at: datetime,
@@ -268,10 +280,7 @@ def _ipo_research(
     min_relative_volume: Decimal,
     fetcher: JsonFetcher,
 ) -> dict[str, Any]:
-    months = sorted({
-        checked_at.strftime("%Y-%m"),
-        (checked_at - timedelta(days=lookback_days)).strftime("%Y-%m"),
-    }, reverse=True)
+    months = _ipo_calendar_months(checked_at, lookback_days)
     nasdaq_headers = {
         "Accept": "application/json, text/plain, */*",
         "User-Agent": "Mozilla/5.0 (compatible; MandateIPOResearch/1.0)",
@@ -298,7 +307,7 @@ def _ipo_research(
         )
         return candidate, asset, status
 
-    with ThreadPoolExecutor(max_workers=min(10, max(1, len(checked_candidates)))) as executor:
+    with ThreadPoolExecutor(max_workers=min(MAX_ASSET_WORKERS, max(1, len(checked_candidates)))) as executor:
         asset_results = list(executor.map(fetch_asset, checked_candidates))
     for candidate, asset, status in asset_results:
         if status["status"] != "ok":
@@ -527,7 +536,7 @@ def collect_market_monitoring(
             )
             return symbol, asset, asset_status
 
-        with ThreadPoolExecutor(max_workers=min(10, max(1, len(qualified_symbols)))) as executor:
+        with ThreadPoolExecutor(max_workers=min(MAX_ASSET_WORKERS, max(1, len(qualified_symbols)))) as executor:
             discovered_assets = list(executor.map(fetch_discovered_asset, qualified_symbols))
         for symbol, asset, asset_status in discovered_assets:
             if (
