@@ -434,6 +434,7 @@ export function buildAutonomyPrompt(
   const executableCandidateIds = decisionCandidates
     .filter((candidate) => candidate.execution_eligible === true)
     .map((candidate) => candidate.candidate_id);
+  const positionActionEvidence = allowedPositionActionEvidence(precomputedEvaluation, activeStrategy);
   return [
     "AUTOMATIC PAPER TRADE PLANNING TURN from the trusted local runner.",
     "Return a trade.plan.v3 plan only. Never call tools, execute orders, request approval, or start subagents.",
@@ -461,6 +462,7 @@ export function buildAutonomyPrompt(
     "Hypotheses may reference any decision candidate. Steps may reference only executable candidate_ids. A candidate with execution_eligible=false is assessment context and can never appear in steps.",
     "EXECUTE_PLAN may contain one to three unique ordered steps, each with reason, executable candidate_id, and evidence_refs. Every selected step must have a matching hypothesis. If the executable id list is empty you must PARK with no steps.",
     "position_actions must contain exactly one decision for every open underlying in the position watcher digest. HOLD uses fraction 0, REDUCE uses 0.5, EXIT uses 1. Never name a non-open underlying. A PARK entry decision may still REDUCE or EXIT positions.",
+    `Position-action evidence_refs must be copied verbatim from this allowlist: ${JSON.stringify(positionActionEvidence)}`,
     "The watcher is advisory: explicitly accept or override it from supplied position/strategy evidence. If watcher status is timeout or error while positions exist, emit HOLD using position.<UNDERLYING>.watcher_unavailable; deterministic hard-risk exits remain independent.",
     "Any underlying listed in fast_exits already entered the deterministic fast-exit path. Emit HOLD for it in this plan and never propose a new entry on it; any unfilled remainder is re-evaluated from fresh broker state next cycle.",
     "Include one to five candidate hypotheses even when PARKing. Each exact hypothesis has candidate_id, thesis, confidence (low|medium|high), non-empty supports, contradicts (possibly empty), and a concrete invalidation. References must point into supplied evidence.",
@@ -546,6 +548,18 @@ function compactTradeCandidates(candidates: TradeCandidate[]): Record<string, un
       },
     };
   });
+}
+
+function allowedPositionActionEvidence(
+  evaluation: Record<string, unknown>,
+  activeStrategy?: ActiveStrategy,
+): string[] {
+  return compactOpenPositions(evaluation, activeStrategy).flatMap((position) => [
+    ...positionEvidenceRefs(position),
+    `position.${position.underlying}.watcher_state`,
+    `position.${position.underlying}.watcher_recommendation`,
+    `position.${position.underlying}.watcher_unavailable`,
+  ]);
 }
 
 function optionUnderlying(symbol: string): string | null {
@@ -1986,10 +2000,7 @@ async function runTraderCycle(
     .map((candidate) => candidate.candidate_id);
   const allowedNewsEvidence = alerts.flatMap((event) => newsEvidenceRef(event) ?? []);
   const openUnderlyings = compactOpenPositions(evaluation, activeStrategy).map((item) => item.underlying);
-  const allowedPositionEvidence = [
-    ...compactOpenPositions(evaluation, activeStrategy).flatMap(positionEvidenceRefs),
-    ...openUnderlyings.map((underlying) => `position.${underlying}.watcher_unavailable`),
-  ];
+  const allowedPositionEvidence = allowedPositionActionEvidence(evaluation, activeStrategy);
   let parsedPlan = parseTradePlan(
     turn.text, cycleId, decisionCandidateIds, executableCandidateIds, allowedNewsEvidence,
     openUnderlyings, allowedPositionEvidence,

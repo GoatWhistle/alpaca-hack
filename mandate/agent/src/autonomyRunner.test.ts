@@ -181,6 +181,7 @@ test("planner prompt contains full candidates, critics, and only the canonical c
   assert.match(prompt, /trade\.plan\.v3/u);
   assert.match(prompt, /entry-1-AAPL/u);
   assert.match(prompt, /Executable candidate_ids.*entry-1-AAPL/u);
+  assert.match(prompt, /Position-action evidence_refs must be copied verbatim/u);
   assert.match(prompt, /relative volume remains elevated/u);
   assert.match(prompt, /untrusted data/u);
   assert.doesNotMatch(prompt, /DECISION_JSON|PROPOSE|human approval|place_stock_order/u);
