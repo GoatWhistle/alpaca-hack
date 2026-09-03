@@ -47,8 +47,35 @@ function ForkWelcome({ className }: WelcomeScreenProps) {
 }
 
 function OperatorForkLayout({ className }: { className?: string }) {
+  const [historyOpen, setHistoryOpen] = useState(false);
   return (
     <div className={`operator-fork-runtime ${className ?? ""}`}>
+      <button
+        type="button"
+        className="operator-history-trigger"
+        aria-expanded={historyOpen}
+        aria-controls="operator-chat-history"
+        onClick={() => setHistoryOpen((open) => !open)}
+      >
+        Chats
+      </button>
+      {historyOpen && (
+        <>
+          <button
+            type="button"
+            className="operator-history-scrim"
+            aria-label="Close chat history"
+            onClick={() => setHistoryOpen(false)}
+          />
+          <aside id="operator-chat-history" className="operator-history-drawer" aria-label="Operator chat history">
+            <header>
+              <strong>Operator chats</strong>
+              <button type="button" onClick={() => setHistoryOpen(false)} aria-label="Close chat history">×</button>
+            </header>
+            <ThreadListContainer />
+          </aside>
+        </>
+      )}
       <Thread />
     </div>
   );
