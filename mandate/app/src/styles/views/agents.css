@@ -52,14 +52,23 @@
 .agent-edges {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
 }
 
 /* Edges are always visible at full weight — one step brighter than Iron so
    the curves read on Charcoal — and only the live stage adds Ice emphasis. */
 .agent-edge {
   fill: none;
-  stroke: #54555d;
-  stroke-width: 1.5;
+  stroke: #666872;
+  stroke-width: 1.75;
+  marker-end: url(#agent-arrow);
+}
+
+.agent-edges marker path {
+  fill: #777983;
 }
 
 .agent-edge--return {
@@ -93,6 +102,7 @@
   letter-spacing: .08em;
   text-transform: uppercase;
   white-space: nowrap;
+  z-index: 1;
 }
 
 /* Node chip — a small pill centred on its canvas point. */
@@ -109,6 +119,7 @@
   cursor: default;
   outline: none;
   transition: border-color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+  z-index: 2;
 }
 
 .agent-chip:hover,
@@ -173,20 +184,20 @@
   pointer-events: none;
 }
 
-/* Hover card — opens centred ON the node and hides it under the card.
-   Edge-most nodes clamp the card horizontally; top/bottom rows flip it
-   below/above so it never leaves the canvas. */
-.agent-tip {
+/* One bounded inspector replaces per-node popovers. It lives inside the
+   canvas and opens opposite the hovered node, so a long source report cannot
+   escape the graph or cover the node being inspected. */
+.agent-inspector {
   position: absolute;
   top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) scale(.97);
-  width: max-content;
-  max-width: min(300px, 80vw);
+  transform: translateY(-50%);
+  width: min(390px, calc(50% - 36px));
+  max-height: min(360px, calc(100% - 32px));
+  overflow: auto;
   padding: calc(var(--space-2) + 2px) calc(var(--space-3) + 2px);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  background: var(--surface-inset);
+  background: color-mix(in srgb, var(--surface-inset) 96%, transparent);
   box-shadow: 0 10px 32px rgb(0 0 0 / 0.55);
   display: flex;
   flex-direction: column;
@@ -194,61 +205,33 @@
   text-align: left;
   color: var(--ink-muted);
   font: 400 var(--text-xs)/1.55 var(--font-ui);
-  opacity: 0;
   pointer-events: none;
-  z-index: var(--z-sticky);
-  transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+  z-index: 4;
+  animation: agent-inspector-in var(--dur-fast) var(--ease);
 }
 
-.agent-chip:hover .agent-tip,
-.agent-chip:focus-visible .agent-tip {
-  opacity: 1;
-  transform: translate(-50%, -50%) scale(1);
+.agent-inspector--left { left: 16px; }
+.agent-inspector--right { right: 16px; }
+
+@keyframes agent-inspector-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-/* The hovered node retreats under its card — but only where the card
-   actually covers it (centre/west/east anchors). */
-.agent-chip:not(.agent-chip--south):not(.agent-chip--north):hover > b,
-.agent-chip:not(.agent-chip--south):not(.agent-chip--north):focus-visible > b { opacity: 0; }
-
-.agent-chip--west .agent-tip { left: 0; transform: translate(0, -50%) scale(.97); }
-.agent-chip--west:hover .agent-tip,
-.agent-chip--west:focus-visible .agent-tip { transform: translate(0, -50%) scale(1); }
-
-.agent-chip--east .agent-tip { left: auto; right: 0; transform: translate(0, -50%) scale(.97); }
-.agent-chip--east:hover .agent-tip,
-.agent-chip--east:focus-visible .agent-tip { transform: translate(0, -50%) scale(1); }
-
-.agent-chip--south .agent-tip { top: calc(100% + 8px); transform: translate(-50%, 0) scale(.97); }
-.agent-chip--south:hover .agent-tip,
-.agent-chip--south:focus-visible .agent-tip { transform: translate(-50%, 0) scale(1); }
-
-.agent-chip--north .agent-tip { top: auto; bottom: calc(100% + 8px); transform: translate(-50%, -0) scale(.97); }
-.agent-chip--north:hover .agent-tip,
-.agent-chip--north:focus-visible .agent-tip { transform: translate(-50%, 0) scale(1); }
-
-/* Corner combos: keep the horizontal clamp, apply the vertical flip. */
-.agent-chip--west.agent-chip--south .agent-tip { transform: translate(0, 0) scale(.97); }
-.agent-chip--west.agent-chip--south:hover .agent-tip,
-.agent-chip--west.agent-chip--south:focus-visible .agent-tip { transform: translate(0, 0) scale(1); }
-.agent-chip--east.agent-chip--south .agent-tip { transform: translate(0, 0) scale(.97); }
-.agent-chip--east.agent-chip--south:hover .agent-tip,
-.agent-chip--east.agent-chip--south:focus-visible .agent-tip { transform: translate(0, 0) scale(1); }
-
-.agent-tip b {
+.agent-inspector b {
   color: var(--ink);
   font: 500 var(--text-2xs) var(--font-mono);
   letter-spacing: .1em;
   text-transform: uppercase;
 }
 
-.agent-tip i {
+.agent-inspector i {
   color: var(--ink-muted);
   font: 400 var(--text-2xs)/1.5 var(--font-mono);
   font-style: normal;
 }
 
-.agent-tip i:last-child {
+.agent-inspector i:last-child {
   color: var(--accent);
   font-weight: 500;
   letter-spacing: .1em;

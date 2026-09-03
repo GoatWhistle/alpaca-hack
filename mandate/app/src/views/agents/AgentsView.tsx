@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { getTraderTimeline, type Snapshot, type TraderTimelineEvent } from "../../lib/api";
 
 type Tone = "running" | "healthy" | "degraded" | "idle";
@@ -88,8 +88,9 @@ function sourceNodes(runtime: Record<string, unknown>): GraphNode[] {
 }
 
 /* ── Graph geometry ───────────────────────────────────────────────────────
-   Nodes live on a normalized 100×100 canvas rendered at a fixed height;
-   edges are drawn in pixel space so curves and dash patterns stay uniform. */
+   Nodes and edges share a normalized 100×100 canvas. Keeping the SVG in the
+   same coordinate system as the chips avoids stale pixel measurements while
+   the navigation shell is resizing. */
 
 type Pos = { x: number; y: number };
 
@@ -158,14 +159,22 @@ const NODE_STAGES: Record<string, string[]> = {
   broker: ["execution"],
 };
 
-function edgePath(a: Pos, b: Pos, bend: Pos | undefined, w: number, h: number): string {
-  const x1 = (a.x / 100) * w;
-  const y1 = (a.y / 100) * h;
-  const x2 = (b.x / 100) * w;
-  const y2 = (b.y / 100) * h;
-  const cx = ((a.x + b.x) / 2 + (bend?.x ?? 0)) / 100 * w;
-  const cy = ((a.y + b.y) / 2 + (bend?.y ?? 0)) / 100 * h;
-  return `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`;
+function edgePath(a: Pos, b: Pos, bend?: Pos): string {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const distance = Math.hypot(dx, dy) || 1;
+  // Stop outside the chips so the arrowhead remains visible instead of being
+  // buried under the destination node.
+  const trim = Math.min(5.5, distance * 0.22);
+  const ux = dx / distance;
+  const uy = dy / distance;
+  const start = { x: a.x + ux * trim, y: a.y + uy * trim };
+  const end = { x: b.x - ux * trim, y: b.y - uy * trim };
+  const control = {
+    x: (a.x + b.x) / 2 + (bend?.x ?? 0),
+    y: (a.y + b.y) / 2 + (bend?.y ?? 0),
+  };
+  return `M ${start.x} ${start.y} Q ${control.x} ${control.y} ${end.x} ${end.y}`;
 }
 
 function nodeTooltip(node: GraphNode): ReactNode {
@@ -190,25 +199,33 @@ interface ChipProps {
   problem?: string;
   aria: string;
   tooltip: ReactNode;
+  onInspect: (inspection: Inspection | null) => void;
 }
 
-function Chip({ at, name, tone, live, primary, label, problem, aria, tooltip }: ChipProps) {
-  // The hover card opens ON TOP of the node, hiding it. Edge- and corner-most
-  // nodes clamp the card toward the canvas centre so it never clips.
-  const hAnchor = at.x <= 20 ? " agent-chip--west" : at.x >= 80 ? " agent-chip--east" : "";
-  const vAnchor = at.y <= 15 ? " agent-chip--south" : at.y >= 82 ? " agent-chip--north" : "";
+interface Inspection {
+  nodeId: string;
+  at: Pos;
+  content: ReactNode;
+}
+
+function Chip({ at, name, tone, live, primary, label, problem, aria, tooltip, onInspect }: ChipProps) {
+  const showInspection = () => onInspect({ nodeId: name, at, content: tooltip });
+  const hideInspection = () => onInspect(null);
   return (
     <div
-      className={`agent-chip${primary ? " agent-chip--primary" : ""}${live ? " is-live" : ""}${hAnchor}${vAnchor}`}
+      className={`agent-chip${primary ? " agent-chip--primary" : ""}${live ? " is-live" : ""}`}
       data-tone={tone}
       style={{ left: `${at.x}%`, top: `${at.y}%` }}
       tabIndex={0}
       aria-label={aria}
+      onMouseEnter={showInspection}
+      onMouseLeave={hideInspection}
+      onFocus={showInspection}
+      onBlur={hideInspection}
     >
       <i aria-hidden="true" />
       <b>{label ?? name}</b>
       {problem && <small>{compact(problem, 110)}</small>}
-      <span className="agent-tip" role="tooltip" aria-hidden="true">{tooltip}</span>
     </div>
   );
 }
@@ -220,8 +237,7 @@ function chipAria(node: GraphNode): string {
 export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; paused: boolean }) {
   const [events, setEvents] = useState<TraderTimelineEvent[]>([]);
   const [timelineError, setTimelineError] = useState<string | null>(null);
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const [canvasSize, setCanvasSize] = useState({ w: 1000, h: 580 });
+  const [inspection, setInspection] = useState<Inspection | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -236,16 +252,6 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
       });
     return () => controller.abort();
   }, [snapshot?.generated_at, paused]);
-
-  useLayoutEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    const measure = () => setCanvasSize({ w: el.clientWidth, h: el.clientHeight });
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
 
   const graph = useMemo(() => {
     const runtime = snapshot?.autonomy.runtime ?? {};
@@ -403,8 +409,6 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
   const feedProblem = feeds.find((f) => f.problem)?.problem;
 
   const isLive = (stages?: string[]) => Boolean(stages?.includes(graph.stage));
-  const { w, h } = canvasSize;
-
   return (
     <div className="mandate-chrome agents-view">
       <main id="main-content" tabIndex={-1}>
@@ -420,8 +424,18 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
           </header>
 
           <div className="agent-canvas-wrap">
-            <div className="agent-canvas" ref={canvasRef}>
-              <svg className="agent-edges" width={w} height={h} aria-hidden="true">
+            <div className="agent-canvas">
+              <svg
+                className="agent-edges"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                aria-hidden="true"
+              >
+                <defs>
+                  <marker id="agent-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                    <path d="M 0 0 L 8 4 L 0 8 z" />
+                  </marker>
+                </defs>
                 {EDGES.map((edge) => (
                   <path
                     key={edge.id}
@@ -431,7 +445,9 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
                       edge.kind === "ondemand" ? "agent-edge--ondemand" : "",
                       isLive(edge.stages) ? "is-live" : "",
                     ].filter(Boolean).join(" ")}
-                    d={edgePath(POS[edge.from], POS[edge.to], edge.bend, w, h)}
+                    d={edgePath(POS[edge.from], POS[edge.to], edge.bend)}
+                    markerEnd="url(#agent-arrow)"
+                    vectorEffect="non-scaling-stroke"
                   />
                 ))}
               </svg>
@@ -463,6 +479,7 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
                     <i>Collect attributable market events</i>
                   </>
                 }
+                onInspect={setInspection}
               />
               {graph.sources
                 .filter((node) => node.id === "ipo-researcher" || node.id === "market-monitor")
@@ -477,6 +494,7 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
                     problem={node.problem}
                     aria={chipAria(node)}
                     tooltip={nodeTooltip(node)}
+                    onInspect={setInspection}
                   />
                 ))}
 
@@ -491,6 +509,7 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
                   problem={node.problem}
                   aria={chipAria(node)}
                   tooltip={nodeTooltip(node)}
+                  onInspect={setInspection}
                 />
               ))}
 
@@ -502,6 +521,7 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
                 live={graph.operator.tone === "running"}
                 aria={chipAria(graph.operator)}
                 tooltip={nodeTooltip(graph.operator)}
+                onInspect={setInspection}
               />
 
               <Chip
@@ -514,6 +534,7 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
                 problem={graph.trader.problem}
                 aria={chipAria(graph.trader)}
                 tooltip={nodeTooltip(graph.trader)}
+                onInspect={setInspection}
               />
 
               {graph.critics.map((node, index) => (
@@ -527,6 +548,7 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
                   problem={node.problem}
                   aria={chipAria(node)}
                   tooltip={nodeTooltip(node)}
+                  onInspect={setInspection}
                 />
               ))}
 
@@ -541,8 +563,20 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
                   problem={node.problem}
                   aria={chipAria(node)}
                   tooltip={nodeTooltip(node)}
+                  onInspect={setInspection}
                 />
               ))}
+
+              {inspection && (
+                <aside
+                  className={`agent-inspector agent-inspector--${inspection.at.x < 50 ? "right" : "left"}`}
+                  role="tooltip"
+                  aria-live="polite"
+                  key={inspection.nodeId}
+                >
+                  {inspection.content}
+                </aside>
+              )}
             </div>
           </div>
 
