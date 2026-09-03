@@ -105,6 +105,7 @@ const POS: Record<string, Pos> = {
   criticRisk: { x: 50, y: 66 },
   criticMarket: { x: 62, y: 77 },
   criticExec: { x: 74, y: 66 },
+  positionWatcher: { x: 63, y: 86 },
   executor: { x: 89, y: 30 },
   broker: { x: 89, y: 68 },
 };
@@ -133,6 +134,8 @@ const EDGES: Edge[] = [
   { id: "e-ret-risk", from: "criticRisk", to: "trader", kind: "return", bend: { x: -2, y: -7 } },
   { id: "e-ret-market", from: "criticMarket", to: "trader", kind: "return", bend: { x: -1, y: -8 } },
   { id: "e-ret-exec", from: "criticExec", to: "trader", kind: "return", bend: { x: 2, y: -7 } },
+  { id: "e-broker-watch", from: "broker", to: "positionWatcher", bend: { x: 0, y: 4 } },
+  { id: "e-watch-trader", from: "positionWatcher", to: "trader", kind: "return", bend: { x: -12, y: 0 }, stages: ["signals", "hypothesis", "challenge"] },
   { id: "e-operator", from: "operator", to: "trader", kind: "ondemand" },
   { id: "e-plan", from: "trader", to: "executor", stages: ["broker", "execution", "risk_exit"], label: { x: 76, y: 22 } },
   { id: "e-broker", from: "executor", to: "broker", bend: { x: 7, y: 0 } },
@@ -141,7 +144,7 @@ const EDGES: Edge[] = [
 const EDGE_LABELS: { text: string; at: Pos }[] = [
   { text: "events · tape", at: { x: 23, y: 35 } },
   { text: "evidence", at: { x: 50, y: 22 } },
-  { text: "trade.plan.v2", at: { x: 76, y: 22 } },
+  { text: "trade.plan.v3", at: { x: 76, y: 22 } },
   { text: "hypothesis ⇄ critic results", at: { x: 63, y: 57 } },
 ];
 
@@ -155,6 +158,7 @@ const NODE_STAGES: Record<string, string[]> = {
   criticRisk: ["challenge"],
   criticMarket: ["challenge"],
   criticExec: ["challenge"],
+  positionWatcher: ["signals", "hypothesis", "challenge", "risk_exit"],
   executor: ["risk_exit", "broker", "execution"],
   broker: ["execution"],
 };
@@ -265,6 +269,8 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
     const plan = latest(events, "plan");
     const research = latest(events, "tool_result");
     const execution = latest(events, "execution") ?? latest(events, "risk_exit");
+    const watchEvent = latest(events, "position_watch");
+    const watchStatus = text(record(watchEvent?.details).status, watchEvent?.status ?? "ready");
     const stage = text(runtime.pipeline_stage, "monitoring");
     const runnerHealthy = runtime.status !== "degraded" && !runtime.last_error;
     const planReason = text(record(record(plan?.details).plan).reason, plan?.summary ?? "No completed plan yet");
@@ -362,6 +368,17 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
         meta: modelFor("main_trader", "zai/glm-5-3-flash"),
       } satisfies GraphNode,
       critics: [critic("risk"), critic("market"), critic("execution")],
+      positionWatcher: {
+        id: idFor("position_watcher", "mandate-position-watcher"),
+        name: "Position Watcher",
+        kind: "advisory agent",
+        tone: watchStatus === "timeout" || watchStatus === "error" ? "degraded" : stage === "signals" ? "running" : "healthy",
+        status: stage === "signals" ? "assessing" : watchStatus,
+        task: "Re-judge every open position; advise the trader, close an invalidated thesis at once",
+        result: compact(watchEvent?.summary ?? "No open-position assessment retained"),
+        problem: watchStatus === "timeout" || watchStatus === "error" ? compact(watchEvent?.summary ?? watchStatus) : undefined,
+        meta: modelFor("position_watcher", "zai/glm-4-5-air"),
+      } satisfies GraphNode,
       operator: {
         id: idFor("operator", "mandate-operator-agent"),
         name: "Operator Agent",
@@ -400,7 +417,7 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
     };
   }, [events, snapshot, timelineError]);
 
-  const allNodes = [...graph.sources, ...graph.research, graph.trader, ...graph.critics, graph.operator, ...graph.action];
+  const allNodes = [...graph.sources, ...graph.research, graph.trader, graph.positionWatcher, ...graph.critics, graph.operator, ...graph.action];
   const degradedCount = allNodes.filter((node) => node.tone === "degraded").length;
   const feeds = graph.sources.filter((node) => node.id.startsWith("source-"));
   const feedTone: Tone = feeds.some((f) => f.tone === "degraded")
@@ -534,6 +551,18 @@ export function AgentsView({ snapshot, paused }: { snapshot: Snapshot | null; pa
                 problem={graph.trader.problem}
                 aria={chipAria(graph.trader)}
                 tooltip={nodeTooltip(graph.trader)}
+                onInspect={setInspection}
+              />
+
+              <Chip
+                at={POS.positionWatcher}
+                name={graph.positionWatcher.name}
+                label="Position watcher"
+                tone={graph.positionWatcher.tone}
+                live={isLive(NODE_STAGES.positionWatcher)}
+                problem={graph.positionWatcher.problem}
+                aria={chipAria(graph.positionWatcher)}
+                tooltip={nodeTooltip(graph.positionWatcher)}
                 onInspect={setInspection}
               />
 

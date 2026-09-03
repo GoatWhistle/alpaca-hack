@@ -129,6 +129,15 @@ function decisionJournal(plan: Record<string, unknown>, fallback: string): strin
     sections.push(`### Candidate plan\n\n${rendered.join("\n")}`);
   }
 
+  const positionActions = Array.isArray(plan.position_actions) ? plan.position_actions.slice(0, 6) : [];
+  if (positionActions.length > 0) {
+    const rendered = positionActions.map((value) => {
+      const item = record(value);
+      return `- **${cell(item.underlying, 16)} · ${cell(item.action, 16)}** — ${cell(item.reason, 220)}`;
+    });
+    sections.push(`### Open book decisions\n\n${rendered.join("\n")}`);
+  }
+
   const resolutions = Array.isArray(plan.critic_resolutions)
     ? plan.critic_resolutions.slice(0, 3)
     : [];
@@ -313,6 +322,36 @@ function criticResultsJournal(event: TraderTimelineEvent): string {
   ].join("\n\n"));
 }
 
+function positionWatchJournal(event: TraderTimelineEvent): string {
+  const watch = record(event.details.watch);
+  const assessments = Array.isArray(watch.assessments) ? watch.assessments.slice(0, 6) : [];
+  const positions = new Map(
+    (Array.isArray(event.details.positions) ? event.details.positions : [])
+      .slice(0, 6)
+      .map((value) => {
+        const position = record(value);
+        return [String(position.underlying ?? ""), position] as const;
+      }),
+  );
+  const rows = assessments.map((value) => {
+    const item = record(value);
+    const position = positions.get(String(item.underlying ?? "")) ?? {};
+    const pnl = Number(position.unrealized_pl ?? 0);
+    const pnlPct = Number(position.unrealized_plpc ?? 0) * 100;
+    const pnlText = Number.isFinite(pnl) && Number.isFinite(pnlPct)
+      ? `${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} · ${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`
+      : "—";
+    return `| ${cell(item.underlying, 16)} | ${cell(position.quantity, 44)} | ${cell(item.state, 20)} | **${cell(item.recommendation, 12)}** | ${cell(pnlText, 32)} | ${cell(item.reason, 180)} |`;
+  });
+  return capJournal([
+    "**Position Watcher · advisory returned to the main trader**",
+    markdownText(event.summary, 500) ?? "Open positions assessed.",
+    rows.length > 0
+      ? `| Position | Qty / legs | State | Advice | Open P&L | Why |\n|---|---:|---|---|---:|---|\n${rows.join("\n")}`
+      : "No open position required an assessment.",
+  ].join("\n\n"));
+}
+
 function safeForPublicChat(value: unknown, depth = 0): unknown {
   if (depth > 6) return "[truncated]";
   if (typeof value === "string") return value.length > 2_000 ? `${value.slice(0, 2_000)}…` : value;
@@ -412,6 +451,7 @@ function modelTextEvent(event: TraderTimelineEvent, content: string, suffix = "m
 export function timelineEventToTurnEvents(event: TraderTimelineEvent): NativeTurnEvent[] {
   if (event.kind === "news") return [modelTextEvent(event, newsJournal(event), "news")];
   if (event.kind === "hypothesis") return [modelTextEvent(event, hypothesisJournal(event), "hypothesis")];
+  if (event.kind === "position_watch") return [modelTextEvent(event, positionWatchJournal(event), "position-watch")];
   if (event.kind === "critics") {
     return [modelTextEvent(event, criticResultsJournal(event), "critic-results")];
   }

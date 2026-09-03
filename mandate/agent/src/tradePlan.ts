@@ -15,6 +15,14 @@ export type TradePlanStep = {
   evidence_refs: string[];
 };
 
+export type PositionAction = {
+  underlying: string;
+  action: "HOLD" | "REDUCE" | "EXIT";
+  fraction: 0 | 0.5 | 1;
+  reason: string;
+  evidence_refs: string[];
+};
+
 export type CriticResolution = {
   critic: CriticName;
   resolution: "ACCEPTED" | "OVERRIDDEN" | "UNAVAILABLE";
@@ -44,12 +52,13 @@ export type TradeHypothesisDraft = {
 };
 
 export type TradePlan = {
-  schema: "trade.plan.v2";
+  schema: "trade.plan.v3";
   cycle_id: string;
   reason: string;
   action: "PARK" | "EXECUTE_PLAN";
   hypotheses: TradeHypothesis[];
   steps: TradePlanStep[];
+  position_actions: PositionAction[];
   critic_coverage: CriticName[];
   critic_resolutions: CriticResolution[];
   memory_events: MemoryEvent[];
@@ -110,8 +119,9 @@ function parseHypotheses(
   value: unknown,
   allowedCandidates: Set<string>,
   allowedNewsEvidence?: Set<string>,
+  allowEmpty = false,
 ): TradeHypothesis[] | null {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 5) return null;
+  if (!Array.isArray(value) || (!allowEmpty && value.length < 1) || value.length > 5) return null;
   const hypotheses: TradeHypothesis[] = [];
   const seen = new Set<string>();
   for (const rawHypothesis of value) {
@@ -178,13 +188,15 @@ export function parseTradePlan(
   allowedHypothesisCandidates: string[],
   executableCandidates: string[] = allowedHypothesisCandidates,
   allowedNewsEvidenceRefs?: string[],
+  allowedOpenUnderlyings: string[] = [],
+  allowedPositionEvidenceRefs?: string[],
 ): TradePlan | null {
   const payload = markedPayload(text, "TRADE_PLAN_JSON:");
   if (!payload || !exactKeys(payload, [
     "schema", "cycle_id", "reason", "action", "hypotheses", "steps",
-    "critic_coverage", "critic_resolutions", "memory_events",
+    "position_actions", "critic_coverage", "critic_resolutions", "memory_events",
   ])) return null;
-  if (payload.schema !== "trade.plan.v2"
+  if (payload.schema !== "trade.plan.v3"
     || payload.cycle_id !== expectedCycleId
     || (payload.action !== "PARK" && payload.action !== "EXECUTE_PLAN")) return null;
   const reason = boundedText(payload.reason);
@@ -195,7 +207,7 @@ export function parseTradePlan(
   const allowedNewsEvidence = allowedNewsEvidenceRefs
     ? new Set(allowedNewsEvidenceRefs)
     : undefined;
-  const hypotheses = parseHypotheses(payload.hypotheses, allowedHypotheses, allowedNewsEvidence);
+  const hypotheses = parseHypotheses(payload.hypotheses, allowedHypotheses, allowedNewsEvidence, true);
   if (!hypotheses) return null;
   const hypothesisCandidates = new Set(hypotheses.map((hypothesis) => hypothesis.candidate_id));
   const seenSymbols = new Set<string>();
@@ -215,6 +227,42 @@ export function parseTradePlan(
   if ((payload.action === "PARK" && steps.length !== 0)
     || (payload.action === "EXECUTE_PLAN" && steps.length === 0)
     || steps.some((step) => !hypothesisCandidates.has(step.candidate_id))) return null;
+
+  if (!Array.isArray(payload.position_actions) || payload.position_actions.length > 6) return null;
+  const openUnderlyings = new Set(allowedOpenUnderlyings.map((value) => value.trim().toUpperCase()));
+  const allowedPositionEvidence = allowedPositionEvidenceRefs
+    ? new Set(allowedPositionEvidenceRefs)
+    : undefined;
+  const seenUnderlyings = new Set<string>();
+  const positionActions: PositionAction[] = [];
+  for (const rawAction of payload.position_actions) {
+    const item = record(rawAction);
+    if (!item || !exactKeys(item, ["underlying", "action", "fraction", "reason", "evidence_refs"])) return null;
+    const underlying = typeof item.underlying === "string" ? item.underlying.trim().toUpperCase() : "";
+    const action = String(item.action);
+    const fraction = Number(item.fraction);
+    const actionReason = boundedText(item.reason, 240);
+    const evidenceRefs = evidenceList(item.evidence_refs);
+    const fractionValid = (action === "HOLD" && fraction === 0)
+      || (action === "REDUCE" && fraction === 0.5)
+      || (action === "EXIT" && fraction === 1);
+    if (!/^[A-Z][A-Z0-9.-]{0,9}$/u.test(underlying) || !openUnderlyings.has(underlying)
+      || seenUnderlyings.has(underlying) || !fractionValid || !actionReason || !evidenceRefs
+      || (allowedPositionEvidence !== undefined
+        && evidenceRefs.some((reference) => !allowedPositionEvidence.has(reference)))
+      || evidenceRefs.some((reference) => !evidenceIsGrounded(reference, allowedNewsEvidence))) return null;
+    seenUnderlyings.add(underlying);
+    positionActions.push({
+      underlying,
+      action: action as PositionAction["action"],
+      fraction: fraction as PositionAction["fraction"],
+      reason: actionReason,
+      evidence_refs: evidenceRefs,
+    });
+  }
+  // The model may omit an unchanged position. The runner, which owns the live
+  // open-underlying set, deterministically fills every omission with HOLD
+  // before the plan can reach Python execution.
 
   if (!Array.isArray(payload.critic_coverage)
     || payload.critic_coverage.length !== CRITIC_NAMES.length) return null;
@@ -256,12 +304,13 @@ export function parseTradePlan(
   }
 
   return {
-    schema: "trade.plan.v2",
+    schema: "trade.plan.v3",
     cycle_id: expectedCycleId,
     reason,
     action: payload.action,
     hypotheses,
     steps,
+    position_actions: positionActions,
     critic_coverage: criticCoverage,
     critic_resolutions: criticResolutions,
     memory_events: memoryEvents,
@@ -296,14 +345,31 @@ export function normalizeCriticResolutions(
   };
 }
 
-export function parkedPlan(cycleId: string, reason: string): TradePlan {
+export function parkedPlan(
+  cycleId: string,
+  reason: string,
+  openUnderlyings: string[] = [],
+): TradePlan {
   return {
-    schema: "trade.plan.v2",
+    schema: "trade.plan.v3",
     cycle_id: cycleId,
     reason,
     action: "PARK",
     hypotheses: [],
     steps: [],
+    // A runner-issued park never proposes a position change, but the executor
+    // requires an explicit decision for every open underlying, so fail closed
+    // to HOLD instead of emitting an uncovered plan.
+    position_actions: [...new Set(openUnderlyings.map((value) => value.trim().toUpperCase()))]
+      .filter((underlying) => underlying)
+      .slice(0, 6)
+      .map((underlying) => ({
+        underlying,
+        action: "HOLD" as const,
+        fraction: 0 as const,
+        reason: "Runner parked before the trader decided; open positions fail closed to HOLD.",
+        evidence_refs: [`position.${underlying}.runner_park`],
+      })),
     critic_coverage: [...CRITIC_NAMES],
     critic_resolutions: CRITIC_NAMES.map((critic) => ({
       critic,
@@ -311,5 +377,33 @@ export function parkedPlan(cycleId: string, reason: string): TradePlan {
       reason: "No executable candidate was delegated to the advisory layer.",
     })),
     memory_events: [],
+  };
+}
+
+export function positionExitPlan(
+  cycleId: string,
+  reason: string,
+  openUnderlyings: string[],
+  exits: { underlying: string; reason: string; evidence_refs: string[] }[],
+): TradePlan {
+  const requested = new Map(exits.map((item) => [item.underlying.trim().toUpperCase(), item]));
+  const base = parkedPlan(cycleId, reason, openUnderlyings);
+  return {
+    ...base,
+    critic_resolutions: CRITIC_NAMES.map((critic) => ({
+      critic,
+      resolution: "OVERRIDDEN" as const,
+      reason: "Watcher invalidation fast-exit bypassed advisory critics; deterministic executor remains authoritative.",
+    })),
+    position_actions: base.position_actions.map((held) => {
+      const exit = requested.get(held.underlying);
+      return exit ? {
+        underlying: held.underlying,
+        action: "EXIT" as const,
+        fraction: 1 as const,
+        reason: `Position watcher invalidation: ${exit.reason}`.slice(0, 240),
+        evidence_refs: exit.evidence_refs,
+      } : held;
+    }),
   };
 }

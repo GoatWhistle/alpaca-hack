@@ -3,13 +3,15 @@ import test from "node:test";
 
 import {
   normalizeCriticResolutions,
+  parkedPlan,
+  positionExitPlan,
   parseTradeHypothesisDraft,
   parseTradePlan,
 } from "./tradePlan.js";
 
 function validPayload(): Record<string, unknown> {
   return {
-    schema: "trade.plan.v2",
+    schema: "trade.plan.v3",
     cycle_id: "cycle-1",
     reason: "AAPL has the strongest deterministic evidence.",
     action: "EXECUTE_PLAN",
@@ -26,6 +28,7 @@ function validPayload(): Record<string, unknown> {
       candidate_id: "entry-1-AAPL",
       evidence_refs: ["evaluation.trade_candidates.0.evidence"],
     }],
+    position_actions: [],
     critic_coverage: ["risk", "market", "execution"],
     critic_resolutions: [
       { critic: "risk", resolution: "ACCEPTED", reason: "Risk evidence supports the bounded entry." },
@@ -72,6 +75,52 @@ test("strict parser accepts the exact canonical root", () => {
   assert.equal(plan?.steps[0]?.candidate_id, "entry-1-AAPL");
   assert.equal(plan?.hypotheses[0]?.confidence, "medium");
   assert.equal(plan?.memory_events[0]?.ttl_hours, 24);
+});
+
+test("position actions accept a valid subset for runner HOLD fill and enforce exact fractions", () => {
+  const payload = validPayload();
+  payload.position_actions = [{
+    underlying: "AAPL", action: "REDUCE", fraction: 0.5,
+    reason: "Signal weakened while the thesis remains partially intact.",
+    evidence_refs: ["position.AAPL.unrealized_plpc"],
+  }];
+  assert.equal(
+    parseTradePlan(line(payload), "cycle-1", ["entry-1-AAPL"], ["entry-1-AAPL"], undefined, ["AAPL"])?.position_actions[0]?.action,
+    "REDUCE",
+  );
+  (payload.position_actions as Record<string, unknown>[])[0]!.fraction = 1;
+  assert.equal(parseTradePlan(line(payload), "cycle-1", ["entry-1-AAPL"], ["entry-1-AAPL"], undefined, ["AAPL"]), null);
+  payload.position_actions = [];
+  assert.deepEqual(
+    parseTradePlan(line(payload), "cycle-1", ["entry-1-AAPL"], ["entry-1-AAPL"], undefined, ["AAPL"])?.position_actions,
+    [],
+  );
+});
+
+test("a runner-issued park still decides every open underlying explicitly", () => {
+  const parked = parkedPlan("cycle-1", "Trader unavailable; entries parked.", ["aapl", "AAPL", "NVDA"]);
+  assert.equal(parked.action, "PARK");
+  assert.deepEqual(
+    parked.position_actions.map((item) => `${item.underlying}:${item.action}:${item.fraction}`),
+    ["AAPL:HOLD:0", "NVDA:HOLD:0"],
+  );
+  assert.deepEqual(parkedPlan("cycle-1", "No open book.").position_actions, []);
+});
+
+test("the watcher fast lane exits only invalidated positions and never enters", () => {
+  const plan = positionExitPlan(
+    "cycle-1", "Position watcher invalidated 1 open position; closing before the planning turn.",
+    ["AAPL", "MSFT"],
+    [{ underlying: "aapl", reason: "breakout fully reversed", evidence_refs: ["position.AAPL.unrealized_plpc"] }],
+  );
+  assert.equal(plan.action, "PARK");
+  assert.deepEqual(plan.steps, []);
+  assert.deepEqual(
+    plan.position_actions.map((item) => `${item.underlying}:${item.action}:${item.fraction}`),
+    ["AAPL:EXIT:1", "MSFT:HOLD:0"],
+  );
+  assert.match(plan.position_actions[0]!.reason, /breakout fully reversed/u);
+  assert.deepEqual(plan.position_actions[0]!.evidence_refs, ["position.AAPL.unrealized_plpc"]);
 });
 
 test("hypotheses are bounded, candidate-linked, and carry explicit invalidation", () => {

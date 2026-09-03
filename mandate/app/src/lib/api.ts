@@ -16,7 +16,7 @@ export interface TraderTimelineEvent {
   at: string;
   trading_date: string;
   kind: "trigger" | "news" | "reasoning" | "tool_call" | "tool_result"
-    | "hypothesis" | "critics" | "plan" | "execution" | "risk_exit" | "session";
+    | "position_watch" | "hypothesis" | "critics" | "plan" | "execution" | "risk_exit" | "session";
   status: "ok" | "parked" | "submitted" | "degraded";
   session_id: string | null;
   summary: string;
@@ -51,7 +51,7 @@ export interface BrokerTradeOrder {
 
 const TIMELINE_KINDS = new Set<TraderTimelineEvent["kind"]>([
   "trigger", "news", "reasoning", "tool_call", "tool_result", "hypothesis",
-  "critics", "plan", "execution", "risk_exit", "session",
+  "position_watch", "critics", "plan", "execution", "risk_exit", "session",
 ]);
 const TIMELINE_STATUSES = new Set<TraderTimelineEvent["status"]>([
   "ok", "parked", "submitted", "degraded",

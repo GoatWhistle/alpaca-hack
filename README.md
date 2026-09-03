@@ -147,10 +147,11 @@ No black boxes — timeline, evidence and critic debates are all visible.
 |:---:|---|---|
 | **1 — Sense** | Scans live market data, news, corporate actions and the freshest IPO calendar | Nothing is missed — not even a newly listed name |
 | **2 — Rank** | Scores every name through a blend of price, regime and news confirmation | Only the truly tradable survives |
-| **3 — Hypothesize** | Forms clear, testable ideas — with what would prove them wrong | Discipline over gut feeling |
-| **4 — Challenge** | Three independent critics stress-test every idea from a different angle | One brain proposes, three brains oppose |
-| **5 — Decide** | Commits to a tiny, ranked plan — or parks with a concrete reason | No vague indecision, no overtrading |
-| **6 — Execute** | Enters with equities or defined-risk options, manages fills, then guards the position | From idea to broker with zero human touch |
+| **3 — Watch** | A dedicated watcher re-reads every open position against the latest retained thesis and current evidence — and a broken thesis is closed on the spot | Positions are re-judged, not just entered and forgotten |
+| **4 — Hypothesize** | Forms clear, testable ideas — with what would prove them wrong | Discipline over gut feeling |
+| **5 — Challenge** | Three independent critics stress-test every idea from a different angle | One brain proposes, three brains oppose |
+| **6 — Decide** | Commits to a tiny, ranked plan — plus an explicit hold, reduce or exit for every open position — or parks with a concrete reason | No vague indecision, no overtrading, no forgotten position |
+| **7 — Execute** | Enters with equities or defined-risk options, manages fills, then guards the position | From idea to broker with zero human touch |
 
 The intelligence proposes. The risk system disposes. **Alpaca executes.**
 
@@ -210,6 +211,20 @@ Reads regime, breadth and timing. Is the broad market confirming this move? Is t
 Lives in spreads, volume, staleness and option chain quality. If liquidity isn't there, the idea doesn't matter — this critic kills it before capital is wasted.
 
 *Task: only approve what can actually be filled well.*
+
+</td>
+</tr>
+<tr>
+<td colspan="2" valign="top">
+
+#### 🔭 Position Watcher
+*The Sentinel*
+
+Owns the open book. Every cycle it re-reads each live position — equity or option spread — against the thesis and invalidation that opened it, and returns one verdict per name: healthy, weakening or invalidated. It never confuses a red number with a broken idea.
+
+Every position becomes a proposal the trader must answer explicitly — hold, reduce or exit, for every position, every cycle. Stops, targets, session flattening and strong ensemble reversals retain their deterministic fast path. The watcher itself is advisory by default, so a language-model verdict cannot create an easy exit; its optional invalidation fast lane must be enabled explicitly. It never touches the broker — every close goes through the same deterministic executor and is clamped against fresh live positions.
+
+*Task: make sure no open position is ever carried on autopilot.*
 
 </td>
 </tr>
@@ -300,6 +315,7 @@ flowchart TB
     RiskC{{Risk Critic}}
     MarketC{{Market Critic}}
     ExecC{{Execution Critic}}
+    Watch{{Position Watcher}}
 
     Exec[[Execution Engine]]
     Guide[Operator Assistant]
@@ -308,6 +324,8 @@ flowchart TB
 
     Scout & News --> Signals --> Trader
     Risk -.-> Trader
+    Alpaca -->|open positions| Watch
+    Watch -->|weakening → advise| Trader
     Trader <--> RiskC & MarketC & ExecC
     Trader --> Exec --> Alpaca
     Risk --> Exec
@@ -320,6 +338,7 @@ flowchart TB
     style Exec fill:#8B5CF6,stroke:#111827,color:#fff
     style Dashboard fill:#111827,stroke:#111827,color:#fff
     style Risk fill:#EF4444,stroke:#111827,color:#fff
+    style Watch fill:#F59E0B,stroke:#111827,color:#111827
 ```
 
 ### How MANDATE Uses Alpaca
@@ -341,7 +360,7 @@ Not a mock. A live window into an autonomous mind:
 * **Positions** — side, size, market price, unrealized P&L and how each position will be exited
 * **Orders** — pending and filled, including multi-leg option spreads
 * **Pipeline** — where the agent is right now: sensing → ranking → challenging → executing
-* **Timeline** — every hypothesis, critic debate and decision — streamed in real time
+* **Timeline** — every position assessment, hypothesis, critic debate and decision — streamed in real time
 * **IPO Stream** — fresh listings scored for research vs. execution readiness
 
 <p align="center">
@@ -357,7 +376,7 @@ Not a mock. A live window into an autonomous mind:
 |---|---|
 | **P&L Performance** | Regime-adaptive, concentrated sizing. Rotates into strength, exits weakness. Measured from a **fresh $100,000 paper account**. |
 | **Technology Implementation** | Full breadth of Alpaca — Trading API, Market Data API and official MCP, plus options as a first-class strategy. |
-| **Creativity & Originality** | Hypothesis → triple challenge → bounded execution. News-gated ensemble plus autonomous IPO discovery. Defined-risk options preferred, not bolted on. |
+| **Creativity & Originality** | Hypothesis → triple challenge → bounded execution, with a dedicated Position Watcher that re-judges the open book every cycle. News-gated ensemble plus autonomous IPO discovery. Defined-risk options preferred, not bolted on. |
 | **Presentation & Execution** | Live dashboard, streaming timeline, recorded walkthrough and fully reproducible paper results. |
 
 ---

@@ -26,8 +26,18 @@ import {
   type ActiveStrategy,
   type MarketResult,
   type NewsEvent,
+  positionFastExitLimit,
+  type PositionWatchRun,
   type Trajectory,
 } from "./autonomyRunner.js";
+
+const noPositionWatch: PositionWatchRun = {
+  status: "not_required",
+  model: "fixture",
+  summary: "No open positions.",
+  watch: { schema: "position.watch.v1", cycle_id: "cycle-1", assessments: [] },
+  fast_exits: [],
+};
 
 test("trader timeout is configurable and bounded", () => {
   assert.equal(traderTimeoutSeconds({}), 60);
@@ -37,11 +47,19 @@ test("trader timeout is configurable and bounded", () => {
   assert.equal(traderTimeoutSeconds({ MANDATE_TRADER_TIMEOUT_SECONDS: "bad" }), 60);
 });
 
+test("watcher fast exits are bounded and can be disabled entirely", () => {
+  assert.equal(positionFastExitLimit({}), 0);
+  assert.equal(positionFastExitLimit({ MANDATE_POSITION_FAST_EXIT: "false" }), 0);
+  assert.equal(positionFastExitLimit({ MANDATE_POSITION_FAST_EXIT: "true", MANDATE_POSITION_FAST_EXIT_MAX: "99" }), 6);
+  assert.equal(positionFastExitLimit({ MANDATE_POSITION_FAST_EXIT: "true", MANDATE_POSITION_FAST_EXIT_MAX: "-4" }), 0);
+  assert.equal(positionFastExitLimit({ MANDATE_POSITION_FAST_EXIT: "true", MANDATE_POSITION_FAST_EXIT_MAX: "oops" }), 2);
+});
+
 test("critic timeout allows parallel advisors enough time and stays bounded", () => {
-  assert.equal(criticTimeoutSeconds({}), 20);
+  assert.equal(criticTimeoutSeconds({}), 35);
   assert.equal(criticTimeoutSeconds({ MANDATE_CRITIC_TIMEOUT_SECONDS: "45" }), 45);
   assert.equal(criticTimeoutSeconds({ MANDATE_CRITIC_TIMEOUT_SECONDS: "120" }), 60);
-  assert.equal(criticTimeoutSeconds({ MANDATE_CRITIC_TIMEOUT_SECONDS: "bad" }), 20);
+  assert.equal(criticTimeoutSeconds({ MANDATE_CRITIC_TIMEOUT_SECONDS: "bad" }), 35);
 });
 
 test("entry plans fail closed unless all three critics completed exactly once", () => {
@@ -158,9 +176,9 @@ test("planner prompt contains full candidates, critics, and only the canonical c
   }];
   const prompt = buildAutonomyPrompt(
     trajectory, [event], market, {}, { cycle_id: "cycle-1" }, "cycle-1",
-    candidates, critics, activeMemory,
+    candidates, critics, activeMemory, noPositionWatch,
   );
-  assert.match(prompt, /trade\.plan\.v2/u);
+  assert.match(prompt, /trade\.plan\.v3/u);
   assert.match(prompt, /entry-1-AAPL/u);
   assert.match(prompt, /Executable candidate_ids.*entry-1-AAPL/u);
   assert.match(prompt, /relative volume remains elevated/u);
@@ -200,7 +218,7 @@ test("final trader receives passed news even when no candidate is executable", (
     actions: [],
   };
   const prompt = buildHypothesisPrompt(
-    trajectory, [gatedEvent], market, evaluation, "cycle-1", candidates, [], activeStrategy,
+    trajectory, [gatedEvent], market, evaluation, "cycle-1", candidates, [], noPositionWatch, activeStrategy,
   );
   assert.match(prompt, /trade\.hypotheses\.v1/u);
   assert.match(prompt, /watch-news-1-AVGO/u);
@@ -217,10 +235,10 @@ test("planner contracts treat risk-off as directional context rather than a shor
     evidence: { risk: { market_regime: { risk_off: true } }, blocked_by: ["quality_gate"] },
   }];
   const hypothesisPrompt = buildHypothesisPrompt(
-    trajectory, [], market, {}, "risk-off-cycle", candidate, [], undefined,
+    trajectory, [], market, {}, "risk-off-cycle", candidate, [], noPositionWatch, undefined,
   );
   const plannerPrompt = buildAutonomyPrompt(
-    trajectory, [], market, {}, {}, "risk-off-cycle", candidate, [], [], undefined, undefined,
+    trajectory, [], market, {}, {}, "risk-off-cycle", candidate, [], [], noPositionWatch, undefined, undefined,
   );
   assert.match(hypothesisPrompt, /risk_off.*support SHORT.*oppose LONG/iu);
   assert.match(plannerPrompt, /risk_off.*supports a SHORT.*Only evidence\.blocked_by/iu);
@@ -243,6 +261,34 @@ test("decision context preserves executable ids and adds a signal fallback", () 
   assert.equal(candidates[0]?.execution_eligible, true);
   assert.equal(candidates[1]?.symbol, "MSFT");
   assert.equal(candidates[1]?.execution_eligible, false);
+});
+
+test("decision context never exposes an already-open underlying as a new entry", () => {
+  const executable = [{
+    candidate_id: "entry-1-META", symbol: "META", evidence: { blocked_by: [] },
+  }, {
+    candidate_id: "entry-2-MSFT", symbol: "MSFT", evidence: { blocked_by: [] },
+  }];
+  const evaluation = {
+    execution_context: {
+      positions: {
+        META260911C00610000: {
+          asset_class: "us_option", qty: "1", cost_basis: "500", market_value: "520",
+        },
+      },
+    },
+    symbols: {
+      META: { strategies: { regime_ensemble: { strength: "0.7" } } },
+      MSFT: { strategies: { regime_ensemble: { strength: "0.6" } } },
+    },
+  };
+  const candidates = buildDecisionCandidates(evaluation, executable, [], []);
+  assert.equal(candidates.find((candidate) => candidate.symbol === "META")?.execution_eligible, false);
+  assert.equal(candidates.find((candidate) => candidate.symbol === "MSFT")?.execution_eligible, true);
+  assert.match(
+    String((candidates.find((candidate) => candidate.symbol === "META")?.evidence as Record<string, unknown>).blocked_by),
+    /Existing exposure/u,
+  );
 });
 
 test("canonical trade candidates are materialized as full evidence records", () => {
@@ -290,7 +336,7 @@ test("trading date follows America/New_York rather than process timezone", () =>
 
 test("stale persisted sessions are recognized narrowly", () => {
   assert.equal(isStaleTraderSessionError(new Error("session 123 not found (404)")), true);
-  assert.equal(isStaleTraderSessionError(new Error("trader violated trade.plan.v2")), false);
+  assert.equal(isStaleTraderSessionError(new Error("trader violated trade.plan.v3")), false);
 });
 
 test("memory is append-only and only unexpired hypotheses are loaded", async () => {

@@ -19,7 +19,7 @@ MAX_MEMORY_ITEMS = 8
 MAX_STRATEGY_ACTIONS = 5
 MAX_TIMELINE_BYTES = 512 * 1024
 TIMELINE_KINDS = {
-    "trigger", "news", "reasoning", "tool_call", "tool_result", "hypothesis",
+    "trigger", "news", "reasoning", "tool_call", "tool_result", "position_watch", "hypothesis",
     "critics", "plan", "execution", "risk_exit", "session",
 }
 TIMELINE_STATUSES = {"ok", "parked", "submitted", "degraded"}
@@ -63,7 +63,7 @@ def _compact_event(item: dict[str, Any]) -> dict[str, Any] | None:
         return None
     if parsed_at.tzinfo is None:
         return None
-    return {
+    compact = {
         "sequence": sequence,
         "at": at,
         "trading_date": trading_date,
@@ -72,6 +72,15 @@ def _compact_event(item: dict[str, Any]) -> dict[str, Any] | None:
         "session_id": session_id,
         "summary": " ".join(summary.split())[:MAX_SUMMARY_CHARS],
     }
+    if kind == "position_watch" and isinstance(item.get("details"), dict):
+        watch = item["details"].get("watch")
+        assessments = watch.get("assessments") if isinstance(watch, dict) else None
+        if isinstance(assessments, list):
+            compact["position_assessments"] = [{
+                key: value for key, value in assessment.items()
+                if key in {"underlying", "state", "recommendation", "reason"}
+            } for assessment in assessments[:6] if isinstance(assessment, dict)]
+    return compact
 
 
 def _compact_strategy(path: Path | None, errors: list[str]) -> dict[str, Any] | None:

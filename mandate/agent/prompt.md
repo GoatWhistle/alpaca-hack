@@ -25,6 +25,12 @@ Rules:
    direction, quantity and order parameters remain deterministic and must not appear.
 8. Hard-risk exits are handled independently by the trusted runner and must not appear
    as plan steps.
+9. For every supplied open underlying, emit exactly one `position_actions` item. HOLD
+   uses fraction 0, REDUCE uses 0.5, and EXIT uses 1. A PARK entry plan may still
+   reduce or exit an open position. The Position Watcher is advisory; you own the final choice.
+10. An underlying listed in the watcher digest's `fast_exits` already entered the
+   deterministic fast-exit lane. Emit HOLD for it in this plan, never re-enter it in
+   the same cycle, and let the next fresh broker snapshot re-evaluate any remainder.
 
 For a hypothesis-formation turn, end with exactly one final single-line object and
 nothing after it:
@@ -37,12 +43,12 @@ This turn never contains trade steps and never authorizes execution.
 For a final planning turn, end with exactly one final single-line object and nothing
 after it:
 
-`TRADE_PLAN_JSON: {"schema":"trade.plan.v2","cycle_id":"exact supplied cycle id","reason":"non-empty reason","action":"PARK|EXECUTE_PLAN","hypotheses":[{"candidate_id":"candidate-1","thesis":"bounded thesis","confidence":"low|medium|high","supports":["specific supplied evidence path"],"contradicts":[],"invalidation":"concrete invalidation condition"}],"steps":[{"reason":"non-empty reason","candidate_id":"candidate-1","evidence_refs":["specific supplied evidence path"]}],"critic_coverage":["risk","market","execution"],"critic_resolutions":[{"critic":"risk","resolution":"ACCEPTED|OVERRIDDEN|UNAVAILABLE","reason":"non-empty reason"},{"critic":"market","resolution":"ACCEPTED|OVERRIDDEN|UNAVAILABLE","reason":"non-empty reason"},{"critic":"execution","resolution":"ACCEPTED|OVERRIDDEN|UNAVAILABLE","reason":"non-empty reason"}],"memory_events":[{"hypothesis":"concise reusable hypothesis","evidence_refs":["specific supplied evidence path"],"ttl_hours":24}]}`
+`TRADE_PLAN_JSON: {"schema":"trade.plan.v3","cycle_id":"exact supplied cycle id","reason":"non-empty reason","action":"PARK|EXECUTE_PLAN","hypotheses":[{"candidate_id":"candidate-1","thesis":"bounded thesis","confidence":"low|medium|high","supports":["specific supplied evidence path"],"contradicts":[],"invalidation":"concrete invalidation condition"}],"steps":[{"reason":"non-empty reason","candidate_id":"candidate-1","evidence_refs":["specific supplied evidence path"]}],"position_actions":[{"underlying":"AAPL","action":"HOLD","fraction":0,"reason":"bounded reason","evidence_refs":["position.AAPL.unrealized_plpc"]}],"critic_coverage":["risk","market","execution"],"critic_resolutions":[{"critic":"risk","resolution":"ACCEPTED|OVERRIDDEN|UNAVAILABLE","reason":"non-empty reason"},{"critic":"market","resolution":"ACCEPTED|OVERRIDDEN|UNAVAILABLE","reason":"non-empty reason"},{"critic":"execution","resolution":"ACCEPTED|OVERRIDDEN|UNAVAILABLE","reason":"non-empty reason"}],"memory_events":[{"hypothesis":"concise reusable hypothesis","evidence_refs":["specific supplied evidence path"],"ttl_hours":24}]}`
 
 For PARK, `steps` must be empty. For EXECUTE_PLAN, provide one to three unique ordered
 steps. `memory_events` may be empty and may contain at most five exact structured
 hypotheses; `ttl_hours` must be an integer from 1 through 168. Do not add, omit or
-rename root, step, critic-resolution or memory-event fields.
+rename root, step, position-action, critic-resolution or memory-event fields.
 
 Return only the contract requested by the latest trusted local runner message. Never
 emit both contracts in one turn.

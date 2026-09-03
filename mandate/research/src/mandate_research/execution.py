@@ -31,7 +31,7 @@ CLIENT_ORDER_PREFIX = "mandate-direct-"
 MANDATE_ROOT = Path(__file__).resolve().parents[3]
 EXIT_ACTION_KINDS = {"exit", "option_exit", "option_exit_mleg"}
 OPTION_ACTION_KINDS = {"option_entry", "option_spread_entry", "option_exit", "option_exit_mleg"}
-TRADE_PLAN_SCHEMA = "trade.plan.v2"
+TRADE_PLAN_SCHEMA = "trade.plan.v3"
 CRITIC_NAMES = frozenset({"risk", "market", "execution"})
 MAX_PLAN_STEPS = 3
 
@@ -331,11 +331,11 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
     """Validate a model plan and resolve only its candidate IDs to canonical symbols."""
     if decision.get("schema") == TRADE_PLAN_SCHEMA:
         required_root = {
-            "schema", "cycle_id", "reason", "action", "hypotheses", "steps", "critic_coverage",
+            "schema", "cycle_id", "reason", "action", "hypotheses", "steps", "position_actions", "critic_coverage",
             "critic_resolutions", "memory_events",
         }
         if set(decision) != required_root:
-            raise ValueError("trade plan root fields do not match trade.plan.v2")
+            raise ValueError("trade plan root fields do not match trade.plan.v3")
         action = decision.get("action")
         if action not in {"PARK", "EXECUTE_PLAN"}:
             raise ValueError("trade plan action must be PARK or EXECUTE_PLAN")
@@ -359,7 +359,7 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
             if set(hypothesis) != {
                 "candidate_id", "thesis", "confidence", "supports", "contradicts", "invalidation",
             }:
-                raise ValueError("trade hypothesis fields do not match trade.plan.v2")
+                raise ValueError("trade hypothesis fields do not match trade.plan.v3")
             candidate_id = _required_text(
                 hypothesis.get("candidate_id"), f"trade hypothesis {index} candidate_id", maximum=120,
             )
@@ -387,6 +387,54 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
             raise ValueError("PARK trade plan cannot contain steps")
         if action == "EXECUTE_PLAN" and not 1 <= len(raw_steps) <= MAX_PLAN_STEPS:
             raise ValueError(f"EXECUTE_PLAN requires 1-{MAX_PLAN_STEPS} steps")
+        raw_position_actions = decision.get("position_actions")
+        if not isinstance(raw_position_actions, list) or len(raw_position_actions) > 6:
+            raise ValueError("position_actions must contain at most six items")
+        position_actions: list[dict[str, Any]] = []
+        position_underlyings: set[str] = set()
+        for index, raw_position_action in enumerate(raw_position_actions):
+            item = _object(raw_position_action, f"position action {index}")
+            if set(item) != {"underlying", "action", "fraction", "reason", "evidence_refs"}:
+                raise ValueError("position action fields do not match trade.plan.v3")
+            underlying = _required_text(
+                item.get("underlying"), f"position action {index} underlying", maximum=10,
+            ).upper()
+            if re.fullmatch(r"[A-Z][A-Z0-9.-]{0,9}", underlying) is None or underlying in position_underlyings:
+                raise ValueError("position action underlying must be a unique canonical symbol")
+            recommendation = item.get("action")
+            fraction = item.get("fraction")
+            expected_fraction = {"HOLD": 0, "REDUCE": 0.5, "EXIT": 1}.get(str(recommendation))
+            if expected_fraction is None or isinstance(fraction, bool) or _decimal(
+                fraction, f"position action {index} fraction",
+            ) != Decimal(str(expected_fraction)):
+                raise ValueError("position action fraction must match HOLD=0, REDUCE=0.5, EXIT=1")
+            position_reason = _required_text(item.get("reason"), f"position action {index} reason", maximum=240)
+            refs = item.get("evidence_refs")
+            if not isinstance(refs, list) or not 1 <= len(refs) <= 8:
+                raise ValueError("position action evidence_refs must contain 1-8 items")
+            evidence_refs = [
+                _required_text(ref, f"position action {index} evidence_ref", maximum=300)
+                for ref in refs
+            ]
+            position_underlyings.add(underlying)
+            position_actions.append({
+                "underlying": underlying, "action": recommendation, "fraction": expected_fraction,
+                "reason": position_reason, "evidence_refs": evidence_refs,
+            })
+        execution_context = evaluation.get("execution_context")
+        context_positions = (
+            execution_context.get("positions")
+            if isinstance(execution_context, dict) and isinstance(execution_context.get("positions"), dict)
+            else {}
+        )
+        expected_underlyings: list[str] = []
+        for raw_symbol in context_positions:
+            symbol = str(raw_symbol).upper()
+            underlying = _option_underlying(symbol) or symbol
+            if underlying not in expected_underlyings:
+                expected_underlyings.append(underlying)
+        if position_underlyings != set(expected_underlyings[:6]):
+            raise ValueError("position_actions must cover exactly the bounded execution-context underlyings")
         coverage = decision.get("critic_coverage")
         if not isinstance(coverage, list) or len(coverage) != 3 or set(coverage) != CRITIC_NAMES:
             raise ValueError("trade plan must cover risk, market, and execution critics exactly once")
@@ -394,10 +442,11 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
         if not isinstance(resolutions, list) or len(resolutions) != 3:
             raise ValueError("trade plan must resolve all three critics")
         resolved: set[str] = set()
+        critic_unavailable = False
         for index, raw_resolution in enumerate(resolutions):
             resolution = _object(raw_resolution, f"critic resolution {index}")
             if set(resolution) != {"critic", "resolution", "reason"}:
-                raise ValueError("critic resolution fields do not match trade.plan.v2")
+                raise ValueError("critic resolution fields do not match trade.plan.v3")
             critic = str(resolution.get("critic"))
             if critic not in CRITIC_NAMES or critic in resolved:
                 raise ValueError("critic resolutions must be unique")
@@ -405,15 +454,18 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
                 raise ValueError("critic resolution must be ACCEPTED, OVERRIDDEN, or UNAVAILABLE")
             if action == "EXECUTE_PLAN" and resolution.get("resolution") == "UNAVAILABLE":
                 raise ValueError("EXECUTE_PLAN is forbidden while a critic is unavailable")
+            critic_unavailable = critic_unavailable or resolution.get("resolution") == "UNAVAILABLE"
             _required_text(resolution.get("reason"), f"critic resolution {index} reason")
             resolved.add(critic)
+        if critic_unavailable and any(item["action"] != "HOLD" for item in position_actions):
+            raise ValueError("position changes are forbidden while a critic is unavailable")
         memory_events = decision.get("memory_events")
         if not isinstance(memory_events, list) or len(memory_events) > 5:
             raise ValueError("memory_events must contain at most five hypotheses")
         for index, raw_memory in enumerate(memory_events):
             memory = _object(raw_memory, f"memory event {index}")
             if set(memory) != {"hypothesis", "evidence_refs", "ttl_hours"}:
-                raise ValueError("memory event fields do not match trade.plan.v2")
+                raise ValueError("memory event fields do not match trade.plan.v3")
             _required_text(memory.get("hypothesis"), f"memory event {index} hypothesis")
             if not isinstance(memory.get("evidence_refs"), list) or not memory["evidence_refs"]:
                 raise ValueError("memory event evidence_refs must be non-empty")
@@ -422,12 +474,6 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
             ttl_hours = memory.get("ttl_hours")
             if isinstance(ttl_hours, bool) or not isinstance(ttl_hours, int) or not 1 <= ttl_hours <= 168:
                 raise ValueError("memory event ttl_hours must be between 1 and 168")
-        catalog: dict[str, str] | None = None
-        catalog_source = "trade_candidates"
-        if hypothesis_candidates:
-            catalog, catalog_source = _canonical_trade_candidates(evaluation)
-            if any(candidate_id not in catalog for candidate_id in hypothesis_candidates):
-                raise ValueError("trade hypothesis references an unknown candidate_id")
         if action == "PARK":
             return {
                 "schema": TRADE_PLAN_SCHEMA,
@@ -436,16 +482,16 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
                 "action": action,
                 "reason": reason,
                 "steps": [],
+                "position_actions": position_actions,
             }
-        if catalog is None:
-            catalog, catalog_source = _canonical_trade_candidates(evaluation)
+        catalog, catalog_source = _canonical_trade_candidates(evaluation)
         steps: list[dict[str, Any]] = []
         candidate_ids: set[str] = set()
         symbols: set[str] = set()
         for index, raw in enumerate(raw_steps):
             step = _object(raw, f"trade plan step {index}")
             if set(step) != {"candidate_id", "reason", "evidence_refs"}:
-                raise ValueError("trade plan step fields do not match trade.plan.v2")
+                raise ValueError("trade plan step fields do not match trade.plan.v3")
             candidate_id = _required_text(
                 step.get("candidate_id"), f"trade plan step {index} candidate_id", maximum=120,
             )
@@ -461,7 +507,7 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
                 raise ValueError(f"duplicate trade plan candidate_id: {candidate_id}")
             symbol = catalog.get(candidate_id)
             if symbol is None:
-                raise ValueError(f"unknown trade plan candidate_id: {candidate_id}")
+                raise ValueError(f"unknown candidate_id: {candidate_id}")
             if symbol in symbols:
                 raise ValueError(f"trade plan resolves multiple IDs to {symbol}")
             if candidate_id not in hypothesis_candidates:
@@ -481,6 +527,7 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
             "action": action,
             "reason": reason,
             "steps": steps,
+            "position_actions": position_actions,
         }
 
     raise ValueError(f"decision schema must be {TRADE_PLAN_SCHEMA}")
@@ -492,6 +539,7 @@ def select_entries(
     *,
     existing_symbols: set[str] | None = None,
     limit: int = MAX_PLAN_STEPS,
+    health: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     plan = _trade_plan(evaluation, decision)
     if plan["action"] != "EXECUTE_PLAN":
@@ -499,9 +547,14 @@ def select_entries(
     symbols = _object(evaluation.get("symbols"), "evaluation symbols")
     existing = existing_symbols or set()
     entries: list[dict[str, Any]] = []
+    rejected: list[dict[str, str]] = []
     for step in plan["steps"]:
         symbol = str(step["symbol"])
-        if symbol == "SPY" or symbol in existing:
+        if symbol == "SPY":
+            rejected.append({"candidate_id": step["candidate_id"], "symbol": symbol, "reason": "benchmark_not_tradable"})
+            continue
+        if symbol in existing:
+            rejected.append({"candidate_id": step["candidate_id"], "symbol": symbol, "reason": "existing_position"})
             continue
         item = _object(symbols.get(symbol), f"{symbol} evaluation")
         ensemble = _object(
@@ -514,8 +567,10 @@ def select_entries(
         qty = _decimal(sizing.get("qty", 0), f"{symbol} qty")
         last = _decimal(market.get("last"), f"{symbol} last")
         if side not in {"buy", "sell"} or qty <= 0:
+            rejected.append({"candidate_id": step["candidate_id"], "symbol": symbol, "reason": "invalid_direction_or_quantity"})
             continue
         if item.get("research_candidate") is not True or sizing.get("available") is not True:
+            rejected.append({"candidate_id": step["candidate_id"], "symbol": symbol, "reason": "research_or_sizing_unavailable"})
             continue
         rationale = (
             f"direct {item.get('signal_path')} entry; ensemble strength "
@@ -540,6 +595,11 @@ def select_entries(
         })
         if len(entries) >= limit:
             break
+    if health is not None:
+        health.update({
+            "resolved": [str(entry["plan_candidate_id"]) for entry in entries],
+            "rejected": rejected,
+        })
     return entries
 
 
@@ -669,6 +729,7 @@ def _option_underlying(symbol: str) -> str | None:
 def select_option_exits(
     positions: list[dict[str, Any]], *, now: datetime | None = None, limit: int = 2,
     first_seen: dict[str, str] | None = None,
+    forced_actions: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build risk exits for option positions, preserving up to four related legs atomically."""
     checked_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -679,6 +740,7 @@ def select_option_exits(
     time_stop_minutes = int(os.environ.get("MANDATE_OPTION_TIME_STOP_MINUTES", "180"))
     dead_band_pct = _decimal(os.environ.get("MANDATE_OPTION_DEAD_BAND_PCT", "10"), "option dead band")
     tracked = first_seen or {}
+    forced = forced_actions or {}
     grouped: dict[tuple[str, date, str], list[dict[str, Any]]] = {}
     for position in positions:
         if str(position.get("asset_class", "")) != "us_option":
@@ -699,6 +761,8 @@ def select_option_exits(
 
     actions: list[dict[str, Any]] = []
     for (underlying, expiration, kind), legs in sorted(grouped.items()):
+        if forced_actions is not None and underlying not in forced:
+            continue
         cost = sum((abs(_decimal(item.get("cost_basis") or 0, "option cost basis")) for item in legs), ZERO)
         pnl = sum((_decimal(item.get("unrealized_pl") or 0, "option unrealized P/L") for item in legs), ZERO)
         pnl_pct = pnl / cost * Decimal("100") if cost > ZERO else ZERO
@@ -709,7 +773,13 @@ def select_option_exits(
             age_minutes = max(0, int((checked_at - seen.astimezone(timezone.utc)).total_seconds() // 60))
         except ValueError:
             age_minutes = 0
-        if flatten:
+        forced_action = forced.get(underlying)
+        if forced_action is not None:
+            recommendation = str(forced_action.get("action"))
+            if recommendation not in {"REDUCE", "EXIT"}:
+                continue
+            reason = f"main_trader_{recommendation.lower()}: {str(forced_action.get('reason'))[:180]}"
+        elif flatten:
             reason = "session_flatten_1550"
         elif dte <= exit_dte:
             reason = f"option_expiry_guard_{dte}dte"
@@ -730,6 +800,12 @@ def select_option_exits(
             for value in quantities[1:]:
                 common_qty = gcd(common_qty, value)
             ratios = [value // common_qty for value in quantities]
+            if forced_action is not None and forced_action.get("action") == "REDUCE":
+                if common_qty % 2 != 0:
+                    continue
+                common_qty //= 2
+                if common_qty < 1:
+                    continue
             net_credit = sum(
                 item["_current"] * Decimal(ratio) * (ONE if item["_qty"] > ZERO else -ONE)
                 for item, ratio in zip(chunk, ratios)
@@ -772,7 +848,138 @@ def select_option_exits(
                     "limit_price": str(price), "time_in_force": "day", "legs": payload_legs,
                 },
             })
-    return actions if flatten else actions[:limit]
+    return actions if flatten or forced_actions is not None else actions[:limit]
+
+
+def select_agent_position_exits(
+    positions: list[dict[str, Any]],
+    position_actions: list[dict[str, Any]],
+    *,
+    now: datetime | None = None,
+    health: dict[str, Any] | None = None,
+    expected_positions: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Materialize only main-trader REDUCE/EXIT decisions against live positions."""
+    changes = {
+        str(item.get("underlying", "")).upper(): item
+        for item in position_actions
+        if item.get("action") in {"REDUCE", "EXIT"}
+    }
+    requested = set(changes)
+    stale: set[str] = set()
+    if expected_positions is not None:
+        def fingerprint(items: list[tuple[str, dict[str, Any]]], underlying: str) -> list[tuple[str, str, str, str, str]]:
+            return sorted(
+                (
+                    symbol,
+                    str(item.get("qty")),
+                    str(item.get("asset_class", "us_equity")),
+                    str(item.get("avg_entry_price", "")),
+                    str(item.get("cost_basis", "")),
+                )
+                for symbol, item in items
+                if (_option_underlying(symbol) or symbol) == underlying
+            )
+        expected_items = [
+            (str(symbol).upper(), item) for symbol, item in expected_positions.items()
+            if isinstance(item, dict)
+        ]
+        live_items = [
+            (str(item.get("symbol", "")).upper(), item) for item in positions
+            if str(item.get("symbol", ""))
+        ]
+        stale = {
+            underlying for underlying in requested
+            if fingerprint(expected_items, underlying) != fingerprint(live_items, underlying)
+        }
+        changes = {key: value for key, value in changes.items() if key not in stale}
+    if not requested:
+        if health is not None:
+            health.update({"healthy": True, "unresolved": []})
+        return []
+    actions: list[dict[str, Any]] = []
+    for position in positions:
+        if str(position.get("asset_class", "us_equity")) != "us_equity":
+            continue
+        symbol = str(position.get("symbol", "")).upper()
+        decision = changes.get(symbol)
+        if decision is None:
+            continue
+        try:
+            qty = _decimal(position.get("qty"), f"{symbol} position qty")
+            current = _decimal(position.get("current_price"), f"{symbol} current price")
+        except ValueError:
+            continue
+        close_qty = abs(qty)
+        if decision["action"] == "REDUCE":
+            if close_qty % 2 != 0:
+                continue
+            close_qty = (close_qty / Decimal("2")).to_integral_value(rounding=ROUND_FLOOR)
+        if close_qty < ONE or current <= ZERO:
+            continue
+        side = "sell" if qty > ZERO else "buy"
+        actions.append({
+            "kind": "exit", "symbol": symbol, "underlying": symbol,
+            "side": side, "qty": str(close_qty), "limit_price": str(_limit_price(current, side)),
+            "rationale": f"main_trader_{str(decision['action']).lower()}: {str(decision['reason'])[:180]}",
+            "evidence_refs": decision.get("evidence_refs", []),
+        })
+    option_actions = select_option_exits(
+        positions, now=now, limit=6, forced_actions=changes,
+    )
+    option_symbols: dict[str, set[str]] = {}
+    for position in positions:
+        if str(position.get("asset_class", "")) != "us_option":
+            continue
+        symbol = str(position.get("symbol", "")).upper()
+        underlying = _option_underlying(symbol)
+        if underlying in changes:
+            option_symbols.setdefault(underlying, set()).add(symbol)
+    grouped_option_actions: dict[str, list[dict[str, Any]]] = {}
+    for action in option_actions:
+        grouped_option_actions.setdefault(_action_underlying(action), []).append(action)
+    for underlying, expected_symbols in option_symbols.items():
+        candidates = grouped_option_actions.get(underlying, [])
+        emitted_symbols: set[str] = set()
+        for action in candidates:
+            payload = action.get("payload") if isinstance(action.get("payload"), dict) else {}
+            legs = payload.get("legs") if isinstance(payload.get("legs"), list) else []
+            if legs:
+                emitted_symbols.update(
+                    str(leg.get("symbol", "")).upper() for leg in legs if isinstance(leg, dict)
+                )
+            elif action.get("symbol"):
+                emitted_symbols.add(str(action["symbol"]).upper())
+        # One atomic order must cover every live leg. Complex positions that
+        # need multiple orders are left untouched and retried after a fresh plan.
+        if len(candidates) == 1 and emitted_symbols == expected_symbols:
+            actions.extend(candidates)
+    materialized_symbols: set[str] = set()
+    for action in actions:
+        payload = action.get("payload") if isinstance(action.get("payload"), dict) else {}
+        legs = payload.get("legs") if isinstance(payload.get("legs"), list) else []
+        if legs:
+            materialized_symbols.update(
+                str(leg.get("symbol", "")).upper() for leg in legs if isinstance(leg, dict)
+            )
+        elif action.get("symbol"):
+            materialized_symbols.add(str(action["symbol"]).upper())
+    expected_by_underlying = {
+        underlying: {
+            str(position.get("symbol", "")).upper()
+            for position in positions
+            if (_option_underlying(str(position.get("symbol", "")).upper())
+                or str(position.get("symbol", "")).upper()) == underlying
+        }
+        for underlying in changes
+    }
+    unresolved = sorted(stale | {
+        underlying for underlying, symbols in expected_by_underlying.items()
+        if not symbols or not symbols.issubset(materialized_symbols)
+    })
+    if health is not None:
+        health.update({"healthy": not unresolved, "unresolved": unresolved})
+    return actions
 
 
 def _option_quote(symbol: str, snapshot: Any) -> dict[str, Any] | None:
@@ -1366,6 +1573,21 @@ def _execution_is_complete(action: dict[str, Any], execution: dict[str, Any]) ->
     return requested > ZERO and filled >= requested
 
 
+def _advisory_exit_blocks_entries(
+    health: dict[str, Any],
+    errors: list[str],
+    actions: list[dict[str, Any]],
+    executions: list[dict[str, Any]],
+) -> bool:
+    """Distinguish uncertain state from a known partial advisory fill.
+
+    Broker positions and account are refreshed after any advisory submission.
+    A partial reduction therefore does not freeze unrelated entries; live
+    position netting still prevents re-entry into the affected underlying.
+    """
+    return health.get("healthy") is not True or bool(errors) or len(executions) != len(actions)
+
+
 def _live_underlyings(broker: PaperBroker) -> set[str]:
     result: set[str] = set()
     for position in broker.positions():
@@ -1507,6 +1729,48 @@ def _execute_locked(evaluation: dict[str, Any], decision: dict[str, Any]) -> dic
     if exit_actions:
         positions = broker.positions()
         account = broker.account()
+    plan: dict[str, Any] | None = None
+    plan_error: str | None = None
+    try:
+        plan = _trade_plan(evaluation, decision)
+    except ValueError as exc:
+        plan_error = f"invalid trade plan: {str(exc)[:180]}"
+
+    requested_position_actions = plan.get("position_actions", []) if plan is not None else []
+    execution_context = evaluation.get("execution_context")
+    expected_positions = (
+        execution_context.get("positions")
+        if isinstance(execution_context, dict) and isinstance(execution_context.get("positions"), dict)
+        else None
+    )
+    advisory_exit_health: dict[str, Any] = {"healthy": True, "unresolved": []}
+    advisory_actions = select_agent_position_exits(
+        positions,
+        requested_position_actions,
+        now=checked_at,
+        health=advisory_exit_health,
+        expected_positions=expected_positions,
+    )
+    advisory_executions, advisory_errors = ([], [])
+    if advisory_actions:
+        advisory_executions, advisory_errors = _run_actions(
+            broker, advisory_actions,
+            checked_at=evaluation.get("checked_at"), start_index=len(exit_actions),
+        )
+    exit_actions.extend(advisory_actions)
+    executions.extend(advisory_executions)
+    errors.extend(advisory_errors)
+    advisory_exit_blocks_entries = _advisory_exit_blocks_entries(
+        advisory_exit_health, advisory_errors, advisory_actions, advisory_executions,
+    )
+    advisory_exit_incomplete = advisory_exit_blocks_entries or any(
+        not _execution_is_complete(action, result)
+        for action, result in zip(advisory_actions, advisory_executions)
+    )
+    if advisory_actions:
+        positions = broker.positions()
+        account = broker.account()
+
     equity = _decimal(account.get("equity", 0), "account equity")
     existing_underlyings: set[str] = set()
     for item in positions:
@@ -1529,22 +1793,31 @@ def _execute_locked(evaluation: dict[str, Any], decision: dict[str, Any]) -> dic
     existing_underlyings |= exited_underlyings
     limits = _mandate_limits()
     risk_gate = _entry_risk_gate(broker, account, limits)
-    plan: dict[str, Any] | None = None
-    plan_error: str | None = None
-    try:
-        plan = _trade_plan(evaluation, decision)
-    except ValueError as exc:
-        plan_error = f"invalid trade plan: {str(exc)[:180]}"
-    entry_blocked = after_flatten or risk_gate["allow_entries"] is not True or hard_exit_incomplete
+    entry_blocked = (
+        after_flatten or risk_gate["allow_entries"] is not True
+        or hard_exit_incomplete or advisory_exit_blocks_entries
+    )
     entries: list[dict[str, Any]] = []
+    entry_resolution: dict[str, Any] = {"resolved": [], "rejected": []}
     if plan is not None and plan["action"] == "EXECUTE_PLAN" and not entry_blocked:
         entries = select_entries(
             evaluation, decision, existing_symbols=existing_underlyings, limit=MAX_PLAN_STEPS,
+            health=entry_resolution,
         )
-        entries = [
-            entry for entry in entries
-            if not _cooldown_active(state, str(entry["symbol"]), now=checked_at)
-        ]
+        cooldown_allowed: list[dict[str, Any]] = []
+        for entry in entries:
+            if _cooldown_active(state, str(entry["symbol"]), now=checked_at):
+                entry_resolution["rejected"].append({
+                    "candidate_id": str(entry["plan_candidate_id"]),
+                    "symbol": str(entry["symbol"]),
+                    "reason": "same_day_reentry_disabled" if os.environ.get(
+                        "MANDATE_ALLOW_SAME_DAY_REENTRY", "true"
+                    ).lower() != "true" else "reentry_cooldown_active",
+                })
+                continue
+            cooldown_allowed.append(entry)
+        entries = cooldown_allowed
+        entry_resolution["resolved"] = [str(entry["plan_candidate_id"]) for entry in entries]
     option_exposure = sum(
         _option_risk_reserve(item)
         for item in positions if str(item.get("asset_class", "")) == "us_option"
@@ -1646,6 +1919,13 @@ def _execute_locked(evaluation: dict[str, Any], decision: dict[str, Any]) -> dic
     if strict_plan and expected_steps:
         build_error = build_error or _whole_plan_risk_error(risk_gate, entry_actions, expected_steps)
         if build_error:
+            rejected = entry_resolution.get("rejected")
+            if isinstance(rejected, list) and rejected:
+                first = rejected[0] if isinstance(rejected[0], dict) else {}
+                build_error = (
+                    f"{build_error}; {first.get('candidate_id', 'unknown')}:"
+                    f"{first.get('reason', 'not_materialized')}"
+                )
             entry_actions = []
             plan_error = f"whole plan rejected: {build_error}"
 
@@ -1685,6 +1965,26 @@ def _execute_locked(evaluation: dict[str, Any], decision: dict[str, Any]) -> dic
         "reason": plan.get("reason") if plan is not None else None,
         "planned_steps": expected_steps,
         "validated_steps": len(entry_actions),
+        "step_resolution": [
+            {
+                "candidate_id": str(step["candidate_id"]),
+                "symbol": str(step["symbol"]),
+                "status": "resolved" if any(
+                    action.get("plan_candidate_id") == step["candidate_id"] for action in entry_actions
+                ) else "rejected",
+                "reason": "canonical_entry_materialized" if any(
+                    action.get("plan_candidate_id") == step["candidate_id"] for action in entry_actions
+                ) else next((
+                    str(item.get("reason")) for item in entry_resolution.get("rejected", [])
+                    if isinstance(item, dict) and item.get("candidate_id") == step["candidate_id"]
+                ), "not_materialized"),
+            }
+            for step in (plan.get("steps", []) if plan is not None else [])
+        ],
+        "position_actions": plan.get("position_actions", []) if plan is not None else [],
+        "validated_position_exits": len(advisory_actions),
+        "position_exits_complete": not advisory_exit_incomplete,
+        "position_exit_health": advisory_exit_health,
         "error": plan_error,
         **plan_execution,
     }
@@ -1695,6 +1995,7 @@ def _execute_locked(evaluation: dict[str, Any], decision: dict[str, Any]) -> dic
             "reason": (
                 "intraday flatten window: new entries parked" if after_flatten
                 else "automatic hard exit did not complete; new entries parked" if hard_exit_incomplete
+                else "main-trader position state was uncertain; new entries parked" if advisory_exit_blocks_entries
                 else f"entry risk gate: {gate_reason}" if gate_reason
                 else plan_error if plan_error
                 else str(plan.get("reason")) if plan is not None and plan.get("action") == "PARK"

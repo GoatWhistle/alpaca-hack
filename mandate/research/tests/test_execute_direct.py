@@ -30,9 +30,9 @@ def _plan_evaluation(*symbols: str) -> dict:
     }
 
 
-def _plan(*candidate_ids: str, action: str = "EXECUTE_PLAN") -> dict:
+def _plan(*candidate_ids: str, action: str = "EXECUTE_PLAN", position_actions: list[dict] | None = None) -> dict:
     return {
-        "schema": "trade.plan.v2",
+        "schema": "trade.plan.v3",
         "cycle_id": "cycle-20260902-1400",
         "action": action,
         "reason": "ranked canonical candidates",
@@ -55,6 +55,7 @@ def _plan(*candidate_ids: str, action: str = "EXECUTE_PLAN") -> dict:
             }
             for candidate_id in candidate_ids
         ],
+        "position_actions": position_actions or [],
         "critic_coverage": ["risk", "market", "execution"],
         "critic_resolutions": [
             {"critic": critic, "resolution": "ACCEPTED", "reason": "bounded evidence"}
@@ -273,6 +274,167 @@ def test_option_positions_receive_atomic_expiry_exit() -> None:
     ]
 
 
+def test_main_trader_can_reduce_equity_and_exit_option_spread() -> None:
+    now = datetime(2026, 9, 2, 18, 0, tzinfo=timezone.utc)
+    expiry = (now.date() + timedelta(days=10)).strftime("%y%m%d")
+    positions = [
+        {
+            "symbol": "AAPL", "asset_class": "us_equity", "qty": "10",
+            "current_price": "100", "cost_basis": "1000", "unrealized_pl": "0",
+        },
+        {
+            "symbol": f"NVDA{expiry}C00100000", "asset_class": "us_option", "qty": "2",
+            "current_price": "3", "cost_basis": "800", "unrealized_pl": "0",
+        },
+        {
+            "symbol": f"NVDA{expiry}C00105000", "asset_class": "us_option", "qty": "-2",
+            "current_price": "1", "cost_basis": "-300", "unrealized_pl": "0",
+        },
+    ]
+    actions = execution.select_agent_position_exits(positions, [
+        {
+            "underlying": "AAPL", "action": "REDUCE", "fraction": 0.5,
+            "reason": "signal weakened", "evidence_refs": ["strategy.AAPL.signal_direction"],
+        },
+        {
+            "underlying": "NVDA", "action": "EXIT", "fraction": 1,
+            "reason": "thesis invalidated", "evidence_refs": ["strategy.NVDA.invalidation"],
+        },
+    ], now=now)
+    assert actions[0]["symbol"] == "AAPL"
+    assert actions[0]["qty"] == "5"
+    assert actions[1]["kind"] == "option_exit_mleg"
+    assert actions[1]["payload"]["qty"] == "2"
+
+
+def test_one_contract_option_reduce_does_not_turn_into_full_exit() -> None:
+    now = datetime(2026, 9, 2, 18, 0, tzinfo=timezone.utc)
+    expiry = (now.date() + timedelta(days=10)).strftime("%y%m%d")
+    health: dict = {}
+    actions = execution.select_agent_position_exits([{
+        "symbol": f"AAPL{expiry}C00100000", "asset_class": "us_option", "qty": "1",
+        "current_price": "2", "cost_basis": "200", "unrealized_pl": "0",
+    }], [{
+        "underlying": "AAPL", "action": "REDUCE", "fraction": 0.5,
+        "reason": "weaker", "evidence_refs": ["position.AAPL.unrealized_plpc"],
+    }], now=now, health=health)
+    assert actions == []
+    assert health == {"healthy": False, "unresolved": ["AAPL"]}
+
+
+def test_position_change_is_rejected_when_live_position_fingerprint_changed() -> None:
+    health: dict = {}
+    actions = execution.select_agent_position_exits(
+        [{"symbol": "AAPL", "asset_class": "us_equity", "qty": "-9", "current_price": "100"}],
+        [{
+            "underlying": "AAPL", "action": "EXIT", "fraction": 1,
+            "reason": "invalidated", "evidence_refs": ["strategy.AAPL.invalidation"],
+        }],
+        expected_positions={"AAPL": {"asset_class": "us_equity", "qty": "9"}},
+        health=health,
+    )
+    assert actions == []
+    assert health == {"healthy": False, "unresolved": ["AAPL"]}
+
+
+def test_position_change_is_rejected_after_same_size_reopen() -> None:
+    health: dict = {}
+    actions = execution.select_agent_position_exits(
+        [{
+            "symbol": "AAPL", "asset_class": "us_equity", "qty": "10",
+            "avg_entry_price": "101", "cost_basis": "1010", "current_price": "102",
+        }],
+        [{
+            "underlying": "AAPL", "action": "EXIT", "fraction": 1,
+            "reason": "invalidated", "evidence_refs": ["strategy.AAPL.invalidation"],
+        }],
+        expected_positions={"AAPL": {
+            "asset_class": "us_equity", "qty": "10",
+            "avg_entry_price": "99", "cost_basis": "990",
+        }},
+        health=health,
+    )
+    assert actions == []
+    assert health == {"healthy": False, "unresolved": ["AAPL"]}
+
+
+def test_option_change_requires_one_atomic_order_covering_every_live_leg() -> None:
+    now = datetime(2026, 9, 2, 18, 0, tzinfo=timezone.utc)
+    first_expiry = (now.date() + timedelta(days=10)).strftime("%y%m%d")
+    second_expiry = (now.date() + timedelta(days=17)).strftime("%y%m%d")
+    positions = [
+        {
+            "symbol": f"NVDA{first_expiry}C00100000", "asset_class": "us_option", "qty": "2",
+            "current_price": "3", "cost_basis": "600", "unrealized_pl": "0",
+        },
+        {
+            "symbol": f"NVDA{second_expiry}C00100000", "asset_class": "us_option", "qty": "-2",
+            "current_price": "2", "cost_basis": "-400", "unrealized_pl": "0",
+        },
+    ]
+    health: dict = {}
+    actions = execution.select_agent_position_exits(positions, [{
+        "underlying": "NVDA", "action": "EXIT", "fraction": 1,
+        "reason": "invalidated", "evidence_refs": ["strategy.NVDA.invalidation"],
+    }], now=now, health=health)
+    assert actions == []
+    assert health == {"healthy": False, "unresolved": ["NVDA"]}
+
+
+def test_watcher_fast_exit_plan_closes_without_authorizing_any_entry() -> None:
+    evaluation = {
+        **_plan_evaluation("AAPL"),
+        "execution_context": {"positions": {"AAPL": {"qty": "9"}, "MSFT": {"qty": "4"}}},
+    }
+    fast_exit = _plan(action="PARK", position_actions=[
+        {
+            "underlying": "AAPL", "action": "EXIT", "fraction": 1,
+            "reason": "Position watcher invalidation: the breakout fully reversed.",
+            "evidence_refs": ["position.AAPL.unrealized_plpc"],
+        },
+        {
+            "underlying": "MSFT", "action": "HOLD", "fraction": 0,
+            "reason": "Runner parked before the trader decided; open positions fail closed to HOLD.",
+            "evidence_refs": ["position.MSFT.runner_park"],
+        },
+    ])
+    assert execution.select_entries(evaluation, fast_exit) == []
+    actions = execution.select_agent_position_exits(
+        [
+            {"symbol": "AAPL", "asset_class": "us_equity", "qty": "9", "current_price": "100"},
+            {"symbol": "MSFT", "asset_class": "us_equity", "qty": "4", "current_price": "400"},
+        ],
+        fast_exit["position_actions"],
+    )
+    assert [(item["symbol"], item["side"], item["qty"]) for item in actions] == [("AAPL", "sell", "9")]
+    assert actions[0]["rationale"].startswith("main_trader_exit: Position watcher invalidation")
+
+
+def test_position_actions_must_cover_every_open_underlying() -> None:
+    expiry = (datetime(2026, 9, 2, tzinfo=timezone.utc).date() + timedelta(days=10)).strftime("%y%m%d")
+    evaluation = {
+        **_plan_evaluation("AAPL"),
+        "execution_context": {
+            "positions": {"AAPL": {"qty": "9"}, f"NVDA{expiry}C00100000": {"qty": "2"}},
+        },
+    }
+    with pytest.raises(ValueError, match="bounded execution-context underlyings"):
+        execution.select_entries(evaluation, _plan("candidate-1"))
+    covered = _plan("candidate-1", position_actions=[
+        {
+            "underlying": underlying, "action": "HOLD", "fraction": 0,
+            "reason": "Runner parked before the trader decided; open positions fail closed to HOLD.",
+            "evidence_refs": [f"position.{underlying}.runner_park"],
+        }
+        for underlying in ("AAPL", "NVDA")
+    ])
+    assert [entry["symbol"] for entry in execution.select_entries(evaluation, covered)] == ["AAPL"]
+    assert execution.select_agent_position_exits(
+        [{"symbol": "AAPL", "asset_class": "us_equity", "qty": "9", "current_price": "100"}],
+        covered["position_actions"],
+    ) == []
+
+
 def test_flat_option_position_receives_time_stop(monkeypatch: pytest.MonkeyPatch) -> None:
     # Keep this before the mandatory 15:50 America/New_York flatten window so
     # the test isolates the option time-stop rule regardless of wall-clock time.
@@ -299,6 +461,21 @@ def test_same_day_reentry_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> No
 
     next_day = now + timedelta(days=1)
     assert execution._cooldown_active(state, "AAPL", now=next_day) is False
+
+
+def test_entry_resolution_reports_existing_position() -> None:
+    health: dict = {}
+    entries = execution.select_entries(
+        _plan_evaluation("MSFT"), _plan("candidate-1"),
+        existing_symbols={"MSFT"}, health=health,
+    )
+    assert entries == []
+    assert health == {
+        "resolved": [],
+        "rejected": [{
+            "candidate_id": "candidate-1", "symbol": "MSFT", "reason": "existing_position",
+        }],
+    }
 
 
 def test_broker_retries_reads_but_not_order_submissions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -485,7 +662,7 @@ def test_exit_policy_is_exact_for_options_and_absent_for_closing_orders() -> Non
 def test_plan_client_order_id_is_stable_across_index_and_canonical_repricing() -> None:
     action = {
         "kind": "entry", "symbol": "AAPL", "side": "buy", "qty": "10",
-        "limit_price": "100", "plan_schema": "trade.plan.v2",
+        "limit_price": "100", "plan_schema": "trade.plan.v3",
         "plan_cycle_id": "cycle-1", "plan_candidate_id": "candidate-1",
     }
     first = execution._client_order_id(action, "first-check", 0)
@@ -522,7 +699,7 @@ def test_ordered_plan_stops_after_partial_fill(monkeypatch: pytest.MonkeyPatch) 
     actions = [{
         "kind": "entry", "symbol": symbol, "side": "buy", "qty": "10",
         "limit_price": "100", "rationale": "test", "plan_candidate_id": candidate_id,
-        "plan_cycle_id": "cycle-1", "plan_schema": "trade.plan.v2",
+        "plan_cycle_id": "cycle-1", "plan_schema": "trade.plan.v3",
     } for symbol, candidate_id in (
         ("AAPL", "candidate-1"), ("MSFT", "candidate-2"), ("NVDA", "candidate-3"),
     )]
@@ -533,6 +710,29 @@ def test_ordered_plan_stops_after_partial_fill(monkeypatch: pytest.MonkeyPatch) 
     assert len(results) == 2
     assert errors == []
     assert halt == {"halted": True, "reason": "partial:candidate-2:filled", "skipped": 1}
+
+
+def test_known_partial_advisory_reduce_does_not_block_unrelated_entries() -> None:
+    action = {"kind": "exit", "symbol": "TSM", "qty": "8"}
+    partial = {"status": "partially_filled", "filled_qty": "7"}
+    assert execution._execution_is_complete(action, partial) is False
+    assert execution._advisory_exit_blocks_entries(
+        {"healthy": True, "unresolved": []}, [], [action], [partial],
+    ) is False
+
+
+@pytest.mark.parametrize(
+    ("health", "errors", "actions", "executions"),
+    [
+        ({"healthy": False}, [], [], []),
+        ({"healthy": True}, ["broker error"], [], []),
+        ({"healthy": True}, [], [{"symbol": "TSM"}], []),
+    ],
+)
+def test_uncertain_advisory_state_still_blocks_entries(
+    health: dict, errors: list[str], actions: list[dict], executions: list[dict],
+) -> None:
+    assert execution._advisory_exit_blocks_entries(health, errors, actions, executions) is True
 
 
 def test_ordered_plan_stops_before_submit_on_live_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -548,7 +748,7 @@ def test_ordered_plan_stops_before_submit_on_live_conflict(monkeypatch: pytest.M
     action = {
         "kind": "entry", "symbol": "AAPL", "side": "buy", "qty": "10",
         "limit_price": "100", "rationale": "test", "plan_candidate_id": "candidate-1",
-        "plan_cycle_id": "cycle-1", "plan_schema": "trade.plan.v2",
+        "plan_cycle_id": "cycle-1", "plan_schema": "trade.plan.v3",
     }
     results, errors, halt = execution._run_plan_actions(
         Broker(), [action], checked_at="checked", start_index=0,
