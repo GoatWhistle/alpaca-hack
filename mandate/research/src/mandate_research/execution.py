@@ -401,8 +401,10 @@ def _trade_plan(evaluation: dict[str, Any], decision: dict[str, Any]) -> dict[st
             critic = str(resolution.get("critic"))
             if critic not in CRITIC_NAMES or critic in resolved:
                 raise ValueError("critic resolutions must be unique")
-            if resolution.get("resolution") not in {"ACCEPTED", "OVERRIDDEN"}:
-                raise ValueError("critic resolution must be ACCEPTED or OVERRIDDEN")
+            if resolution.get("resolution") not in {"ACCEPTED", "OVERRIDDEN", "UNAVAILABLE"}:
+                raise ValueError("critic resolution must be ACCEPTED, OVERRIDDEN, or UNAVAILABLE")
+            if action == "EXECUTE_PLAN" and resolution.get("resolution") == "UNAVAILABLE":
+                raise ValueError("EXECUTE_PLAN is forbidden while a critic is unavailable")
             _required_text(resolution.get("reason"), f"critic resolution {index} reason")
             resolved.add(critic)
         memory_events = decision.get("memory_events")

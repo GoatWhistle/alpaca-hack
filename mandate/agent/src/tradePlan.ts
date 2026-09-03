@@ -17,7 +17,7 @@ export type TradePlanStep = {
 
 export type CriticResolution = {
   critic: CriticName;
-  resolution: "ACCEPTED" | "OVERRIDDEN";
+  resolution: "ACCEPTED" | "OVERRIDDEN" | "UNAVAILABLE";
   reason: string;
 };
 
@@ -99,7 +99,18 @@ function markedPayload(text: string, marker: string): Record<string, unknown> | 
   }
 }
 
-function parseHypotheses(value: unknown, allowedCandidates: Set<string>): TradeHypothesis[] | null {
+const NEWS_EVIDENCE_REF = /^news\.[a-f0-9]{64}$/iu;
+
+function evidenceIsGrounded(reference: string, allowedNewsEvidence?: Set<string>): boolean {
+  return !reference.toLowerCase().startsWith("news.")
+    || (NEWS_EVIDENCE_REF.test(reference) && (allowedNewsEvidence?.has(reference) ?? true));
+}
+
+function parseHypotheses(
+  value: unknown,
+  allowedCandidates: Set<string>,
+  allowedNewsEvidence?: Set<string>,
+): TradeHypothesis[] | null {
   if (!Array.isArray(value) || value.length < 1 || value.length > 5) return null;
   const hypotheses: TradeHypothesis[] = [];
   const seen = new Set<string>();
@@ -117,6 +128,7 @@ function parseHypotheses(value: unknown, allowedCandidates: Set<string>): TradeH
     const contradicts = optionalEvidenceList(hypothesis.contradicts);
     if (!allowedCandidates.has(candidateId) || seen.has(candidateId)
       || !thesis || !invalidation || !supports || !contradicts
+      || [...supports, ...contradicts].some((reference) => !evidenceIsGrounded(reference, allowedNewsEvidence))
       || !["low", "medium", "high"].includes(String(hypothesis.confidence))) return null;
     seen.add(candidateId);
     hypotheses.push({
@@ -135,6 +147,7 @@ export function parseTradeHypothesisDraft(
   text: string,
   expectedCycleId: string,
   allowedCandidates: string[],
+  allowedNewsEvidenceRefs?: string[],
 ): TradeHypothesisDraft | null {
   const payload = markedPayload(text, "TRADE_HYPOTHESES_JSON:");
   if (!payload || !exactKeys(payload, [
@@ -144,7 +157,10 @@ export function parseTradeHypothesisDraft(
     ? payload.focus_candidate_id.trim()
     : "";
   const allowed = new Set(allowedCandidates);
-  const hypotheses = parseHypotheses(payload.hypotheses, allowed);
+  const allowedNewsEvidence = allowedNewsEvidenceRefs
+    ? new Set(allowedNewsEvidenceRefs)
+    : undefined;
+  const hypotheses = parseHypotheses(payload.hypotheses, allowed, allowedNewsEvidence);
   if (payload.schema !== "trade.hypotheses.v1" || payload.cycle_id !== expectedCycleId
     || !allowed.has(focusCandidateId) || !hypotheses
     || !hypotheses.some((hypothesis) => hypothesis.candidate_id === focusCandidateId)) return null;
@@ -161,6 +177,7 @@ export function parseTradePlan(
   expectedCycleId: string,
   allowedHypothesisCandidates: string[],
   executableCandidates: string[] = allowedHypothesisCandidates,
+  allowedNewsEvidenceRefs?: string[],
 ): TradePlan | null {
   const payload = markedPayload(text, "TRADE_PLAN_JSON:");
   if (!payload || !exactKeys(payload, [
@@ -175,7 +192,10 @@ export function parseTradePlan(
 
   const allowedHypotheses = new Set(allowedHypothesisCandidates);
   const allowedSteps = new Set(executableCandidates);
-  const hypotheses = parseHypotheses(payload.hypotheses, allowedHypotheses);
+  const allowedNewsEvidence = allowedNewsEvidenceRefs
+    ? new Set(allowedNewsEvidenceRefs)
+    : undefined;
+  const hypotheses = parseHypotheses(payload.hypotheses, allowedHypotheses, allowedNewsEvidence);
   if (!hypotheses) return null;
   const hypothesisCandidates = new Set(hypotheses.map((hypothesis) => hypothesis.candidate_id));
   const seenSymbols = new Set<string>();
@@ -187,6 +207,7 @@ export function parseTradePlan(
     const stepReason = boundedText(step.reason);
     const evidenceRefs = evidenceList(step.evidence_refs);
     if (!CANDIDATE_ID.test(candidateId) || !stepReason || !evidenceRefs
+      || evidenceRefs.some((reference) => !evidenceIsGrounded(reference, allowedNewsEvidence))
       || seenSymbols.has(candidateId) || !allowedSteps.has(candidateId)) return null;
     seenSymbols.add(candidateId);
     steps.push({ reason: stepReason, candidate_id: candidateId, evidence_refs: evidenceRefs });
@@ -207,12 +228,12 @@ export function parseTradePlan(
     const resolution = record(rawResolution);
     if (!resolution || !exactKeys(resolution, ["critic", "resolution", "reason"])) return null;
     if (!CRITIC_NAMES.includes(resolution.critic as CriticName)
-      || (resolution.resolution !== "ACCEPTED" && resolution.resolution !== "OVERRIDDEN")) return null;
+      || !["ACCEPTED", "OVERRIDDEN", "UNAVAILABLE"].includes(String(resolution.resolution))) return null;
     const resolutionReason = boundedText(resolution.reason);
     if (!resolutionReason) return null;
     criticResolutions.push({
       critic: resolution.critic as CriticName,
-      resolution: resolution.resolution,
+      resolution: resolution.resolution as CriticResolution["resolution"],
       reason: resolutionReason,
     });
   }
@@ -227,7 +248,9 @@ export function parseTradePlan(
     const hypothesis = boundedText(memory.hypothesis, 500);
     const evidenceRefs = evidenceList(memory.evidence_refs);
     const ttlHours = memory.ttl_hours;
-    if (!hypothesis || !evidenceRefs || !Number.isInteger(ttlHours)
+    if (!hypothesis || !evidenceRefs
+      || evidenceRefs.some((reference) => !evidenceIsGrounded(reference, allowedNewsEvidence))
+      || !Number.isInteger(ttlHours)
       || Number(ttlHours) < 1 || Number(ttlHours) > 168) return null;
     memoryEvents.push({ hypothesis, evidence_refs: evidenceRefs, ttl_hours: Number(ttlHours) });
   }
@@ -242,6 +265,34 @@ export function parseTradePlan(
     critic_coverage: criticCoverage,
     critic_resolutions: criticResolutions,
     memory_events: memoryEvents,
+  };
+}
+
+export function normalizeCriticResolutions(
+  plan: TradePlan,
+  critics: CriticAdvice[],
+): TradePlan {
+  const actual = new Map(critics.map((critic) => [critic.critic, critic]));
+  const proposed = new Map(plan.critic_resolutions.map((resolution) => [resolution.critic, resolution]));
+  return {
+    ...plan,
+    critic_resolutions: CRITIC_NAMES.map((critic) => {
+      const advice = actual.get(critic);
+      if (!advice || advice.status !== "completed") {
+        return {
+          critic,
+          resolution: "UNAVAILABLE" as const,
+          reason: (advice
+            ? `${advice.status}: ${advice.summary}`
+            : "error: critic result was not returned.").slice(0, 500),
+        };
+      }
+      return proposed.get(critic) ?? {
+        critic,
+        resolution: "UNAVAILABLE" as const,
+        reason: "error: completed critic was not resolved by the main trader.",
+      };
+    }),
   };
 }
 

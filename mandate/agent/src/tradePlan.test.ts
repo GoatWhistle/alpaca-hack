@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseTradeHypothesisDraft, parseTradePlan } from "./tradePlan.js";
+import {
+  normalizeCriticResolutions,
+  parseTradeHypothesisDraft,
+  parseTradePlan,
+} from "./tradePlan.js";
 
 function validPayload(): Record<string, unknown> {
   return {
@@ -101,6 +105,32 @@ test("strict parser requires all three critic resolutions exactly once", () => {
   const duplicate = validPayload();
   duplicate.critic_coverage = ["risk", "risk", "execution"];
   assert.equal(parseTradePlan(line(duplicate), "cycle-1", ["entry-1-AAPL"]), null);
+});
+
+test("critic timeout is represented as unavailable even when the model calls it accepted", () => {
+  const plan = parseTradePlan(line(validPayload()), "cycle-1", ["entry-1-AAPL"]);
+  assert.ok(plan);
+  const normalized = normalizeCriticResolutions(plan, [
+    { critic: "risk", status: "completed", model: "fixture", summary: "bounded" },
+    { critic: "market", status: "timeout", model: "fixture", summary: "deadline" },
+    { critic: "execution", status: "completed", model: "fixture", summary: "liquid" },
+  ]);
+  assert.deepEqual(normalized.critic_resolutions.map(({ critic, resolution }) => ({ critic, resolution })), [
+    { critic: "risk", resolution: "ACCEPTED" },
+    { critic: "market", resolution: "UNAVAILABLE" },
+    { critic: "execution", resolution: "OVERRIDDEN" },
+  ]);
+});
+
+test("news evidence refs must exactly match the supplied canonical catalogue", () => {
+  const eventId = "a".repeat(64);
+  const payload = validPayload();
+  (payload.hypotheses as Record<string, unknown>[])[0]!.supports = [`news.${eventId}`];
+  assert.ok(parseTradePlan(line(payload), "cycle-1", ["entry-1-AAPL"], ["entry-1-AAPL"], [`news.${eventId}`]));
+  assert.equal(
+    parseTradePlan(line(payload), "cycle-1", ["entry-1-AAPL"], ["entry-1-AAPL"], [`news.${"b".repeat(64)}`]),
+    null,
+  );
 });
 
 test("PARK has no steps and EXECUTE_PLAN has one to three unique steps", () => {

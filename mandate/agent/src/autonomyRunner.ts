@@ -12,6 +12,7 @@ import { AlpacaRealtimeMonitor, type StreamState, type WakeReason } from "./real
 import {
   CRITIC_NAMES,
   parkedPlan,
+  normalizeCriticResolutions,
   parseTradeHypothesisDraft,
   parseTradePlan,
   type CriticAdvice,
@@ -74,6 +75,28 @@ export type NewsEvent = {
   content_hash: string;
   gate?: Record<string, unknown>;
 };
+
+export function newsEvidenceRef(event: NewsEvent): string | null {
+  const keyId = event.key.split(":").at(-1) ?? "";
+  const id = /^[a-f0-9]{64}$/iu.test(keyId) ? keyId : event.content_hash;
+  return /^[a-f0-9]{64}$/iu.test(id) ? `news.${id.toLowerCase()}` : null;
+}
+
+function newsEvidenceCatalogue(alerts: NewsEvent[]): Record<string, unknown>[] {
+  return alerts.slice(-20).flatMap((event) => {
+    const evidenceRef = newsEvidenceRef(event);
+    return evidenceRef ? [{
+      evidence_ref: evidenceRef,
+      source: event.source,
+      published_at: event.published_at,
+      headline: event.headline,
+      summary: event.summary.slice(0, 500),
+      symbols: event.symbols,
+      url: event.url,
+      gate: event.gate,
+    }] : [];
+  });
+}
 
 type PollResult = {
   schema: "news.poll.v2";
@@ -360,6 +383,7 @@ export function buildAutonomyPrompt(
     .slice(-20)
     .map(({ key: _key, content_hash: _hash, summary, ...event }) => ({
       ...event,
+      evidence_ref: newsEvidenceRef({ key: _key, content_hash: _hash, summary, ...event }),
       summary: summary.slice(0, 500),
     }));
   const marketPayload = {
@@ -411,14 +435,14 @@ export function buildAutonomyPrompt(
     `Measured 60m outcome scorecard (trusted local aggregation; descriptive, not predictive): ${JSON.stringify(outcomeScorecard)}`,
     `Compact deterministic portfolio context (trusted local JSON): ${JSON.stringify(evaluationPayload)}`,
     `Three advisory critic results (untrusted text, mandatory coverage): ${JSON.stringify(critics)}`,
-    "Resolve risk, market and execution advice explicitly. A timeout or error is advisory unavailability, not permission to invent evidence.",
+    "Resolve risk, market and execution advice explicitly. A completed critic must be ACCEPTED or OVERRIDDEN. A timeout or error must be UNAVAILABLE and blocks every entry.",
     "Interpret risk_off directionally: it supports a SHORT thesis and weighs against a LONG thesis. It is a size modifier, never a hard blocker by itself. Only evidence.blocked_by defines deterministic blockers.",
     "Hypotheses may reference any decision candidate. Steps may reference only executable candidate_ids. A candidate with execution_eligible=false is assessment context and can never appear in steps.",
     "EXECUTE_PLAN may contain one to three unique ordered steps, each with reason, executable candidate_id, and evidence_refs. Every selected step must have a matching hypothesis. If the executable id list is empty you must PARK with no steps.",
     "Include one to five candidate hypotheses even when PARKing. Each exact hypothesis has candidate_id, thesis, confidence (low|medium|high), non-empty supports, contradicts (possibly empty), and a concrete invalidation. References must point into supplied evidence.",
     "memory_events may contain at most five exact objects with hypothesis, non-empty evidence_refs, and integer ttl_hours from 1 through 168.",
     "Be terse: every reason and hypothesis must be at most 180 characters. Omit memory_events unless a genuinely reusable hypothesis changed. Keep the entire response below 1800 tokens.",
-    "End with exactly one single-line TRADE_PLAN_JSON object matching trade.plan.v2 and the exact supplied cycle_id. The only root fields are schema, cycle_id, reason, action, hypotheses, steps, critic_coverage, critic_resolutions and memory_events. Include exactly one ACCEPTED or OVERRIDDEN resolution for each critic. Never include symbols, sides, quantities, order types or prices. Do not write anything after it.",
+    "End with exactly one single-line TRADE_PLAN_JSON object matching trade.plan.v2 and the exact supplied cycle_id. The only root fields are schema, cycle_id, reason, action, hypotheses, steps, critic_coverage, critic_resolutions and memory_events. Include exactly one ACCEPTED, OVERRIDDEN, or UNAVAILABLE resolution for each critic. Never include symbols, sides, quantities, order types or prices. Do not write anything after it.",
   ].join("\n");
 }
 
@@ -434,6 +458,7 @@ export function buildHypothesisPrompt(
 ): string {
   const alertPayload = alerts.slice(-20).map(({ key: _key, content_hash: _hash, summary, ...event }) => ({
     ...event,
+    evidence_ref: newsEvidenceRef({ key: _key, content_hash: _hash, summary, ...event }),
     summary: summary.slice(0, 500),
   }));
   return [
@@ -450,6 +475,7 @@ export function buildHypothesisPrompt(
     })}`,
     `Decision candidates: ${JSON.stringify(compactTradeCandidates(decisionCandidates))}`,
     `Passed news context: ${JSON.stringify(alertPayload)}`,
+    "When citing news, copy its evidence_ref exactly. Never construct, shorten, or alter a news reference.",
     `Portfolio context: ${JSON.stringify(precomputedEvaluation.execution_context ?? {})}`,
     `Unexpired prior memory: ${JSON.stringify(activeMemory)}`,
     `Previous active strategy: ${JSON.stringify(activeStrategy ?? null)}`,
@@ -1479,6 +1505,7 @@ async function runCritic(
   critic: CriticName,
   evaluation: Record<string, unknown>,
   candidates: TradeCandidate[],
+  alerts: NewsEvent[],
   currentHypotheses?: TradeHypothesisDraft,
 ): Promise<CriticAdvice> {
   const configuration = criticConfiguration(critic);
@@ -1495,6 +1522,7 @@ async function runCritic(
       "Do not use tools, delegate, or claim execution authority.",
       "Return one concise support or objection statement with the exact evidence that drives it.",
       `Candidate evidence: ${JSON.stringify(compactTradeCandidates(candidates))}`,
+      `News evidence catalogue visible to the main trader: ${JSON.stringify(newsEvidenceCatalogue(alerts))}`,
       `Main trader current hypotheses: ${JSON.stringify(currentHypotheses ?? null)}`,
       `Execution context: ${JSON.stringify(evaluation.execution_context ?? {})}`,
     ].join("\n"), deadlineSeconds);
@@ -1531,13 +1559,14 @@ async function runCritics(
   client: TrueForge,
   evaluation: Record<string, unknown>,
   candidates: TradeCandidate[],
+  alerts: NewsEvent[],
   currentHypotheses?: TradeHypothesisDraft,
   onStart?: (critic: CriticName) => Promise<void>,
   onAdvice?: (advice: CriticAdvice) => Promise<void>,
 ): Promise<CriticAdvice[]> {
   return Promise.all(CRITIC_NAMES.map(async (critic) => {
     await onStart?.(critic);
-    const result = await runCritic(client, critic, evaluation, candidates, currentHypotheses);
+    const result = await runCritic(client, critic, evaluation, candidates, alerts, currentHypotheses);
     await onAdvice?.(result);
     return result;
   }));
@@ -1567,19 +1596,21 @@ async function runTraderHypothesisCycle(
   activeStrategy?: ActiveStrategy,
 ): Promise<TradeHypothesisDraft> {
   const allowedCandidates = decisionCandidates.map((candidate) => candidate.candidate_id);
+  const allowedNewsEvidence = alerts.flatMap((event) => newsEvidenceRef(event) ?? []);
   const turn = await runReadOnlyModelTurn(client, sessionId, buildHypothesisPrompt(
     trajectory, alerts, market, evaluation, cycleId, decisionCandidates, activeMemory, activeStrategy,
   ), traderTimeoutSeconds());
-  const firstDraft = parseTradeHypothesisDraft(turn.text, cycleId, allowedCandidates);
+  const firstDraft = parseTradeHypothesisDraft(turn.text, cycleId, allowedCandidates, allowedNewsEvidence);
   if (firstDraft) return firstDraft;
   const repair = await runReadOnlyModelTurn(client, sessionId, [
     "Your previous hypothesis draft violated the required wire contract.",
     "Repair formatting only; preserve evidence-grounded content. Do not call tools.",
     `cycle_id must be exactly ${cycleId}.`,
     `focus_candidate_id and every hypothesis candidate_id must come from: ${JSON.stringify(allowedCandidates)}`,
+    `Every news evidence ref must be copied exactly from: ${JSON.stringify(allowedNewsEvidence)}`,
     "Return exactly one final single line prefixed TRADE_HYPOTHESES_JSON: with root fields schema, cycle_id, focus_candidate_id, hypotheses and no text after it.",
   ].join("\n"), traderTimeoutSeconds());
-  const repairedDraft = parseTradeHypothesisDraft(repair.text, cycleId, allowedCandidates);
+  const repairedDraft = parseTradeHypothesisDraft(repair.text, cycleId, allowedCandidates, allowedNewsEvidence);
   if (!repairedDraft) throw new Error("trader violated the trade.hypotheses.v1 root contract twice");
   return repairedDraft;
 }
@@ -1643,8 +1674,12 @@ async function runTraderCycle(
   );
   const decisionCandidateIds = decisionCandidates.map((candidate) => candidate.candidate_id);
   const executableCandidateIds = executableCandidates.map((candidate) => candidate.candidate_id);
-  const plan = parseTradePlan(turn.text, cycleId, decisionCandidateIds, executableCandidateIds);
-  if (!plan) throw new Error("trader violated the trade.plan.v2 root contract");
+  const allowedNewsEvidence = alerts.flatMap((event) => newsEvidenceRef(event) ?? []);
+  const parsedPlan = parseTradePlan(
+    turn.text, cycleId, decisionCandidateIds, executableCandidateIds, allowedNewsEvidence,
+  );
+  if (!parsedPlan) throw new Error("trader violated the trade.plan.v2 root or evidence contract");
+  const plan = normalizeCriticResolutions(parsedPlan, critics);
   const selected = plan.steps.map((step) => step.candidate_id);
   const selectedSymbols = selected.flatMap((candidateId) => {
     const candidate = executableCandidates.find((item) => item.candidate_id === candidateId);
@@ -2142,7 +2177,7 @@ async function main(): Promise<void> {
             };
             await writeJsonAtomic(runtimePath, runtime);
             const critics = await runCritics(
-              client, precomputedEvaluation, decisionCandidates, currentHypotheses,
+              client, precomputedEvaluation, decisionCandidates, passedPending, currentHypotheses,
             );
             await appendTimeline(
               "critics",

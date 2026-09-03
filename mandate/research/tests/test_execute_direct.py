@@ -104,6 +104,21 @@ def test_trade_plan_requires_a_hypothesis_for_every_selected_candidate() -> None
         execution.select_entries(_plan_evaluation("AAPL", "MSFT"), plan)
 
 
+def test_trade_plan_fails_closed_when_a_critic_is_unavailable() -> None:
+    plan = _plan("candidate-1")
+    plan["critic_resolutions"][1] = {
+        "critic": "market",
+        "resolution": "UNAVAILABLE",
+        "reason": "timeout: advisory deadline exceeded",
+    }
+    with pytest.raises(ValueError, match="forbidden while a critic is unavailable"):
+        execution.select_entries(_plan_evaluation("AAPL"), plan)
+
+    parked = _plan(action="PARK")
+    parked["critic_resolutions"][1] = plan["critic_resolutions"][1]
+    assert execution.select_entries(_plan_evaluation("AAPL"), parked) == []
+
+
 def test_trade_plan_park_requires_reason_and_selects_nothing() -> None:
     evaluation = _plan_evaluation("AAPL")
     assert execution.select_entries(evaluation, _plan(action="PARK")) == []
