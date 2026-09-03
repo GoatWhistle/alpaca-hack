@@ -224,6 +224,8 @@ test("planner contracts treat risk-off as directional context rather than a shor
   );
   assert.match(hypothesisPrompt, /risk_off.*support SHORT.*oppose LONG/iu);
   assert.match(plannerPrompt, /risk_off.*supports a SHORT.*Only evidence\.blocked_by/iu);
+  assert.match(hypothesisPrompt, /compare executable LONG and SHORT/iu);
+  assert.match(plannerPrompt, /prefer the strongest executable SHORT/iu);
 });
 
 test("decision context preserves executable ids and adds a signal fallback", () => {
