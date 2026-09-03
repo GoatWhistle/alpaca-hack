@@ -49,7 +49,11 @@
   min-width: 920px;
 }
 
-.agent-edges {
+/* The chrome's generic icon rule targets `.mandate-chrome svg` and therefore
+   has higher specificity than a lone class selector. Keep the topology SVG
+   stretched over the canvas instead of letting that rule collapse it to the
+   18px icon size. */
+.mandate-chrome svg.agent-edges {
   position: absolute;
   inset: 0;
   width: 100%;

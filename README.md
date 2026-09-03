@@ -36,10 +36,6 @@
 ## See It In Action
 
 <p align="center">
-  <em>Replace placeholders with your 1280×720 captures before submission — these frames are what judges open first.</em>
-</p>
-
-<p align="center">
   <a href="https://alpaca.miposts.com"><img src="docs/screenshots/dashboard.png" alt="Dashboard — Live Equity & P&L" width="100%"/></a><br/>
   <em>Dashboard — live equity, P&L, positions and orders. Every number is real Alpaca paper data. — <a href="https://alpaca.miposts.com">🚀 Open live dashboard →</a></em>
 </p>
@@ -51,7 +47,7 @@
 **Trader Timeline**
 <img src="docs/screenshots/timeline.png" alt="Timeline" width="100%"/>
 
-*From hypothesis to challenged decision — fully transparent, streamed live.*
+*The current strategy, hypotheses, critic synthesis, watcher verdicts and tool results — streamed as one conversation.*
 
 </td>
 <td width="50%">
@@ -59,7 +55,7 @@
 **Orders & Exits**
 <img src="docs/screenshots/orders.png" alt="Orders" width="100%"/>
 
-*Entries and risk exits working in parallel. Intraday positions flattened at 15:50 ET.*
+*Every filled strategy paired with its live mark or exit, holding time, P&L and recorded exit reason.*
 
 </td>
 </tr>
@@ -69,7 +65,7 @@
 **Market Intelligence**
 <img src="docs/screenshots/monitoring.png" alt="Monitoring" width="100%"/>
 
-*SPY regime, macro context, live discovery and the dedicated IPO stream.*
+*Attributable market news from Alpaca and first-party sources, retained as evidence for the trader.*
 
 </td>
 <td width="50%">
@@ -77,7 +73,7 @@
 **Risk & Options**
 <img src="docs/screenshots/risk.png" alt="Risk" width="100%"/>
 
-*Quality gates, ATR-based protection and defined-risk options confirmation.*
+*Live service/feed health and the forward strategy scorecard that adapts ensemble weights.*
 
 </td>
 </tr>
@@ -137,7 +133,7 @@ No black boxes — timeline, evidence and critic debates are all visible.
 
 ## How It Works
 
-### The Loop — Every 30 Seconds, All Day
+### The Loop — Every 3 Minutes in Market, Every 5 Minutes Off-Hours
 
 <p align="center">
   <img src="docs/screenshots/flow.png" alt="How it works" width="85%"/>

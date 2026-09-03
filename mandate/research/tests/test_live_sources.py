@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 
+from mandate_research import live_sources
 from mandate_research.live_sources import CIK_BY_SYMBOL, collect_live_news, collect_official_news, probe_live_sources
 
 
@@ -61,6 +63,23 @@ def fake_fetch(url: str, headers: dict[str, str]) -> bytes:
     )):
         return GENERIC_RSS
     raise AssertionError(f"unexpected URL {url}")
+
+
+def test_fetch_retries_transient_transport_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+
+    def flaky_get(url: str, **_kwargs: object) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise httpx.ConnectError("transient TLS EOF")
+        return httpx.Response(200, content=GENERIC_RSS, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(live_sources.httpx, "get", flaky_get)
+    monkeypatch.setattr(live_sources.time, "sleep", lambda _seconds: None)
+
+    assert live_sources._fetch(live_sources.META_RSS_ENDPOINT, {"User-Agent": "MANDATE"}) == GENERIC_RSS
+    assert attempts == 3
 
 
 def test_probe_parses_and_scopes_all_three_sources(monkeypatch: pytest.MonkeyPatch) -> None:

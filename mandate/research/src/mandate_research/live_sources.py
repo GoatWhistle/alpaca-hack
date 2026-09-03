@@ -113,13 +113,26 @@ def _fetch(url: str, headers: dict[str, str]) -> bytes:
             if delay > 0:
                 time.sleep(delay)
             _SEC_NEXT_REQUEST_AT = time.monotonic() + 0.125
-    response = httpx.get(
-        url,
-        headers=headers,
-        timeout=timeout,
-        follow_redirects=True,
-        proxy=_request_proxy(url),
-    )
+    response: httpx.Response | None = None
+    last_transport_error: httpx.TransportError | None = None
+    for attempt in range(3):
+        try:
+            response = httpx.get(
+                url,
+                headers=headers,
+                timeout=timeout,
+                follow_redirects=True,
+                proxy=_request_proxy(url),
+            )
+            break
+        except httpx.TransportError as exc:
+            last_transport_error = exc
+            if attempt == 2:
+                raise
+            time.sleep(0.25 * (2 ** attempt))
+    if response is None:
+        assert last_transport_error is not None
+        raise last_transport_error
     response.raise_for_status()
     if response.url.scheme != "https" or response.url.host not in ALLOWED_HOSTS:
         raise ValueError("live source redirected outside the fixed HTTPS allowlist")
