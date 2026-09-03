@@ -9,6 +9,7 @@ import {
   buildAutonomyPrompt,
   buildDecisionCandidates,
   buildHypothesisPrompt,
+  compactOpenPositions,
   criticTimeoutSeconds,
   criticsAllowEntries,
   detectNewEvents,
@@ -27,6 +28,7 @@ import {
   type MarketResult,
   type NewsEvent,
   positionFastExitLimit,
+  positionWatcherTimeoutSeconds,
   type PositionWatchRun,
   type Trajectory,
 } from "./autonomyRunner.js";
@@ -53,6 +55,30 @@ test("watcher fast exits are bounded and can be disabled entirely", () => {
   assert.equal(positionFastExitLimit({ MANDATE_POSITION_FAST_EXIT: "true", MANDATE_POSITION_FAST_EXIT_MAX: "99" }), 6);
   assert.equal(positionFastExitLimit({ MANDATE_POSITION_FAST_EXIT: "true", MANDATE_POSITION_FAST_EXIT_MAX: "-4" }), 0);
   assert.equal(positionFastExitLimit({ MANDATE_POSITION_FAST_EXIT: "true", MANDATE_POSITION_FAST_EXIT_MAX: "oops" }), 2);
+});
+
+test("position watcher gets enough time for a six-position response", () => {
+  assert.equal(positionWatcherTimeoutSeconds({}), 30);
+  assert.equal(positionWatcherTimeoutSeconds({ MANDATE_POSITION_WATCHER_TIMEOUT_SECONDS: "8" }), 15);
+  assert.equal(positionWatcherTimeoutSeconds({ MANDATE_POSITION_WATCHER_TIMEOUT_SECONDS: "45" }), 45);
+  assert.equal(positionWatcherTimeoutSeconds({ MANDATE_POSITION_WATCHER_TIMEOUT_SECONDS: "90" }), 60);
+  assert.equal(positionWatcherTimeoutSeconds({ MANDATE_POSITION_WATCHER_TIMEOUT_SECONDS: "bad" }), 30);
+});
+
+test("option verticals expose their directional side to the watcher", () => {
+  const positions = compactOpenPositions({
+    execution_context: { positions: {
+      MSFT260911C00510000: {
+        asset_class: "us_option", qty: "2", cost_basis: "1000", market_value: "900", unrealized_pl: "-100",
+      },
+      MSFT260911C00530000: {
+        asset_class: "us_option", qty: "-2", cost_basis: "-300", market_value: "-200", unrealized_pl: "100",
+      },
+    } },
+    symbols: {},
+  });
+  assert.equal(positions[0]?.underlying, "MSFT");
+  assert.equal(positions[0]?.side, "LONG");
 });
 
 test("critic timeout allows parallel advisors enough time and stays bounded", () => {

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { fastExitAssessments, parsePositionWatch, positionEvidenceRefs } from "./positionWatch.js";
+import {
+  fastExitAssessments, parsePositionWatch, positionEvidenceRefs, stabilizePositionWatch,
+} from "./positionWatch.js";
 
 function response(assessments: Record<string, unknown>[]): string {
   return `POSITION_WATCH_JSON: ${JSON.stringify({
@@ -23,6 +25,7 @@ test("position watcher requires exactly one grounded assessment per open underly
   assert.equal(parsePositionWatch(raw, "cycle-1", ["AAPL", "MSFT"]), null);
   assert.equal(parsePositionWatch(raw, "another-cycle", ["AAPL"]), null);
   assert.equal(parsePositionWatch(raw.replace("POSITION_WATCH_JSON:", "POSITION_WATCH_JSON"), "cycle-1", ["AAPL"])?.assessments.length, 1);
+  assert.equal(parsePositionWatch(raw.slice(raw.indexOf("{")).trim(), "cycle-1", ["AAPL"])?.assessments.length, 1);
 });
 
 test("position watcher rejects fabricated evidence and non-open symbols", () => {
@@ -71,4 +74,68 @@ test("main trader may ground a decision in any supplied position fact", () => {
   assert.ok(refs.includes("position.AAPL.current_value"));
   assert.ok(refs.includes("strategy.AAPL.invalidation"));
   assert.ok(refs.includes("position.AAPL.blocked_by"));
+});
+
+test("missing research context cannot masquerade as a weakening thesis", () => {
+  const watch = parsePositionWatch(response([{
+    underlying: "AAPL",
+    state: "WEAKENING",
+    recommendation: "REDUCE",
+    reason: "Signal and quality fields are null, so reduce exposure.",
+    evidence_refs: ["strategy.AAPL.signal_direction"],
+  }]), "cycle-1", ["AAPL"]);
+  assert.ok(watch);
+  const stabilized = stabilizePositionWatch(watch, [{
+    underlying: "AAPL", asset_class: "equity", side: "LONG", legs: 1,
+    quantity: "10", entry_value: "1000", current_value: "980",
+    unrealized_pl: "-20", unrealized_plpc: "-0.02", thesis: null,
+    invalidation: null, signal_direction: null, signal_strength: null,
+    quality_pass: null, news_price_aligned: null, risk_off: true, blocked_by: ["stale_quote"],
+  }]);
+  assert.deepEqual(stabilized.assessments[0], {
+    underlying: "AAPL",
+    state: "HEALTHY",
+    recommendation: "HOLD",
+    reason: "Fresh thesis and signal context is unavailable; defer to deterministic hard-risk exits.",
+    evidence_refs: ["position.AAPL.unrealized_plpc"],
+  });
+});
+
+test("an evidence-backed watcher change is preserved", () => {
+  const watch = parsePositionWatch(response([{
+    underlying: "AAPL",
+    state: "WEAKENING",
+    recommendation: "REDUCE",
+    reason: "The current sell signal opposes the retained long thesis.",
+    evidence_refs: ["strategy.AAPL.signal_direction"],
+  }]), "cycle-1", ["AAPL"]);
+  assert.ok(watch);
+  const stabilized = stabilizePositionWatch(watch, [{
+    underlying: "AAPL", asset_class: "equity", side: "LONG", legs: 1,
+    quantity: "10", entry_value: "1000", current_value: "980",
+    unrealized_pl: "-20", unrealized_plpc: "-0.02", thesis: "Breakout continuation",
+    invalidation: "Sell signal below VWAP", signal_direction: "sell", signal_strength: "0.4",
+    quality_pass: true, news_price_aligned: null, risk_off: true, blocked_by: [],
+  }]);
+  assert.equal(stabilized.assessments[0]?.recommendation, "REDUCE");
+});
+
+test("loss and entry quality alone cannot reduce a position against an intact signal", () => {
+  const watch = parsePositionWatch(response([{
+    underlying: "MSFT",
+    state: "WEAKENING",
+    recommendation: "REDUCE",
+    reason: "Loss and a wide spread weaken conviction.",
+    evidence_refs: ["position.MSFT.unrealized_plpc", "strategy.MSFT.quality_pass"],
+  }]), "cycle-1", ["MSFT"]);
+  assert.ok(watch);
+  const stabilized = stabilizePositionWatch(watch, [{
+    underlying: "MSFT", asset_class: "option", side: "LONG", legs: 2,
+    quantity: "long:2,short:-2", entry_value: "1282", current_value: "1128",
+    unrealized_pl: "-154", unrealized_plpc: "-0.12", thesis: null,
+    invalidation: null, signal_direction: "buy", signal_strength: "0.72",
+    quality_pass: false, news_price_aligned: true, risk_off: false, blocked_by: ["quality_gate"],
+  }]);
+  assert.equal(stabilized.assessments[0]?.recommendation, "HOLD");
+  assert.match(stabilized.assessments[0]?.reason ?? "", /entry-quality fields alone/u);
 });

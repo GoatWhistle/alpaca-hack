@@ -3,7 +3,12 @@ import { fileURLToPath } from "node:url";
 
 import { TrueForge } from "@truefoundry/trueforge-sdk";
 
-import { buildCriticSpec, buildOperatorSpec, buildTraderSpec } from "./agentSpec.js";
+import {
+  buildCriticSpec,
+  buildOperatorSpec,
+  buildPositionWatcherSpec,
+  buildTraderSpec,
+} from "./agentSpec.js";
 import { loadWorkspaceEnv } from "./workspaceEnv.js";
 
 loadWorkspaceEnv();
@@ -148,7 +153,7 @@ const advisoryAgents = await Promise.all(critics.map((critic) =>
 ));
 const watcherAgent = await upsertAgent(
   positionWatcher.name,
-  buildCriticSpec(positionWatcher.instructions, positionWatcher.model),
+  buildPositionWatcherSpec(positionWatcher.instructions, positionWatcher.model),
 );
 
 console.log(JSON.stringify({

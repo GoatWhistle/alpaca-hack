@@ -77,6 +77,20 @@ export function buildCriticSpec(
   };
 }
 
+export function buildPositionWatcherSpec(
+  instructions: string,
+  model: string,
+): TrueForgeApi.AgentSpec {
+  const base = buildCriticSpec(instructions, model);
+  return {
+    ...base,
+    model: {
+      name: model,
+      params: { maxTokens: 1_200, temperature: 0, thinking: { type: "disabled" } },
+    },
+  };
+}
+
 export function buildOperatorSpec(
   instructions: string,
   model = "zai/glm-4-5-air",

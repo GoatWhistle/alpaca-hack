@@ -80,8 +80,16 @@ function text(value: unknown, limit: number): string | null {
 
 function markedPayload(raw: string): Record<string, unknown> | null {
   const markerName = "POSITION_WATCH_JSON";
-  const lines = raw.trim().split(/\r?\n/u).filter((line) => line.trim());
+  const trimmed = raw.trim();
+  const lines = trimmed.split(/\r?\n/u).filter((line) => line.trim());
   const marked = lines.filter((line) => line.startsWith(markerName));
+  if (marked.length === 0 && trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      return record(JSON.parse(trimmed) as unknown);
+    } catch {
+      return null;
+    }
+  }
   if (marked.length !== 1 || marked[0] !== lines.at(-1)) return null;
   const suffix = marked[0]!.slice(markerName.length);
   const json = suffix.startsWith(":") ? suffix.slice(1).trim() : suffix.trim();
@@ -134,6 +142,52 @@ export function parsePositionWatch(
 
 export function unavailablePositionWatch(cycleId: string): PositionWatch {
   return { schema: "position.watch.v1", cycle_id: cycleId, assessments: [] };
+}
+
+function hasPositionDecisionContext(position: PositionWatchInput): boolean {
+  return position.thesis !== null
+    || position.invalidation !== null
+    || position.signal_direction !== null
+    || position.signal_strength !== null
+    || position.quality_pass !== null
+    || position.news_price_aligned !== null;
+}
+
+function hasOpposingDirectionalSignal(position: PositionWatchInput): boolean {
+  const direction = position.signal_direction?.trim().toLowerCase();
+  const strength = Number(position.signal_strength);
+  if (!Number.isFinite(strength) || strength < 0.15) return false;
+  if (position.side === "LONG") return direction === "sell" || direction === "short";
+  if (position.side === "SHORT") return direction === "buy" || direction === "long";
+  return false;
+}
+
+/** Null research fields are missing context, not evidence of a weaker thesis. */
+export function stabilizePositionWatch(
+  watch: PositionWatch,
+  positions: PositionWatchInput[],
+): PositionWatch {
+  const byUnderlying = new Map(positions.map((position) => [position.underlying, position]));
+  return {
+    ...watch,
+    assessments: watch.assessments.map((assessment) => {
+      const position = byUnderlying.get(assessment.underlying);
+      if (assessment.recommendation === "HOLD" || !position) {
+        return assessment;
+      }
+      const hasContext = hasPositionDecisionContext(position);
+      if (hasContext && hasOpposingDirectionalSignal(position)) return assessment;
+      return {
+        underlying: assessment.underlying,
+        state: "HEALTHY",
+        recommendation: "HOLD",
+        reason: hasContext
+          ? "No opposing directional signal; P&L and entry-quality fields alone do not invalidate the position."
+          : "Fresh thesis and signal context is unavailable; defer to deterministic hard-risk exits.",
+        evidence_refs: [`position.${assessment.underlying}.unrealized_plpc`],
+      };
+    }),
+  };
 }
 
 export function fastExitAssessments(watch: PositionWatch, limit: number): PositionAssessment[] {

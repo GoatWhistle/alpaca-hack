@@ -801,8 +801,6 @@ def select_option_exits(
                 common_qty = gcd(common_qty, value)
             ratios = [value // common_qty for value in quantities]
             if forced_action is not None and forced_action.get("action") == "REDUCE":
-                if common_qty % 2 != 0:
-                    continue
                 common_qty //= 2
                 if common_qty < 1:
                     continue
@@ -898,6 +896,21 @@ def select_agent_position_exits(
             health.update({"healthy": True, "unresolved": []})
         return []
     actions: list[dict[str, Any]] = []
+    deferred: set[str] = set()
+    for underlying, decision in changes.items():
+        matching = [
+            item for item in positions
+            if (_option_underlying(str(item.get("symbol", "")).upper())
+                or str(item.get("symbol", "")).upper()) == underlying
+        ]
+        if decision.get("action") != "REDUCE" or not matching:
+            continue
+        try:
+            quantities = [abs(_decimal(item.get("qty"), f"{underlying} position qty")) for item in matching]
+        except ValueError:
+            continue
+        if quantities and all(quantity == ONE for quantity in quantities):
+            deferred.add(underlying)
     for position in positions:
         if str(position.get("asset_class", "us_equity")) != "us_equity":
             continue
@@ -912,8 +925,6 @@ def select_agent_position_exits(
             continue
         close_qty = abs(qty)
         if decision["action"] == "REDUCE":
-            if close_qty % 2 != 0:
-                continue
             close_qty = (close_qty / Decimal("2")).to_integral_value(rounding=ROUND_FLOOR)
         if close_qty < ONE or current <= ZERO:
             continue
@@ -925,7 +936,8 @@ def select_agent_position_exits(
             "evidence_refs": decision.get("evidence_refs", []),
         })
     option_actions = select_option_exits(
-        positions, now=now, limit=6, forced_actions=changes,
+        positions, now=now, limit=6,
+        forced_actions={key: value for key, value in changes.items() if key not in deferred},
     )
     option_symbols: dict[str, set[str]] = {}
     for position in positions:
@@ -973,12 +985,14 @@ def select_agent_position_exits(
         }
         for underlying in changes
     }
-    unresolved = sorted(stale | {
+    unresolved = sorted(stale | ({
         underlying for underlying, symbols in expected_by_underlying.items()
         if not symbols or not symbols.issubset(materialized_symbols)
-    })
+    } - deferred))
     if health is not None:
         health.update({"healthy": not unresolved, "unresolved": unresolved})
+        if deferred:
+            health["deferred"] = sorted(deferred)
     return actions
 
 

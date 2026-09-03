@@ -9,7 +9,7 @@ limits:
   max_daily_loss_pct: 10
   # Alpaca counts submissions, replacements, cancels and exits separately.
   # This allows several bounded attempts without disabling exits late in session.
-  max_orders_per_day: 50
+  max_orders_per_day: 200
 wake_me_if:
   - daily_loss_pct > 8
   - single_symbol_move_pct > 8

@@ -319,7 +319,32 @@ def test_one_contract_option_reduce_does_not_turn_into_full_exit() -> None:
         "reason": "weaker", "evidence_refs": ["position.AAPL.unrealized_plpc"],
     }], now=now, health=health)
     assert actions == []
-    assert health == {"healthy": False, "unresolved": ["AAPL"]}
+    assert health == {"healthy": True, "unresolved": [], "deferred": ["AAPL"]}
+
+
+def test_three_contract_option_spread_reduces_by_one_atomic_contract() -> None:
+    now = datetime(2026, 9, 2, 18, 0, tzinfo=timezone.utc)
+    expiry = (now.date() + timedelta(days=10)).strftime("%y%m%d")
+    positions = [
+        {
+            "symbol": f"AMZN{expiry}C00250000", "asset_class": "us_option", "qty": "3",
+            "current_price": "4", "cost_basis": "1200", "unrealized_pl": "0",
+        },
+        {
+            "symbol": f"AMZN{expiry}C00260000", "asset_class": "us_option", "qty": "-3",
+            "current_price": "1", "cost_basis": "-300", "unrealized_pl": "0",
+        },
+    ]
+    health: dict = {}
+    actions = execution.select_agent_position_exits(positions, [{
+        "underlying": "AMZN", "action": "REDUCE", "fraction": 0.5,
+        "reason": "weaker", "evidence_refs": ["position.AMZN.unrealized_plpc"],
+    }], now=now, health=health)
+    assert len(actions) == 1
+    assert actions[0]["kind"] == "option_exit_mleg"
+    assert actions[0]["qty"] == "1"
+    assert actions[0]["payload"]["qty"] == "1"
+    assert health == {"healthy": True, "unresolved": []}
 
 
 def test_position_change_is_rejected_when_live_position_fingerprint_changed() -> None:

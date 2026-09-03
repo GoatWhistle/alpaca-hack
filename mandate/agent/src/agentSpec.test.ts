@@ -6,6 +6,7 @@ import {
   ALPACA_MCP_WRITE_TOOLS,
   buildCriticSpec,
   buildOperatorSpec,
+  buildPositionWatcherSpec,
   buildTraderSpec,
 } from "./agentSpec.js";
 
@@ -29,6 +30,14 @@ test("critics use their configured model and have no execution authority", () =>
   assert.deepEqual(spec.mcpServers, []);
   assert.equal(spec.config?.iterationLimit, 2);
   assert.equal(spec.config?.sandbox?.enabled, false);
+});
+
+test("position watcher fits the bounded six-position wire contract", () => {
+  const spec = buildPositionWatcherSpec("watch positions", "zai/watcher-model");
+  assert.equal(spec.model.name, "zai/watcher-model");
+  assert.equal(spec.model.params?.maxTokens, 1_200);
+  assert.deepEqual(spec.mcpServers, []);
+  assert.equal(spec.config?.iterationLimit, 2);
 });
 
 test("operator can only read or approval-gate trader memory", () => {
