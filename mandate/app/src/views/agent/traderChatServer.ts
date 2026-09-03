@@ -252,6 +252,67 @@ function newsJournal(event: TraderTimelineEvent): string {
   ].filter(Boolean).join("\n\n"));
 }
 
+function hypothesisJournal(event: TraderTimelineEvent): string {
+  const draft = record(event.details.draft);
+  if (event.details.phase === "forming") {
+    const candidates = Array.isArray(event.details.candidates)
+      ? event.details.candidates.slice(0, 10)
+      : [];
+    const labels = candidates.map((value) => {
+      const candidate = record(value);
+      const symbol = markdownText(candidate.symbol, 24) ?? "unknown";
+      return `${symbol}${candidate.execution_eligible === true ? " · executable" : " · context"}`;
+    });
+    return capJournal([
+      "**Main trader · selecting active hypothesis**",
+      markdownText(event.summary, 800) ?? "Reviewing the ranked context.",
+      labels.length > 0 ? `Candidate focus: ${labels.join(" · ")}` : "Candidate context is loading.",
+    ].join("\n\n"));
+  }
+  const focus = markdownText(draft.focus_candidate_id, 100) ?? "unavailable";
+  const hypotheses = Array.isArray(draft.hypotheses) ? draft.hypotheses.slice(0, 5) : [];
+  if (hypotheses.length === 0) {
+    return `**Main trader · hypothesis unavailable**\n\n${markdownText(event.summary, 1_200) ?? "No valid hypothesis was published."}`;
+  }
+  const rendered = hypotheses.map((value, index) => {
+    const hypothesis = record(value);
+    const candidate = markdownText(hypothesis.candidate_id, 100) ?? `candidate ${index + 1}`;
+    const confidence = markdownText(hypothesis.confidence, 20) ?? "unknown";
+    const thesis = markdownText(hypothesis.thesis, 600) ?? "No thesis supplied.";
+    const invalidation = markdownText(hypothesis.invalidation, 600) ?? "No invalidation supplied.";
+    const active = boundedString(hypothesis.candidate_id, 100) === boundedString(draft.focus_candidate_id, 100);
+    return [
+      `### ${active ? "Testing now" : "Secondary hypothesis"} · ${candidate}`,
+      `**Confidence:** ${confidence}`,
+      thesis,
+      `- Evidence for: ${evidenceRefs(hypothesis.supports)}`,
+      `- Evidence against: ${evidenceRefs(hypothesis.contradicts)}`,
+      `- Reject when: ${invalidation}`,
+    ].join("\n");
+  });
+  return capJournal([
+    "**Main trader · active hypothesis set**",
+    `Current focus: **${focus}**`,
+    ...rendered,
+  ].join("\n\n"));
+}
+
+function criticResultsJournal(event: TraderTimelineEvent): string {
+  const items = Array.isArray(event.details.items) ? event.details.items.slice(0, 3) : [];
+  const rendered = items.map((value) => {
+    const advice = record(value);
+    const critic = markdownText(advice.critic, 40) ?? "advisory";
+    const status = markdownText(advice.status, 30) ?? "unknown";
+    const summary = markdownText(advice.summary, 1_000) ?? "No result supplied.";
+    return `- **${critic} · ${status}** — ${summary}`;
+  });
+  return capJournal([
+    "**Evidence returned to the main trader**",
+    markdownText(event.summary, 500) ?? "Advisory checks completed.",
+    rendered.length > 0 ? rendered.join("\n") : "No advisory result was available.",
+  ].join("\n\n"));
+}
+
 function safeForPublicChat(value: unknown, depth = 0): unknown {
   if (depth > 6) return "[truncated]";
   if (typeof value === "string") return value.length > 2_000 ? `${value.slice(0, 2_000)}…` : value;
@@ -350,8 +411,14 @@ function modelTextEvent(event: TraderTimelineEvent, content: string, suffix = "m
  */
 export function timelineEventToTurnEvents(event: TraderTimelineEvent): NativeTurnEvent[] {
   if (event.kind === "news") return [modelTextEvent(event, newsJournal(event), "news")];
-  if (event.kind === "tool_call") return [toolCallEvent(event)];
-  if (event.kind === "tool_result" || event.kind === "critics") {
+  if (event.kind === "hypothesis") return [modelTextEvent(event, hypothesisJournal(event), "hypothesis")];
+  if (event.kind === "critics") {
+    return [modelTextEvent(event, criticResultsJournal(event), "critic-results")];
+  }
+  if (event.kind === "tool_call") {
+    return toolName(event).startsWith("critic.") ? [] : [toolCallEvent(event)];
+  }
+  if (event.kind === "tool_result") {
     return [toolResponseEvent(event)];
   }
   if (event.kind === "execution") {
@@ -400,6 +467,7 @@ export function timelineEventToTurnEvents(event: TraderTimelineEvent): NativeTur
       ),
     ];
   }
+  if (event.kind === "session") return [];
   const label = event.kind === "trigger" ? "Trigger" : "Session";
   return [modelTextEvent(event, `**${label} · ${event.status}**\n\n${markdownText(event.summary, 4_000) ?? "No summary supplied."}`)];
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseTradePlan } from "./tradePlan.js";
+import { parseTradeHypothesisDraft, parseTradePlan } from "./tradePlan.js";
 
 function validPayload(): Record<string, unknown> {
   return {
@@ -39,6 +39,28 @@ function validPayload(): Record<string, unknown> {
 function line(payload: Record<string, unknown>): string {
   return `TRADE_PLAN_JSON: ${JSON.stringify(payload)}`;
 }
+
+test("hypothesis draft names the main trader's active focus", () => {
+  const hypothesis = (validPayload().hypotheses as Record<string, unknown>[])[0]!;
+  const draft = {
+    schema: "trade.hypotheses.v1",
+    cycle_id: "cycle-1",
+    focus_candidate_id: "entry-1-AAPL",
+    hypotheses: [hypothesis],
+  };
+  const parsed = parseTradeHypothesisDraft(
+    `TRADE_HYPOTHESES_JSON: ${JSON.stringify(draft)}`,
+    "cycle-1",
+    ["entry-1-AAPL"],
+  );
+  assert.equal(parsed?.focus_candidate_id, "entry-1-AAPL");
+  assert.equal(parsed?.hypotheses[0]?.thesis, hypothesis.thesis);
+  assert.equal(parseTradeHypothesisDraft(
+    `TRADE_HYPOTHESES_JSON: ${JSON.stringify({ ...draft, focus_candidate_id: "unknown" })}`,
+    "cycle-1",
+    ["entry-1-AAPL"],
+  ), null);
+});
 
 test("strict parser accepts the exact canonical root", () => {
   const plan = parseTradePlan(line(validPayload()), "cycle-1", ["entry-1-AAPL"]);

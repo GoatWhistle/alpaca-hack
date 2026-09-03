@@ -36,6 +36,13 @@ export type TradeHypothesis = {
   invalidation: string;
 };
 
+export type TradeHypothesisDraft = {
+  schema: "trade.hypotheses.v1";
+  cycle_id: string;
+  focus_candidate_id: string;
+  hypotheses: TradeHypothesis[];
+};
+
 export type TradePlan = {
   schema: "trade.plan.v2";
   cycle_id: string;
@@ -80,16 +87,73 @@ function optionalEvidenceList(value: unknown): string[] | null {
   return items.every((item): item is string => item !== null) ? items : null;
 }
 
-function rootPayload(text: string): Record<string, unknown> | null {
+function markedPayload(text: string, marker: string): Record<string, unknown> | null {
   const lines = text.trim().split(/\r?\n/u).filter((line) => line.trim());
-  const marked = lines.filter((line) => line.startsWith("TRADE_PLAN_JSON:"));
+  const marked = lines.filter((line) => line.startsWith(marker));
   if (marked.length !== 1 || marked[0] !== lines.at(-1)) return null;
-  const raw = marked[0]?.slice("TRADE_PLAN_JSON:".length).trim() ?? "";
+  const raw = marked[0]?.slice(marker.length).trim() ?? "";
   try {
     return record(JSON.parse(raw) as unknown);
   } catch {
     return null;
   }
+}
+
+function parseHypotheses(value: unknown, allowedCandidates: Set<string>): TradeHypothesis[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 5) return null;
+  const hypotheses: TradeHypothesis[] = [];
+  const seen = new Set<string>();
+  for (const rawHypothesis of value) {
+    const hypothesis = record(rawHypothesis);
+    if (!hypothesis || !exactKeys(hypothesis, [
+      "candidate_id", "thesis", "confidence", "supports", "contradicts", "invalidation",
+    ])) return null;
+    const candidateId = typeof hypothesis.candidate_id === "string"
+      ? hypothesis.candidate_id.trim()
+      : "";
+    const thesis = boundedText(hypothesis.thesis, 240);
+    const invalidation = boundedText(hypothesis.invalidation, 240);
+    const supports = evidenceList(hypothesis.supports);
+    const contradicts = optionalEvidenceList(hypothesis.contradicts);
+    if (!allowedCandidates.has(candidateId) || seen.has(candidateId)
+      || !thesis || !invalidation || !supports || !contradicts
+      || !["low", "medium", "high"].includes(String(hypothesis.confidence))) return null;
+    seen.add(candidateId);
+    hypotheses.push({
+      candidate_id: candidateId,
+      thesis,
+      confidence: hypothesis.confidence as TradeHypothesis["confidence"],
+      supports,
+      contradicts,
+      invalidation,
+    });
+  }
+  return hypotheses;
+}
+
+export function parseTradeHypothesisDraft(
+  text: string,
+  expectedCycleId: string,
+  allowedCandidates: string[],
+): TradeHypothesisDraft | null {
+  const payload = markedPayload(text, "TRADE_HYPOTHESES_JSON:");
+  if (!payload || !exactKeys(payload, [
+    "schema", "cycle_id", "focus_candidate_id", "hypotheses",
+  ])) return null;
+  const focusCandidateId = typeof payload.focus_candidate_id === "string"
+    ? payload.focus_candidate_id.trim()
+    : "";
+  const allowed = new Set(allowedCandidates);
+  const hypotheses = parseHypotheses(payload.hypotheses, allowed);
+  if (payload.schema !== "trade.hypotheses.v1" || payload.cycle_id !== expectedCycleId
+    || !allowed.has(focusCandidateId) || !hypotheses
+    || !hypotheses.some((hypothesis) => hypothesis.candidate_id === focusCandidateId)) return null;
+  return {
+    schema: "trade.hypotheses.v1",
+    cycle_id: expectedCycleId,
+    focus_candidate_id: focusCandidateId,
+    hypotheses,
+  };
 }
 
 export function parseTradePlan(
@@ -98,7 +162,7 @@ export function parseTradePlan(
   allowedHypothesisCandidates: string[],
   executableCandidates: string[] = allowedHypothesisCandidates,
 ): TradePlan | null {
-  const payload = rootPayload(text);
+  const payload = markedPayload(text, "TRADE_PLAN_JSON:");
   if (!payload || !exactKeys(payload, [
     "schema", "cycle_id", "reason", "action", "hypotheses", "steps",
     "critic_coverage", "critic_resolutions", "memory_events",
@@ -111,35 +175,9 @@ export function parseTradePlan(
 
   const allowedHypotheses = new Set(allowedHypothesisCandidates);
   const allowedSteps = new Set(executableCandidates);
-  if (!Array.isArray(payload.hypotheses)
-    || payload.hypotheses.length < 1 || payload.hypotheses.length > 5) return null;
-  const hypotheses: TradeHypothesis[] = [];
-  const hypothesisCandidates = new Set<string>();
-  for (const rawHypothesis of payload.hypotheses) {
-    const hypothesis = record(rawHypothesis);
-    if (!hypothesis || !exactKeys(hypothesis, [
-      "candidate_id", "thesis", "confidence", "supports", "contradicts", "invalidation",
-    ])) return null;
-    const candidateId = typeof hypothesis.candidate_id === "string"
-      ? hypothesis.candidate_id.trim()
-      : "";
-    const thesis = boundedText(hypothesis.thesis, 240);
-    const invalidation = boundedText(hypothesis.invalidation, 240);
-    const supports = evidenceList(hypothesis.supports);
-    const contradicts = optionalEvidenceList(hypothesis.contradicts);
-    if (!allowedHypotheses.has(candidateId) || hypothesisCandidates.has(candidateId)
-      || !thesis || !invalidation || !supports || !contradicts
-      || !["low", "medium", "high"].includes(String(hypothesis.confidence))) return null;
-    hypothesisCandidates.add(candidateId);
-    hypotheses.push({
-      candidate_id: candidateId,
-      thesis,
-      confidence: hypothesis.confidence as TradeHypothesis["confidence"],
-      supports,
-      contradicts,
-      invalidation,
-    });
-  }
+  const hypotheses = parseHypotheses(payload.hypotheses, allowedHypotheses);
+  if (!hypotheses) return null;
+  const hypothesisCandidates = new Set(hypotheses.map((hypothesis) => hypothesis.candidate_id));
   const seenSymbols = new Set<string>();
   const steps: TradePlanStep[] = [];
   for (const rawStep of payload.steps) {

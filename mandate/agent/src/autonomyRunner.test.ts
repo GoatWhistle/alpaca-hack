@@ -8,6 +8,7 @@ import {
   appendTraderMemory,
   buildAutonomyPrompt,
   buildDecisionCandidates,
+  buildHypothesisPrompt,
   criticTimeoutSeconds,
   criticsAllowEntries,
   detectNewEvents,
@@ -179,6 +180,12 @@ test("final trader receives passed news even when no candidate is executable", (
   assert.equal(candidates[0]?.symbol, "AVGO");
   assert.equal(candidates[0]?.execution_eligible, false);
   assert.equal((candidates[0]?.evidence as Record<string, unknown>).news instanceof Object, true);
+  const prompt = buildHypothesisPrompt(
+    trajectory, [gatedEvent], market, evaluation, "cycle-1", candidates, [],
+  );
+  assert.match(prompt, /trade\.hypotheses\.v1/u);
+  assert.match(prompt, /watch-news-1-AVGO/u);
+  assert.match(prompt, /material guidance update/u);
 });
 
 test("decision context preserves executable ids and adds a signal fallback", () => {

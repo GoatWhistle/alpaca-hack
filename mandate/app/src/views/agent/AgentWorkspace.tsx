@@ -1,10 +1,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import type {
-  AgentStepsCardProps,
   AgentUIServer,
   ThreadComposerAreaShellProps,
-  ToolCallCardProps,
-  ToolGroupCardProps,
   WelcomeScreenProps,
 } from "@truefoundry/trueforge-ui";
 import {
@@ -22,49 +19,6 @@ import {
 } from "./traderChatServer";
 import type { Snapshot } from "../../lib/api";
 import { TradingBookStrip } from "./TradingBookStrip";
-
-const DefaultToolCallCard = defaultSlots.ToolCallCard;
-const DefaultToolGroupCard = defaultSlots.ToolGroupCard;
-const DefaultAgentStepsCard = defaultSlots.AgentStepsCard;
-
-/**
- * The autonomous stream must show every subagent tool call by default — a
- * collapsed tool row hides the desk's work. The operator can still collapse a
- * card; the choice is local to this override and resets on remount.
- */
-function OpenToolCallCard(props: ToolCallCardProps) {
-  const [collapsed, setCollapsed] = useState(false);
-  return (
-    <DefaultToolCallCard
-      {...props}
-      expanded={props.expanded === true || !collapsed}
-      onToggle={() => setCollapsed((value) => !value)}
-    />
-  );
-}
-
-function OpenToolGroupCard(props: ToolGroupCardProps) {
-  const [collapsed, setCollapsed] = useState(false);
-  return (
-    <DefaultToolGroupCard
-      {...props}
-      expanded={props.expanded === true || !collapsed}
-      onToggle={() => setCollapsed((value) => !value)}
-    />
-  );
-}
-
-/** Consecutive runs of tool calls also arrive as a collapsed "steps" group. */
-function OpenAgentStepsCard(props: AgentStepsCardProps) {
-  const [collapsed, setCollapsed] = useState(false);
-  return (
-    <DefaultAgentStepsCard
-      {...props}
-      expanded={props.expanded === true || !collapsed}
-      onToggle={() => setCollapsed((value) => !value)}
-    />
-  );
-}
 
 /** No composer on a read-only stream: let the log run to the bottom edge. */
 function StreamTail({ children, className }: ThreadComposerAreaShellProps) {
@@ -119,9 +73,6 @@ const OPERATOR_AGENT_CONFIG = { mode: "SingleAgent", name: "mandate-operator-age
 const OPERATOR_SERVER = { type: "trueforge", baseUrl: import.meta.env.BASE_URL } as const;
 const TRADER_OVERRIDES = {
   ThreadListNewButton: HiddenTraderNewChat,
-  ToolCallCard: OpenToolCallCard,
-  ToolGroupCard: OpenToolGroupCard,
-  AgentStepsCard: OpenAgentStepsCard,
   // The shell slot is typed as a forwardRef component from the SDK's own
   // React types; the trader tail never receives a ref, so a plain function
   // with a slot-type cast is enough.
