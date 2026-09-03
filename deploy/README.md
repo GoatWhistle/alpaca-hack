@@ -14,8 +14,9 @@ deployment:
 - services: `alpaca-hack-alpaca-mcp`, `alpaca-hack-research`, `alpaca-hack-trueforge`,
   `alpaca-hack-dashboard`, and `alpaca-hack-runner`
 - after any change to `mandate/agent/src/createAgent.ts` or the critic/operator
-  agents, run `cd /opt/alpaca-hack/mandate/agent && npm run apply` with the
-  service environment, otherwise TrueForge answers `Agent not found`
+  agents, apply them with the explicit isolated service URLs shown below;
+  `npm run apply` deliberately refuses to guess an MCP URL so it cannot attach
+  this deployment to `/opt/harness` on port 8020
 - Alpaca HTTP/WebSocket traffic uses the configured external
   `ALPACA_PROXY_URL`; no service from `/opt/harness` is reused
 
@@ -44,7 +45,11 @@ cd /opt/alpaca-hack/mandate/app && npm ci && npm run build
 /opt/alpaca-hack/venv/bin/pip install alpaca-mcp-server
 systemctl enable --now alpaca-hack-alpaca-mcp alpaca-hack-research alpaca-hack-trueforge
 curl --fail http://127.0.0.1:8890/api/v1/agents
-cd /opt/alpaca-hack/mandate/agent && npm run apply
+cd /opt/alpaca-hack/mandate/agent
+set -a; . /etc/alpaca-hack/alpaca-hack.env; set +a
+MANDATE_RESEARCH_URL=http://127.0.0.1:8120/mcp \
+MANDATE_ALPACA_MCP_URL=http://127.0.0.1:8100/mcp \
+TRUEFORGE_BASE_URL=http://127.0.0.1:8890 npm run apply
 systemctl restart alpaca-hack-dashboard
 curl --fail http://127.0.0.1:8130/api/snapshot
 # After the MCP initialize/tools-list checks and all HTTP smoke tests pass:

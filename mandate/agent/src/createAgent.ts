@@ -12,9 +12,13 @@ const AGENT_NAME = process.env.MANDATE_AGENT_NAME ?? "mandate-paper-agent";
 const OPERATOR_AGENT_NAME = process.env.MANDATE_OPERATOR_AGENT_NAME ?? "mandate-operator-agent";
 const LEGACY_AUTO_AGENT_NAME = "mandate-paper-agent-auto";
 const baseUrl = process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790";
-const researchUrl = new URL(
-  process.env.MANDATE_RESEARCH_URL ?? "http://127.0.0.1:8020/mcp",
-);
+const researchUrlRaw = process.env.MANDATE_RESEARCH_URL?.trim();
+if (!researchUrlRaw) {
+  throw new Error(
+    "MANDATE_RESEARCH_URL is required when applying agents; refusing to guess an MCP deployment",
+  );
+}
+const researchUrl = new URL(researchUrlRaw);
 if (!["http:", "https:"].includes(researchUrl.protocol)
   || researchUrl.username || researchUrl.password) {
   throw new Error("MANDATE_RESEARCH_URL must be an HTTP(S) URL without embedded credentials");

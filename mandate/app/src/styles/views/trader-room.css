@@ -175,11 +175,54 @@
   background: var(--surface);
 }
 
-.operator-fork-chat { min-height: 0; overflow: hidden; }
+.operator-fork-chat { position: relative; min-height: 0; overflow: hidden; }
 .operator-fork-chat > .aui-theme-root,
 .operator-fork-runtime { height: 100%; min-height: 0; }
 .operator-fork-runtime { display: flex; flex-direction: column; }
 .operator-fork-runtime > * { min-height: 0; flex: 1; }
+
+.operator-chat-error {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  left: 12px;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--denied) 45%, var(--line));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--denied) 9%, var(--surface-raised));
+  box-shadow: var(--shadow-subtle);
+}
+
+.operator-chat-error > div { min-width: 0; }
+.operator-chat-error strong,
+.operator-chat-error span { display: block; }
+.operator-chat-error strong {
+  color: var(--denied);
+  font: 600 var(--text-2xs) var(--font-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.operator-chat-error span {
+  margin-top: 4px;
+  color: var(--ink-muted);
+  font: 400 var(--text-2xs)/1.5 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.operator-chat-error button {
+  flex: none;
+  border: 0;
+  padding: 0 2px;
+  background: transparent;
+  color: var(--ink-muted);
+  font: 400 18px/1 var(--font-ui);
+  cursor: pointer;
+}
+.operator-chat-error button:hover { color: var(--ink); }
 
 .operator-fork-pane > footer {
   overflow: hidden;

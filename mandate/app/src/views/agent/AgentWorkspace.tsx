@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type {
   AgentUIServer,
   ThreadComposerAreaShellProps,
@@ -10,6 +10,7 @@ import {
   ThreadContainer,
   ThreadListContainer,
   TrueForgeUI,
+  getErrorMessage,
 } from "@truefoundry/trueforge-ui";
 import { MANDATE_CHAT_TOKENS } from "./chatTheme";
 import {
@@ -171,7 +172,7 @@ const TraderRuntime = memo(function TraderRuntime({
   );
 });
 
-const OperatorRuntime = memo(function OperatorRuntime({ onError }: { onError: () => void }) {
+const OperatorRuntime = memo(function OperatorRuntime({ onError }: { onError: (error: unknown) => void }) {
   return (
     <TrueForgeUI
       server={OPERATOR_SERVER}
@@ -192,6 +193,7 @@ export const AgentWorkspace = memo(function AgentWorkspace({
   error: string | null;
 }) {
   const [tradingDate, setTradingDate] = useState(newYorkTradingDate);
+  const [operatorError, setOperatorError] = useState<string | null>(null);
   const traderServer = useMemo(
     () => createTraderChatServer(),
     [],
@@ -200,6 +202,11 @@ export const AgentWorkspace = memo(function AgentWorkspace({
   useEffect(() => {
     const timer = window.setInterval(() => setTradingDate(newYorkTradingDate()), 30_000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  const handleOperatorError = useCallback((failure: unknown) => {
+    const message = getErrorMessage(failure, "Operator run failed before producing a response");
+    setOperatorError(message.length > 320 ? `${message.slice(0, 319)}…` : message);
   }, []);
 
   return (
@@ -223,7 +230,16 @@ export const AgentWorkspace = memo(function AgentWorkspace({
 
         <aside className="operator-fork-pane" aria-label="Operator context fork">
           <div className="operator-fork-chat">
-            <OperatorRuntime onError={IGNORE_UI_ERROR} />
+            {operatorError && (
+              <div className="operator-chat-error" role="alert">
+                <div>
+                  <strong>Operator run failed</strong>
+                  <span>{operatorError}</span>
+                </div>
+                <button type="button" onClick={() => setOperatorError(null)} aria-label="Dismiss operator error">×</button>
+              </div>
+            )}
+            <OperatorRuntime onError={handleOperatorError} />
           </div>
           <footer>
             Persistent changes call <code>append_trader_memory</code> and pause for approval.
