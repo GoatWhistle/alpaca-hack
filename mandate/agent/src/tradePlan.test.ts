@@ -94,6 +94,25 @@ test("PARK has no steps and EXECUTE_PLAN has one to three unique steps", () => {
   assert.equal(parseTradePlan(line(tooMany), "cycle-1", ["candidate-0", "candidate-1", "candidate-2", "candidate-3"]), null);
 });
 
+test("a PARK assessment may hypothesize on non-executable context but cannot trade it", () => {
+  const assessment = validPayload();
+  assessment.action = "PARK";
+  assessment.steps = [];
+  (assessment.hypotheses as Record<string, unknown>[])[0]!.candidate_id = "watch-news-1-AVGO";
+  assert.equal(
+    parseTradePlan(line(assessment), "cycle-1", ["watch-news-1-AVGO"], [])?.action,
+    "PARK",
+  );
+
+  assessment.action = "EXECUTE_PLAN";
+  assessment.steps = [{
+    reason: "News is material.",
+    candidate_id: "watch-news-1-AVGO",
+    evidence_refs: ["news.0"],
+  }];
+  assert.equal(parseTradePlan(line(assessment), "cycle-1", ["watch-news-1-AVGO"], []), null);
+});
+
 test("memory events are structured, bounded to five, and expire within seven days", () => {
   for (const ttl of [0, 169, 1.5]) {
     const payload = validPayload();

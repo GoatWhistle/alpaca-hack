@@ -95,7 +95,8 @@ function rootPayload(text: string): Record<string, unknown> | null {
 export function parseTradePlan(
   text: string,
   expectedCycleId: string,
-  allowedCandidates: string[],
+  allowedHypothesisCandidates: string[],
+  executableCandidates: string[] = allowedHypothesisCandidates,
 ): TradePlan | null {
   const payload = rootPayload(text);
   if (!payload || !exactKeys(payload, [
@@ -108,7 +109,8 @@ export function parseTradePlan(
   const reason = boundedText(payload.reason);
   if (!reason || !Array.isArray(payload.steps) || payload.steps.length > 3) return null;
 
-  const allowed = new Set(allowedCandidates);
+  const allowedHypotheses = new Set(allowedHypothesisCandidates);
+  const allowedSteps = new Set(executableCandidates);
   if (!Array.isArray(payload.hypotheses)
     || payload.hypotheses.length < 1 || payload.hypotheses.length > 5) return null;
   const hypotheses: TradeHypothesis[] = [];
@@ -125,7 +127,7 @@ export function parseTradePlan(
     const invalidation = boundedText(hypothesis.invalidation, 240);
     const supports = evidenceList(hypothesis.supports);
     const contradicts = optionalEvidenceList(hypothesis.contradicts);
-    if (!allowed.has(candidateId) || hypothesisCandidates.has(candidateId)
+    if (!allowedHypotheses.has(candidateId) || hypothesisCandidates.has(candidateId)
       || !thesis || !invalidation || !supports || !contradicts
       || !["low", "medium", "high"].includes(String(hypothesis.confidence))) return null;
     hypothesisCandidates.add(candidateId);
@@ -147,7 +149,7 @@ export function parseTradePlan(
     const stepReason = boundedText(step.reason);
     const evidenceRefs = evidenceList(step.evidence_refs);
     if (!CANDIDATE_ID.test(candidateId) || !stepReason || !evidenceRefs
-      || seenSymbols.has(candidateId) || !allowed.has(candidateId)) return null;
+      || seenSymbols.has(candidateId) || !allowedSteps.has(candidateId)) return null;
     seenSymbols.add(candidateId);
     steps.push({ reason: stepReason, candidate_id: candidateId, evidence_refs: evidenceRefs });
   }

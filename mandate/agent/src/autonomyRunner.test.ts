@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   appendTraderMemory,
   buildAutonomyPrompt,
+  buildDecisionCandidates,
   criticTimeoutSeconds,
   criticsAllowEntries,
   detectNewEvents,
@@ -132,7 +133,8 @@ test("off-hours passed news remains pending across later empty polls", () => {
 
 test("planner prompt contains full candidates, critics, and only the canonical contract", () => {
   const candidates = [{
-    candidate_id: "entry-1-AAPL", symbol: "AAPL", rank: 1, evidence: { signal_path: "price_confirmation" },
+    candidate_id: "entry-1-AAPL", symbol: "AAPL", rank: 1,
+    execution_eligible: true, evidence: { signal_path: "price_confirmation" },
   }];
   const critics = (["risk", "market", "execution"] as const).map((critic) => ({
     critic, status: "completed" as const, model: "fixture", summary: "supported",
@@ -152,9 +154,48 @@ test("planner prompt contains full candidates, critics, and only the canonical c
   );
   assert.match(prompt, /trade\.plan\.v2/u);
   assert.match(prompt, /entry-1-AAPL/u);
+  assert.match(prompt, /Executable candidate_ids.*entry-1-AAPL/u);
   assert.match(prompt, /relative volume remains elevated/u);
   assert.match(prompt, /untrusted data/u);
   assert.doesNotMatch(prompt, /DECISION_JSON|PROPOSE|human approval|place_stock_order/u);
+});
+
+test("final trader receives passed news even when no candidate is executable", () => {
+  const gatedEvent: NewsEvent = {
+    ...event,
+    symbols: ["AVGO"],
+    gate: { decision: "PASS", reason: "material guidance update" },
+  };
+  const evaluation = {
+    symbols: {
+      AVGO: {
+        strategies: { regime_ensemble: { direction: "flat", strength: "0.01" } },
+        blocked_by: ["market_closed"],
+      },
+    },
+  };
+  const candidates = buildDecisionCandidates(evaluation, [], [gatedEvent], []);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.symbol, "AVGO");
+  assert.equal(candidates[0]?.execution_eligible, false);
+  assert.equal((candidates[0]?.evidence as Record<string, unknown>).news instanceof Object, true);
+});
+
+test("decision context preserves executable ids and adds a signal fallback", () => {
+  const executable = [{
+    candidate_id: "entry-1-AAPL", symbol: "AAPL", evidence: {},
+  }];
+  const evaluation = {
+    symbols: {
+      AAPL: { strategies: { regime_ensemble: { strength: "0.3" } } },
+      MSFT: { strategies: { regime_ensemble: { strength: "0.8" } } },
+    },
+  };
+  const candidates = buildDecisionCandidates(evaluation, executable, [], []);
+  assert.equal(candidates[0]?.candidate_id, "entry-1-AAPL");
+  assert.equal(candidates[0]?.execution_eligible, true);
+  assert.equal(candidates[1]?.symbol, "MSFT");
+  assert.equal(candidates[1]?.execution_eligible, false);
 });
 
 test("canonical trade candidates are materialized as full evidence records", () => {
