@@ -1,46 +1,175 @@
+/* Live pipeline — a stepper of state circles on a hairline track.
+   Green dots have passed, the Ice Signal ring marks the stage working now.
+   Hovering or focusing a node lifts a tooltip with what happens there. */
 .live-pipeline {
   margin-bottom: var(--space-3);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface);
-  overflow: hidden;
+  box-shadow: var(--shadow-subtle);
+  overflow: visible;
 }
 
 .pipeline-steps {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: var(--space-3) 0 0;
 }
 
 .pipeline-step {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: 10px;
   min-width: 0;
-  padding: 14px var(--space-4);
-  color: var(--ink-faint);
-  border-right: 1px solid var(--line);
+  padding: 0 var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  text-align: center;
+  cursor: default;
+  outline: none;
 }
 
-.pipeline-step:last-child { border-right: 0; }
+/* Track halves between nodes; each node owns the segment to its left and
+   right, so the filled portion ends exactly at the active circle. */
+.pipeline-step::before,
+.pipeline-step::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  height: 1px;
+  background: var(--line);
+}
 
-.pipeline-step > i {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border: 1px solid currentColor;
+.pipeline-step::before { left: 0; right: 50%; }
+.pipeline-step::after { left: 50%; right: 0; }
+.pipeline-step:first-child::before { display: none; }
+.pipeline-step:last-child::after { display: none; }
+
+.pipeline-step.is-done::before,
+.pipeline-step.is-active::before,
+.pipeline-step.is-done::after {
+  background: color-mix(in srgb, var(--allowed) 55%, transparent);
+}
+
+.pipeline-node {
+  position: relative;
+  z-index: 1;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-inset);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-.pipeline-step span { min-width: 0; }
-.pipeline-step b,
-.pipeline-step small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pipeline-step b { color: inherit; font: 600 var(--text-sm) var(--font-ui); }
-.pipeline-step small { margin-top: 2px; color: var(--ink-faint); font: 400 var(--text-2xs) var(--font-mono); }
-.pipeline-step.is-done { color: var(--allowed); }
-.pipeline-step.is-done > i { background: var(--allowed); border-color: var(--allowed); }
-.pipeline-step.is-active { color: var(--ink); background: var(--surface-inset); }
-.pipeline-step.is-active > i { background: var(--authority); border-color: var(--authority); box-shadow: 0 0 0 4px color-mix(in srgb, var(--authority) 14%, transparent); }
+.pipeline-step.is-done .pipeline-node {
+  border-color: var(--allowed);
+  background: var(--allowed);
+}
+
+.pipeline-step.is-active .pipeline-node {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgb(131 195 255 / 0.16);
+  animation: pipeline-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes pipeline-breathe {
+  50% { box-shadow: 0 0 0 4px rgb(131 195 255 / 0.05); }
+}
+
+.pipeline-step b {
+  color: var(--ink-faint);
+  font: 500 var(--text-sm) var(--font-ui);
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.pipeline-step small {
+  color: var(--ink-faint);
+  font: 400 var(--text-2xs) var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.pipeline-step.is-active b { color: var(--ink); }
+.pipeline-step.is-active small { color: var(--accent); }
+.pipeline-step.is-done b { color: var(--ink-muted); }
+
+.pipeline-step:hover b,
+.pipeline-step:focus-visible b { color: var(--ink); }
+
+/* Tooltip — a Charcoal card on a hairline ring, anchored below the node
+   (the pipeline sits near the top of the page, so below never clips). */
+.pipeline-tip {
+  position: absolute;
+  top: calc(100% - 12px);
+  left: 50%;
+  transform: translate(-50%, calc(-1 * var(--space-1)));
+  width: max-content;
+  max-width: 240px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+  color: var(--ink-muted);
+  font: 400 var(--text-xs)/1.55 var(--font-ui);
+  opacity: 0;
+  pointer-events: none;
+  z-index: var(--z-sticky);
+  transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+
+/* Caret tying the card to its node. */
+.pipeline-tip::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border-top: 1.5px solid var(--line-strong);
+  border-left: 1.5px solid var(--line-strong);
+  background: var(--surface-inset);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.pipeline-step:hover .pipeline-tip,
+.pipeline-step:focus-visible .pipeline-tip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.pipeline-tip b {
+  color: var(--ink);
+  font: 500 var(--text-2xs) var(--font-mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.pipeline-tip i {
+  color: var(--accent);
+  font: 500 var(--text-2xs) var(--font-mono);
+  font-style: normal;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+/* Edge tooltips would clip outside the card; pull them inward. */
+.pipeline-step:first-child .pipeline-tip { left: 0; transform: translate(0, calc(-1 * var(--space-1))); }
+.pipeline-step:first-child:hover .pipeline-tip,
+.pipeline-step:first-child:focus-visible .pipeline-tip { transform: translate(0, 0); }
+.pipeline-step:last-child .pipeline-tip { left: auto; right: 0; transform: translate(0, calc(-1 * var(--space-1))); }
+.pipeline-step:last-child:hover .pipeline-tip,
+.pipeline-step:last-child:focus-visible .pipeline-tip { transform: translate(0, 0); }
 
 .pipeline-now {
   min-height: 38px;
@@ -52,25 +181,30 @@
   color: var(--ink-muted);
 }
 
-.pipeline-now > span { display: inline-flex; align-items: center; gap: 7px; color: var(--ink-faint); font: 600 var(--text-2xs) var(--font-mono); text-transform: uppercase; letter-spacing: .12em; }
+.pipeline-now > span { display: inline-flex; align-items: center; gap: 7px; color: var(--ink-faint); font: 500 var(--text-2xs) var(--font-mono); text-transform: uppercase; letter-spacing: .12em; }
 .pipeline-now > span i { width: 5px; height: 5px; border-radius: 50%; background: var(--allowed); animation: pipeline-pulse 1.6s ease-in-out infinite; }
 .pipeline-now strong { min-width: 0; flex: 1; color: var(--ink); font-size: var(--text-sm); font-weight: 500; }
-.pipeline-outcome { padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-muted); font: 600 var(--text-2xs) var(--font-mono); font-style: normal; }
+.pipeline-outcome { padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-muted); font: 500 var(--text-2xs) var(--font-mono); font-style: normal; }
 .pipeline-outcome--submitted,
 .pipeline-outcome--filled { color: var(--allowed); border-color: color-mix(in srgb, var(--allowed) 35%, transparent); }
 .pipeline-outcome--unfilled_cancelled { color: var(--denied); border-color: color-mix(in srgb, var(--denied) 35%, transparent); }
-.pipeline-outcome--park { color: var(--parked); }
+.pipeline-outcome--park { color: var(--accent); }
 
 @keyframes pipeline-pulse { 50% { opacity: .35; } }
 
-@media (max-width: 760px) {
-  .pipeline-steps { grid-template-columns: repeat(5, minmax(72px, 1fr)); overflow-x: auto; }
-  .pipeline-step { padding-inline: 10px; }
+@media (max-width: 900px) {
+  .pipeline-steps {
+    grid-template-columns: repeat(7, minmax(96px, 1fr));
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
   .pipeline-step small { display: none; }
+  .pipeline-tip { display: none; }
   .pipeline-now { align-items: flex-start; flex-wrap: wrap; }
   .pipeline-now strong { flex-basis: calc(100% - 60px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .pipeline-now > span i { animation: none; }
+  .pipeline-step.is-active .pipeline-node { animation: none; }
 }

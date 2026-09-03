@@ -13,21 +13,21 @@ export function NewsCard({ item, featured = false }: NewsCardProps) {
 
   return (
     <article className={`news-card${featured ? " news-card--featured" : ""}`}>
-      <div className="news-meta">
-        <span>{String(item.source ?? "news")}</span>
+      <header className="news-card-top">
+        <span className="news-source">{String(item.source ?? "news")}</span>
+        {symbols.length > 0 && (
+          <div className="news-symbols">
+            {symbols.map((symbol) => (
+              <b key={symbol}>{symbol}</b>
+            ))}
+          </div>
+        )}
         <time dateTime={String(item.published_at ?? "")}>
           {timestamp(item.published_at)}
         </time>
-        <div>
-          {symbols.map((symbol) => (
-            <b key={symbol}>{symbol}</b>
-          ))}
-        </div>
-      </div>
-      <div className="news-copy">
-        <h3>{decodeEntities(item.headline ?? "Untitled market update")}</h3>
-        {item.summary ? <p>{decodeEntities(item.summary)}</p> : null}
-      </div>
+      </header>
+      <h3>{decodeEntities(item.headline ?? "Untitled market update")}</h3>
+      {item.summary ? <p>{decodeEntities(item.summary)}</p> : null}
       {url ? (
         <a href={url} target="_blank" rel="noreferrer">
           Read full article <Icon name="external" />

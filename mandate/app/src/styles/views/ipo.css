@@ -1,40 +1,33 @@
 .ipo-view main { display: flex; flex-direction: column; gap: var(--space-3); }
 
-.ipo-hero {
-  min-height: 138px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+/* Scanner status chip — replaces the retired hero block; lives in the feed
+   panel heading so the page opens straight on data. */
+.ipo-status-chip {
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-5);
-  padding: var(--space-6);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background:
-    radial-gradient(circle at 8% 50%, color-mix(in srgb, var(--authority) 12%, transparent), transparent 32%),
-    var(--surface);
+  gap: 6px;
+  padding: 4px var(--space-2);
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  font: 500 var(--text-2xs)/1.4 var(--font-mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.ipo-agent-orb {
-  width: 56px;
-  height: 56px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--line-strong);
+.ipo-status-chip::before {
+  content: "";
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: var(--surface-inset);
+  background: currentColor;
 }
 
-.ipo-agent-orb i { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint); }
-.ipo-agent-orb.active { border-color: color-mix(in srgb, var(--allowed) 45%, var(--line)); }
-.ipo-agent-orb.active i { background: var(--allowed); box-shadow: 0 0 18px color-mix(in srgb, var(--allowed) 70%, transparent); animation: ipo-pulse 1.8s ease-in-out infinite; }
+.ipo-status-chip--live { color: var(--allowed); border-color: color-mix(in srgb, var(--allowed) 34%, transparent); }
+.ipo-status-chip--idle { color: var(--ink-muted); border-color: var(--line-strong); }
+.ipo-status-chip--degraded { color: var(--denied); border-color: color-mix(in srgb, var(--denied) 40%, transparent); }
 
-.ipo-agent-copy h2 { margin: 5px 0 7px; font-size: var(--text-xl); font-weight: 600; letter-spacing: -.02em; }
-.ipo-agent-copy p { max-width: 76ch; margin: 0; color: var(--ink-muted); font-size: var(--text-sm); line-height: 1.55; }
-.ipo-agent-status { text-align: right; display: flex; flex-direction: column; gap: 5px; }
-.ipo-agent-status strong { color: var(--allowed); font: 600 var(--text-xs) var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
-.ipo-agent-status span { color: var(--ink-faint); font: 500 var(--text-2xs) var(--font-mono); text-transform: uppercase; }
-
-.ipo-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--surface); }
+.ipo-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--surface); box-shadow: var(--shadow-subtle); }
 .ipo-summary > div { padding: var(--space-4) var(--space-5); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: var(--space-2); }
 .ipo-summary > div:last-child { border-right: 0; }
 .ipo-summary span { color: var(--ink-muted); font: 500 var(--text-2xs) var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
@@ -44,12 +37,12 @@
 .ipo-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .ipo-card { min-width: 0; padding: var(--space-5); border-bottom: 1px solid var(--line); background: var(--surface); }
 .ipo-card:nth-child(odd) { border-right: 1px solid var(--line); }
-.ipo-card--ready { background: linear-gradient(145deg, color-mix(in srgb, var(--allowed) 4%, var(--surface)), var(--surface) 48%); }
+.ipo-card--ready { background: color-mix(in srgb, var(--allowed) 3%, var(--surface)); }
 .ipo-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
 .ipo-card header > div { min-width: 0; }
-.ipo-symbol { display: block; color: var(--authority); font: 650 var(--text-lg) var(--font-mono); }
+.ipo-symbol { display: block; color: var(--accent); font: 500 var(--text-lg) var(--font-mono); }
 .ipo-card h2 { margin-top: 5px; overflow: hidden; color: var(--ink-muted); font-size: var(--text-sm); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.ipo-state { flex: none; padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-muted); font: 600 var(--text-2xs) var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.ipo-state { flex: none; padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-muted); font: 500 var(--text-2xs) var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
 .ipo-state--ready { color: var(--allowed); border-color: color-mix(in srgb, var(--allowed) 35%, var(--line)); background: color-mix(in srgb, var(--allowed) 6%, transparent); }
 .ipo-context, .ipo-gates, .ipo-warnings { display: flex; flex-wrap: wrap; gap: 6px; }
 .ipo-context { margin-top: var(--space-3); color: var(--ink-faint); font: 500 var(--text-2xs) var(--font-mono); }
@@ -60,16 +53,37 @@
 .ipo-metric:last-child { border-right: 0; }
 .ipo-metric span, .ipo-metric strong { display: block; }
 .ipo-metric span { color: var(--ink-faint); font: 500 var(--text-2xs) var(--font-mono); text-transform: uppercase; }
-.ipo-metric strong { margin-top: 7px; overflow: hidden; font: 550 var(--text-sm) var(--font-mono); text-overflow: ellipsis; }
+.ipo-metric strong { margin-top: 7px; overflow: hidden; font: 500 var(--text-sm) var(--font-mono); text-variant-numeric: tabular-nums; text-overflow: ellipsis; }
 .ipo-up { color: var(--allowed) !important; }
 .ipo-down { color: var(--denied) !important; }
 .ipo-gates span, .ipo-warnings span { padding: 4px 7px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--ink-muted); font: 500 var(--text-2xs) var(--font-mono); }
 .ipo-gates .pass { color: var(--allowed); }
-.ipo-gates .blocked, .ipo-gates .outside { color: var(--authority); }
+.ipo-gates .blocked, .ipo-gates .outside { color: var(--accent); }
 .ipo-warnings { margin-top: var(--space-2); }
 .ipo-warnings span { color: var(--ink-faint); border-style: dashed; }
 
-@keyframes ipo-pulse { 50% { opacity: .45; transform: scale(.75); } }
+/* Researcher's read — the plain-language verdict synthesised from the
+   monitoring data, set apart by an Ice Signal edge on an Obsidian well. */
+.ipo-takeaway {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--surface-inset);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  max-width: 72ch;
+}
+
+.ipo-takeaway-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--accent);
+  font: 500 var(--text-2xs) var(--font-mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
 
 @media (max-width: 900px) {
   .ipo-card-grid { grid-template-columns: 1fr; }
@@ -81,8 +95,6 @@
 }
 
 @media (max-width: 620px) {
-  .ipo-hero { grid-template-columns: auto 1fr; padding: var(--space-4); }
-  .ipo-agent-status { grid-column: 1 / -1; flex-direction: row; justify-content: space-between; text-align: left; }
   .ipo-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ipo-metric:nth-child(2) { border-right: 0; }
   .ipo-metric:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }

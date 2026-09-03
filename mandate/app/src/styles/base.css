@@ -15,7 +15,7 @@
   top: var(--space-3);
   z-index: var(--z-toast);
   padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--authority);
+  border: 1px solid var(--accent);
   border-radius: var(--radius);
   background: var(--surface-raised);
   color: var(--ink);
@@ -29,7 +29,7 @@
 
 .skip-link:focus-visible {
   transform: translateY(0);
-  outline: 2px solid var(--authority);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -68,7 +68,7 @@ body {
 }
 
 :where(.mandate-chrome) :focus-visible {
-  outline: 2px solid var(--authority);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -144,9 +144,9 @@ pre {
 .text-button:hover { color: var(--ink); }
 
 .icon-button {
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--line);
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--surface);
   display: inline-flex;
@@ -154,12 +154,12 @@ pre {
   justify-content: center;
   cursor: pointer;
   color: var(--ink-muted);
-  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 
 .icon-button:hover {
   color: var(--ink);
-  border-color: var(--line-strong);
+  background: var(--surface-hover);
 }
 
 .icon-button:disabled { opacity: .45; cursor: default; }
@@ -182,10 +182,8 @@ pre {
     transition-duration: 80ms !important;
     transition-property: opacity, color, border-color, background-color, fill, stroke !important;
   }
-  .decisions::before { animation: none !important; opacity: .7 !important; }
   .skeleton-line, .skeleton-marker { background: var(--surface-raised) !important; }
   .degraded-notice { animation: none !important; }
-  .tab-rail { transition: none !important; }
   .approval-outcome svg path { stroke-dashoffset: 0 !important; }
   .approval-outcome { animation: fade-in-rm 80ms linear both !important; }
   .decisions, .settings-drawer, .decision-card, .timeline-item {

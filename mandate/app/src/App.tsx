@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { TopBar } from "./app/TopBar";
-import { WorkspaceTabs, type View } from "./app/WorkspaceTabs";
+import { SideRail, type View } from "./app/SideRail";
 import { ErrorBoundary } from "./app/ErrorBoundary";
 import { useBrowserIdentity } from "./app/useBrowserIdentity";
 import { freshnessLabel, isStale, useSnapshot } from "./app/useSnapshot";
@@ -15,17 +15,20 @@ import { NewsView } from "./views/news/NewsView";
 import { AgentWorkspace } from "./views/agent/AgentWorkspace";
 import { IpoView, ipoCandidateCount } from "./views/ipo/IpoView";
 import { TradeHistoryView } from "./views/trades/TradeHistoryView";
+import { ApprovalModal } from "./views/dashboard/decision/ApprovalModal";
+import { AgentsView } from "./views/agents/AgentsView";
 
 const VIEW_AREAS: Record<View, string> = {
   overview: "The dashboard",
   trades: "Trade history",
   ipo: "The IPO scout",
   news: "The news feed",
+  agents: "Agent topology",
   diagnostics: "Diagnostics",
   agent: "The trader room",
 };
 
-const VIEWS = new Set<View>(["overview", "trades", "ipo", "news", "diagnostics", "agent"]);
+const VIEWS = new Set<View>(["overview", "trades", "ipo", "news", "agents", "diagnostics", "agent"]);
 
 function initialView(): View {
   const hash = window.location.hash.slice(1) as View;
@@ -35,7 +38,9 @@ function initialView(): View {
 export function App() {
   const [view, setView] = useState<View>(initialView);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [approvalsOpen, setApprovalsOpen] = useState(false);
   const [approvalActions, setApprovalActions] = useState<Record<string, ApprovalAction>>({});
+  const previousApprovalCount = useRef(0);
   const state = useSnapshot();
   const { snapshot, error, refresh } = state;
 
@@ -52,6 +57,12 @@ export function App() {
 
   const degraded = Boolean(error) || (snapshot !== null && snapshot.source !== "live");
   useBrowserIdentity(view, approvals.count, degraded);
+
+  useEffect(() => {
+    if (approvals.count > previousApprovalCount.current) setApprovalsOpen(true);
+    if (approvals.count === 0) setApprovalsOpen(false);
+    previousApprovalCount.current = approvals.count;
+  }, [approvals.count]);
 
   const selectView = useCallback(
     (next: View) => {
@@ -102,39 +113,42 @@ export function App() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to main content</a>
-      <TopBar
-        marketOpen={snapshot?.mandate.market_is_open ?? false}
-        source={error ? "degraded" : snapshot?.source ?? null}
-        sourceReasons={error ? [error, ...(snapshot?.errors ?? [])] : snapshot?.errors ?? []}
-        stale={isStale(snapshot, state.nowMs)}
-        services={snapshot?.services ?? []}
-        freshness={freshnessLabel(snapshot, state.nowMs, state.paused)}
-        hidden={state.hidden}
+      <SideRail
+        view={view}
+        newsCount={news.length}
+        ipoCount={ipoCount}
         paused={state.paused}
         refreshing={state.refreshing}
         manualRefresh={state.manualRefresh}
-        approvalCount={approvals.count}
         showRefreshControls={view !== "agent"}
         onOpenSettings={() => setSettingsOpen(true)}
         onTogglePause={() => state.setPaused((value) => !value)}
         onRefresh={() => void refresh(true)}
-        onFocusApprovals={() => selectView("overview")}
+        onSelect={selectView}
       />
+      <div className="app-main">
+        <TopBar
+          marketOpen={snapshot?.mandate.market_is_open ?? false}
+          source={error ? "degraded" : snapshot?.source ?? null}
+          sourceReasons={error ? [error, ...(snapshot?.errors ?? [])] : snapshot?.errors ?? []}
+          stale={isStale(snapshot, state.nowMs)}
+          services={snapshot?.services ?? []}
+          freshness={freshnessLabel(snapshot, state.nowMs, state.paused)}
+          hidden={state.hidden}
+          paused={state.paused}
+          approvalCount={approvals.count}
+          onOpenApprovals={() => setApprovalsOpen(true)}
+        />
 
-      <WorkspaceTabs view={view} newsCount={news.length} ipoCount={ipoCount} onSelect={selectView} />
-
-      <div className="workspace-body">
+        <div className="workspace-body">
         <ErrorBoundary key={view} area={VIEW_AREAS[view]}>
           {view === "overview" && (
             <DashboardView
               snapshot={snapshot}
               error={error}
               news={news}
-              decisionItems={decisionItems}
               hidden={state.hidden}
               paused={state.paused}
-              approvalActions={approvalActions}
-              onRespond={(item, approve) => void handleRespond(item, approve)}
               onOpenNews={() => selectView("news")}
               onOpenTrades={() => selectView("trades")}
             />
@@ -145,8 +159,12 @@ export function App() {
           )}
           {view === "ipo" && <IpoView snapshot={snapshot} error={error} nowMs={state.nowMs} />}
           {view === "diagnostics" && <DiagnosticsView snapshot={snapshot} />}
+          {view === "agents" && (
+            <AgentsView snapshot={snapshot} paused={state.paused || state.hidden} />
+          )}
           {view === "agent" && <AgentWorkspace snapshot={snapshot} error={error} />}
         </ErrorBoundary>
+        </div>
       </div>
 
       <TrajectoryDrawer
@@ -156,6 +174,15 @@ export function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onSaved={refresh}
+      />
+      <ApprovalModal
+        open={approvalsOpen}
+        items={decisionItems}
+        actions={approvalActions}
+        live={snapshot?.source === "live" && !error}
+        hidden={state.hidden}
+        onClose={() => setApprovalsOpen(false)}
+        onRespond={(item, approve) => void handleRespond(item, approve)}
       />
     </div>
   );

@@ -1,27 +1,17 @@
-.trade-history-view main {
-  width: 100%;
-  padding: var(--space-5);
-}
+/* Layout (width/padding) comes from the shared full-bleed rule in layout.css. */
 
-.history-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-5);
-  margin-bottom: var(--space-4);
-}
-
-.history-header span,
+/* Live/degraded source chip — sits at the right of the ledger controls row. */
 .history-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--ink-faint);
   font: 500 var(--text-2xs) var(--font-mono);
   letter-spacing: .11em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.history-header h1 { margin: 4px 0; font-size: 24px; letter-spacing: -.025em; }
-.history-header p { margin: 0; color: var(--ink-muted); font-size: var(--text-sm); }
-.history-source { display: flex; align-items: center; gap: 8px; padding-bottom: 3px; }
 .history-source i { width: 7px; height: 7px; border-radius: 50%; background: var(--denied); }
 .history-source i[data-live="true"] { background: var(--allowed); box-shadow: 0 0 0 4px rgb(74 222 128 / .1); }
 
@@ -45,7 +35,7 @@
 
 .history-summary > div:last-child { border-right: 0; }
 .history-summary span { color: var(--ink-faint); font: 500 var(--text-2xs) var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
-.history-summary strong { font: 600 var(--text-md) var(--font-mono); font-variant-numeric: tabular-nums; }
+.history-summary strong { font: 500 var(--text-md) var(--font-mono); font-variant-numeric: tabular-nums; }
 .history-summary strong[data-tone="gain"] { color: var(--allowed); }
 .history-summary strong[data-tone="loss"] { color: var(--denied); }
 
@@ -73,11 +63,11 @@
   border-radius: var(--radius-sm);
   color: var(--ink-muted);
   background: transparent;
-  font: 600 var(--text-2xs) var(--font-mono);
+  font: 500 var(--text-2xs) var(--font-mono);
   letter-spacing: .08em;
 }
 .history-filters button:hover { color: var(--ink); background: var(--surface-raised); }
-.history-filters button.active { color: var(--authority); border-color: rgb(214 171 50 / .3); background: rgb(214 171 50 / .08); }
+.history-filters button.active { color: var(--accent); border-color: rgb(131 195 255 / .3); background: rgb(131 195 255 / .08); }
 .history-controls label { margin-left: auto; }
 .history-controls input {
   width: min(260px, 32vw);
@@ -139,9 +129,9 @@
   font-size: var(--text-2xs);
   letter-spacing: .08em;
 }
-.history-status[data-status="OPEN"] { color: var(--authority); border-color: rgb(214 171 50 / .35); }
+.history-status[data-status="OPEN"] { color: var(--accent); border-color: rgb(131 195 255 / .35); }
 .history-status[data-status="CLOSED"] { color: var(--allowed); border-color: rgb(74 222 128 / .25); }
-.history-status[data-status="UNMATCHED"] { color: var(--denied); border-color: rgb(255 101 104 / .25); }
+.history-status[data-status="UNMATCHED"] { color: var(--denied); border-color: rgb(226 71 86 / .25); }
 .history-pnl[data-tone="gain"] { color: var(--allowed); }
 .history-pnl[data-tone="loss"] { color: var(--denied); }
 .history-pnl[data-tone="flat"] { color: var(--ink-muted); }
@@ -154,8 +144,7 @@
 .history-error { color: var(--denied); border-bottom: 1px solid var(--line); }
 
 @media (max-width: 820px) {
-  .trade-history-view main { padding: var(--space-4) 12px var(--space-8); }
-  .history-header { align-items: flex-start; flex-direction: column; }
+
   .history-summary { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
   .history-summary > div { border-bottom: 1px solid var(--line); }
   .history-controls { align-items: stretch; flex-wrap: wrap; }

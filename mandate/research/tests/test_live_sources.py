@@ -19,9 +19,23 @@ ALPACA = json.dumps(
         ]
     }
 ).encode()
-SEC = b"""<feed xmlns="http://www.w3.org/2005/Atom"><entry>
-<id>sec-1</id><title>8-K - Apple Inc.</title><updated>2026-08-27T10:01:00Z</updated>
-<link href="https://www.sec.gov/Archives/test"/></entry></feed>"""
+SEC = json.dumps(
+    {
+        "cik": "320193",
+        "name": "Apple Inc.",
+        "filings": {
+            "recent": {
+                "form": ["10-Q", "8-K"],
+                "accessionNumber": ["0000320193-26-000001", "0000320193-26-000002"],
+                "acceptanceDateTime": ["2026-08-26T10:00:00Z", "2026-08-27T10:01:00Z"],
+                "filingDate": ["2026-08-26", "2026-08-27"],
+                "primaryDocument": ["aapl-10q.htm", "aapl-8k.htm"],
+                "primaryDocDescription": ["Quarterly report", "Current report"],
+                "items": ["", "2.02,9.01"],
+            }
+        },
+    }
+).encode()
 RSS = b"""<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>apple-1</id>
 <title>Apple product update</title><updated>2026-08-27T10:02:00Z</updated></entry></feed>"""
 NVIDIA_RSS = b"""<rss><channel><item><guid>nvda-1</guid><title>NVIDIA product update</title>

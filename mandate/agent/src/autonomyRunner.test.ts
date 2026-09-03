@@ -12,6 +12,7 @@ import {
   criticTimeoutSeconds,
   criticsAllowEntries,
   detectNewEvents,
+  effectivePollSeconds,
   enforcePlanSafety,
   isStaleTraderSessionError,
   materializeTradeCandidates,
@@ -22,6 +23,7 @@ import {
   readActiveTraderMemory,
   traderTimeoutSeconds,
   tradeCandidates,
+  type ActiveStrategy,
   type MarketResult,
   type NewsEvent,
   type Trajectory,
@@ -72,6 +74,11 @@ const trajectory: Trajectory = {
   updated_at: "2026-09-02T00:00:00Z",
   updated_by: "operator",
 };
+
+test("poll cadence slows to five minutes only while the market is closed", () => {
+  assert.equal(effectivePollSeconds(trajectory, true), trajectory.news_poll_seconds);
+  assert.equal(effectivePollSeconds(trajectory, false), 300);
+});
 
 const event: NewsEvent = {
   key: "alpaca:1:hash",
@@ -180,12 +187,26 @@ test("final trader receives passed news even when no candidate is executable", (
   assert.equal(candidates[0]?.symbol, "AVGO");
   assert.equal(candidates[0]?.execution_eligible, false);
   assert.equal((candidates[0]?.evidence as Record<string, unknown>).news instanceof Object, true);
+  const activeStrategy: ActiveStrategy = {
+    schema: "trader.strategy.v1",
+    version: 7,
+    updated_at: "2026-09-03T08:00:00Z",
+    market_phase: "next_open",
+    status: "watching",
+    reason: "Track guidance into the opening print.",
+    focus_candidate_id: "watch-news-1-AVGO",
+    hypotheses: [],
+    candidate_symbols: ["AVGO"],
+    actions: [],
+  };
   const prompt = buildHypothesisPrompt(
-    trajectory, [gatedEvent], market, evaluation, "cycle-1", candidates, [],
+    trajectory, [gatedEvent], market, evaluation, "cycle-1", candidates, [], activeStrategy,
   );
   assert.match(prompt, /trade\.hypotheses\.v1/u);
   assert.match(prompt, /watch-news-1-AVGO/u);
   assert.match(prompt, /material guidance update/u);
+  assert.match(prompt, /trader\.strategy\.v1/u);
+  assert.match(prompt, /revise.*delete.*add/u);
 });
 
 test("decision context preserves executable ids and adds a signal fallback", () => {

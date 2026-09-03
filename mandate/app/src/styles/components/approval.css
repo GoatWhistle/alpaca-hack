@@ -64,7 +64,7 @@
 
 .approval-button-text b {
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: .01em;
 }
 
@@ -74,20 +74,20 @@
   letter-spacing: .04em;
 }
 
+/* Outlined Ice Signal action — the most chromatic element on the canvas. */
 .approval-button--approve {
-  border: 1px solid var(--authority);
-  background: var(--authority-wash);
+  border: 1px solid var(--accent);
+  background: transparent;
   color: var(--ink);
 }
 
 .approval-button--approve .approval-button-mark {
-  background: var(--authority);
-  color: var(--ground);
+  border: 1px solid var(--accent);
+  color: var(--accent);
 }
 
 .approval-button--approve:hover:not(:disabled) {
-  background: #241d12;
-  transform: translateY(-1px);
+  border-color: var(--ink);
 }
 
 .approval-button--deny {
@@ -103,7 +103,6 @@
 
 .approval-button--deny:hover:not(:disabled) {
   border-color: var(--denied);
-  transform: translateY(-1px);
 }
 
 .approval-button--deny:hover:not(:disabled) .approval-button-mark {
@@ -131,9 +130,9 @@
 }
 
 .approval-outcome--approved {
-  border: 1px solid var(--authority-dim);
-  background: var(--authority-wash);
-  color: var(--authority);
+  border: 1px solid var(--accent-dim);
+  background: var(--accent-wash);
+  color: var(--accent);
 }
 
 .approval-outcome--denied {

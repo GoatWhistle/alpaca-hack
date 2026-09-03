@@ -1,15 +1,14 @@
 .agent-workspace {
-  height: calc(100dvh - 97px);
+  height: calc(100dvh - 40px);
   min-height: 560px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
-  background:
-    radial-gradient(circle at 12% 0%, rgb(74 222 128 / 0.035), transparent 28%),
-    var(--ground);
+  background: var(--surface);
 }
 
 .trading-book {
+  grid-row: 1;
   min-width: 0;
   border-bottom: 1px solid var(--line-strong);
   background: var(--surface);
@@ -32,7 +31,7 @@
   min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-left: 3px solid var(--authority);
+  border-left: 3px solid var(--accent);
   border-radius: var(--radius);
   background: var(--surface-inset);
 }
@@ -40,15 +39,17 @@
 .trading-book-cards .position-card { min-width: 270px; }
 
 .book-position-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.book-position-title b { overflow: hidden; font: 600 var(--text-sm) var(--font-mono); text-overflow: ellipsis; }
+.book-position-title b { overflow: hidden; font: 500 var(--text-sm) var(--font-mono); text-overflow: ellipsis; }
 .book-position-title em { color: var(--ink-muted); font: 500 var(--text-2xs) var(--font-mono); text-transform: uppercase; }
 
 .book-order p { margin: 7px 0 0; color: var(--ink-muted); font: 400 var(--text-2xs) var(--font-mono); }
-.book-order small { color: var(--authority); font: 500 var(--text-2xs) var(--font-mono); text-transform: uppercase; }
+.book-order small { color: var(--accent); font: 500 var(--text-2xs) var(--font-mono); text-transform: uppercase; }
 .trader-stream-pane,
 .operator-fork-pane { min-width: 0; min-height: 0; }
 
 .trader-room-grid {
+  grid-row: 2;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -57,12 +58,56 @@
 }
 
 .trader-stream-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border-right: 1px solid var(--line-strong);
   background: var(--ground);
 }
 
-.trader-stream-pane > .aui-theme-root { height: 100%; min-height: 0; }
+.active-strategy {
+  grid-row: 1;
+  min-width: 0;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+.active-strategy > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+  font: 500 10px var(--font-mono);
+  letter-spacing: .08em;
+}
+
+.active-strategy > header span { color: var(--ink-muted); text-transform: uppercase; }
+.active-strategy > header span[data-status="submitted"] { color: var(--positive); }
+.active-strategy > header span[data-status="parked"] { color: var(--warning); }
+
+.active-strategy-table-wrap { overflow-x: auto; border: 1px solid var(--line); }
+.active-strategy table { width: 100%; border-collapse: collapse; font: 500 10px var(--font-mono); }
+.active-strategy th,
+.active-strategy td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.active-strategy th { color: var(--ink-faint); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+.active-strategy tbody tr:last-child td { border-bottom: 0; }
+.active-strategy tbody tr:hover { background: var(--surface-inset); }
+.active-strategy td strong { color: var(--ink); }
+.active-strategy td em { margin-left: 5px; color: var(--ink-muted); font-style: normal; }
+.active-strategy td em[data-side="LONG"] { color: var(--positive); }
+.active-strategy td em[data-side="SHORT"] { color: var(--negative); }
+.active-strategy td b[data-state="READY"] { color: var(--positive); }
+.active-strategy td b[data-state="WAIT"] { color: var(--warning); }
+.active-strategy-empty { margin: 0; color: var(--ink-muted); font: 400 10px var(--font-mono); }
+
+.trader-stream-pane > .aui-theme-root {
+  grid-row: 2;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
 .trader-stream-pane .aui-thread-root { --thread-max-width: 100% !important; }
 
 /* The read-only stream has no composer: the log runs to the bottom edge and
@@ -156,7 +201,7 @@
 @media (max-width: 760px) {
   .agent-workspace {
     height: auto;
-    min-height: calc(100dvh - 95px);
+    min-height: calc(100dvh - 40px);
     overflow: visible;
   }
   .trading-book-cards { grid-auto-columns: minmax(260px, 82vw); }

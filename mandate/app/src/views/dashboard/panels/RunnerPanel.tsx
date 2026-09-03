@@ -26,11 +26,15 @@ export function RunnerPanel({
   const lastAction = String(runtime.last_action ?? "");
   const candidate = typeof runtime.last_candidate === "string" ? runtime.last_candidate : "";
   const brokerTransport = typeof runtime.broker_transport === "string" ? runtime.broker_transport : "";
+  const effectivePollSeconds = number(runtime.effective_poll_seconds)
+    || number(trajectory.news_poll_seconds);
 
   const health = [
     { label: "News stream", value: String(stream.news ?? "—") },
     { label: "Market stream", value: String(stream.market ?? "—") },
-    { label: "News cadence", value: `every ${String(trajectory.news_poll_seconds ?? "—")} s` },
+    { label: "Poll cadence", value: effectivePollSeconds >= 60
+      ? `every ${Math.round(effectivePollSeconds / 60)} min`
+      : `every ${effectivePollSeconds || "—"} s` },
     { label: "Forward outcomes", value: `${String(runtime.outcomes_observed ?? 0)} measured` },
     { label: "Last analysis", value: timestamp(runtime.last_analysis_at) },
     { label: "Next analysis", value: timestamp(runtime.next_analysis_at) },

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -10,9 +11,18 @@ from mandate_research.live_comparison import _fetch_json, compare_live_signals
 
 
 NOW = datetime(2026, 8, 27, 12, tzinfo=timezone.utc)
-SEC = b"""<feed xmlns="http://www.w3.org/2005/Atom"><entry>
-<id>sec-1</id><title>8-K - Apple Inc.</title><updated>2026-08-27T09:00:00Z</updated>
-</entry></feed>"""
+SEC = json.dumps({
+    "cik": "320193",
+    "name": "Apple Inc.",
+    "filings": {"recent": {
+        "form": ["8-K"],
+        "accessionNumber": ["0000320193-26-000002"],
+        "acceptanceDateTime": ["2026-08-27T09:00:00Z"],
+        "primaryDocument": ["aapl-8k.htm"],
+        "primaryDocDescription": ["Current report"],
+        "items": ["2.02"],
+    }},
+}).encode()
 APPLE = b"""<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>apple-1</id>
 <title>Apple product update</title><updated>2026-08-27T09:30:00Z</updated></entry></feed>"""
 

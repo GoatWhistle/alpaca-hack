@@ -25,7 +25,7 @@
 
 .panel h2 {
   font-size: var(--text-md);
-  font-weight: 600;
+  font-weight: 500;
   margin: 0;
   color: var(--ink);
 }
@@ -181,7 +181,7 @@
 .decision-explanation b {
   flex: 0 0 auto;
   color: var(--parked);
-  font: 600 var(--text-2xs) var(--font-mono);
+  font: 500 var(--text-2xs) var(--font-mono);
   letter-spacing: .12em;
   text-transform: uppercase;
 }

@@ -1,0 +1,82 @@
+/* Left icon rail — the OpenSea-style primary navigation strip.
+   56px wide on Void, active item marked by a 2px Ice Signal bar. */
+.side-rail {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  width: 56px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: var(--space-2) 0;
+  background: var(--ground);
+  border-right: 1px solid var(--line);
+  z-index: var(--z-sticky);
+}
+
+.side-rail-nav,
+.side-rail-cluster {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.side-rail button {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink-muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+}
+
+.side-rail button:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.side-rail button:disabled {
+  opacity: .45;
+  cursor: default;
+  background: transparent;
+}
+
+.side-rail button.active {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.side-rail button.active::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.side-rail button em {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  min-width: 14px;
+  padding: 1px 3px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--ground);
+  font: 500 9px/1.2 var(--font-mono);
+  font-style: normal;
+  text-align: center;
+}
+
+.side-rail .refresh-state--live { color: var(--allowed); }
+.side-rail .refresh-state--paused { color: var(--accent); }

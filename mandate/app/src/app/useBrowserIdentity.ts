@@ -1,11 +1,12 @@
 import { useEffect } from "react";
-import type { View } from "./WorkspaceTabs";
+import type { View } from "./SideRail";
 
 const VIEW_TITLES: Record<View, string> = {
   overview: "Dashboard",
   trades: "Trade history",
   ipo: "IPO scout",
   news: "News",
+  agents: "Agent topology",
   diagnostics: "Diagnostics",
   agent: "Trader room",
 };
@@ -13,10 +14,10 @@ const VIEW_TITLES: Record<View, string> = {
 export type IdentityState = "idle" | "pending" | "degraded";
 
 function faviconMarkup(state: IdentityState): string {
-  const disc = state === "degraded" ? "#ff6568" : state === "pending" ? "#d6ab32" : "#fafafa";
-  const bracket = state === "degraded" ? "#ff6568" : "#d6ab32";
+  const disc = state === "degraded" ? "#e24756" : state === "pending" ? "#83c3ff" : "#fafafa";
+  const bracket = state === "degraded" ? "#e24756" : "#83c3ff";
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <rect width="32" height="32" rx="6" fill="#08090d"/>
+  <rect width="32" height="32" rx="6" fill="#080809"/>
   <path d="M10 8 H6.5 V24 H10" fill="none" stroke="${bracket}" stroke-width="2.5" stroke-linecap="square"/>
   <path d="M22 8 H25.5 V24 H22" fill="none" stroke="${bracket}" stroke-width="2.5" stroke-linecap="square"/>
   <circle cx="16" cy="16" r="4.5" fill="${disc}"/>
@@ -48,6 +49,6 @@ export function useBrowserIdentity(
 
   useEffect(() => {
     const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-    if (meta) meta.content = degraded ? "#1a0f10" : "#08090d";
+    if (meta) meta.content = degraded ? "#160d0e" : "#080809";
   }, [degraded]);
 }

@@ -96,6 +96,59 @@ const OPERATOR_THEME = {
 } as const;
 const IGNORE_UI_ERROR = () => undefined;
 
+function record(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function ActiveStrategy({ snapshot }: { snapshot: Snapshot | null }) {
+  const strategy = record(snapshot?.autonomy.runtime.active_strategy);
+  if (strategy.schema !== "trader.strategy.v1") return null;
+  const actions = Array.isArray(strategy.actions)
+    ? strategy.actions.map(record).slice(0, 5)
+    : [];
+  const phase = strategy.market_phase === "next_open" ? "NEXT OPEN" : "LIVE";
+  const version = Number(strategy.version) || 1;
+  const ready = actions.filter((action) => action.state === "READY").length;
+  return (
+    <section className="active-strategy" aria-label="Current trader strategy">
+      <header>
+        <strong>CURRENT STRATEGY · V{version}</strong>
+        <span data-status={String(strategy.status ?? "watching")}>{phase} · {ready} READY · {actions.length - ready} WAIT</span>
+      </header>
+      {actions.length > 0 ? (
+        <div className="active-strategy-table-wrap">
+          <table>
+            <thead><tr><th>State</th><th>Bet</th><th>Instrument</th><th>Size at open</th><th>Entry</th><th>Exit</th></tr></thead>
+            <tbody>{actions.map((action, index) => {
+              const quantity = Number(action.quantity);
+              const notional = Number(action.notional);
+              const detail = [
+                String(action.thesis ?? ""),
+                `Cancel: ${String(action.invalidation ?? "new evidence invalidates the setup")}`,
+                Array.isArray(action.blockers) && action.blockers.length > 0
+                  ? `Blocked by: ${action.blockers.map(String).join(", ")}`
+                  : "",
+              ].filter(Boolean).join("\n");
+              return (
+                <tr key={String(action.candidate_id ?? index)} title={detail}>
+                  <td><b data-state={String(action.state)}>{String(action.state ?? "WAIT")}</b></td>
+                  <td><strong>{String(action.symbol ?? "—")}</strong> <em data-side={String(action.side)}>{action.side === "NONE" ? "—" : String(action.side)}</em></td>
+                  <td>{String(action.instrument ?? "—")}</td>
+                  <td>{Number.isFinite(notional) && notional > 0 ? `$${Math.round(notional).toLocaleString()}` : "—"}{Number.isFinite(quantity) && quantity > 0 ? ` · ${quantity} sh eq.` : ""}</td>
+                  <td>{String(action.entry ?? "ON GATES")}</td>
+                  <td>{String(action.exit ?? "15:50 ET")}</td>
+                </tr>
+              );
+            })}</tbody>
+          </table>
+        </div>
+      ) : <p className="active-strategy-empty">Recalculating exact order sheet…</p>}
+    </section>
+  );
+}
+
 const TraderRuntime = memo(function TraderRuntime({
   server,
   tradingDate,
@@ -159,6 +212,7 @@ export const AgentWorkspace = memo(function AgentWorkspace({
 
       <div className="trader-room-grid">
         <section className="trader-stream-pane" aria-label="Autonomous trader stream">
+          <ActiveStrategy snapshot={snapshot} />
           <TraderRuntime
             key={tradingDate}
             server={traderServer}

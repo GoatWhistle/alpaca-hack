@@ -1,4 +1,3 @@
-import { Icon } from "../components/Icon";
 import { SourceBadge } from "../components/SourceBadge";
 import { Wordmark } from "../components/Wordmark";
 import type { ServiceStatus } from "../lib/api";
@@ -35,14 +34,8 @@ interface TopBarProps {
   freshness: string;
   hidden: boolean;
   paused: boolean;
-  refreshing: boolean;
-  manualRefresh: boolean;
   approvalCount: number;
-  showRefreshControls: boolean;
-  onOpenSettings: () => void;
-  onTogglePause: () => void;
-  onRefresh: () => void;
-  onFocusApprovals: () => void;
+  onOpenApprovals: () => void;
 }
 
 export function TopBar({
@@ -54,14 +47,8 @@ export function TopBar({
   freshness,
   hidden,
   paused,
-  refreshing,
-  manualRefresh,
   approvalCount,
-  showRefreshControls,
-  onOpenSettings,
-  onTogglePause,
-  onRefresh,
-  onFocusApprovals,
+  onOpenApprovals,
 }: TopBarProps) {
   return (
     <div className="mandate-chrome topbar-shell">
@@ -85,41 +72,11 @@ export function TopBar({
           {approvalCount > 0 && (
             <button
               className="approval-badge"
-              onClick={onFocusApprovals}
+              onClick={onOpenApprovals}
               title={`${approvalCount} memory change${approvalCount > 1 ? "s" : ""} awaiting approval`}
             >
               {approvalCount} memory approval{approvalCount > 1 ? "s" : ""}
             </button>
-          )}
-          <button
-            className="icon-button settings-button"
-            aria-label="Monitoring settings"
-            title="Monitoring settings"
-            onClick={onOpenSettings}
-          >
-            <Icon name="settings" />
-          </button>
-          {showRefreshControls && (
-            <>
-              <button
-                className={`icon-button refresh-state refresh-state--${paused ? "paused" : "live"}`}
-                aria-label={paused ? "Resume auto-refresh" : "Pause auto-refresh"}
-                title={paused ? "Resume auto-refresh" : "Pause auto-refresh"}
-                onClick={onTogglePause}
-              >
-                <Icon name="pulse" />
-              </button>
-              <button
-                className="icon-button"
-                aria-label="Refresh"
-                onClick={onRefresh}
-                disabled={refreshing}
-              >
-                <span className={manualRefresh ? "spin" : ""}>
-                  <Icon name="refresh" />
-                </span>
-              </button>
-            </>
           )}
         </div>
       </header>

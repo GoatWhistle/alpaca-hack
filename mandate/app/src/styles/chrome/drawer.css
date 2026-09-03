@@ -53,7 +53,7 @@
 .settings-drawer-header h2 {
   margin: 0;
   font-size: var(--text-md);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .settings-form { padding: var(--space-4); }
@@ -159,7 +159,7 @@
   color: var(--ink-muted);
 }
 
-.check-grid input { width: auto; accent-color: var(--authority); }
+.check-grid input { width: auto; accent-color: var(--accent); }
 
 .thesis-field { text-transform: none; letter-spacing: .1em; }
 .thesis-field textarea { min-height: 76px; resize: vertical; line-height: 1.6; }
@@ -179,14 +179,22 @@
 .settings-save:hover,
 .confirm-box button:hover { border-color: var(--ink-muted); }
 
-.settings-save { width: 100%; margin-top: var(--space-3); }
+/* The drawer's primary action: outlined Ice Signal, no fill. */
+.settings-save {
+  width: 100%;
+  margin-top: var(--space-3);
+  border-color: var(--accent);
+  background: transparent;
+}
+
+.settings-save:hover { border-color: var(--ink); }
 .settings-save:disabled { opacity: .45; cursor: default; }
 
 .confirm-box {
   margin-top: var(--space-3);
-  border: 1px solid var(--authority-dim);
+  border: 1px solid var(--accent-dim);
   border-radius: var(--radius);
-  background: var(--authority-wash);
+  background: var(--accent-wash);
   padding: var(--space-3);
 }
 
@@ -201,8 +209,8 @@
 .confirm-box button { margin-right: var(--space-2); }
 
 .confirm-box button:first-of-type {
-  border-color: var(--authority);
-  color: var(--authority);
+  border-color: var(--accent);
+  color: var(--accent);
   background: transparent;
 }
 

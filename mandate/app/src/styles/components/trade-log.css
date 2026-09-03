@@ -6,13 +6,13 @@
   gap: 2px var(--space-3);
   padding: var(--space-3) var(--space-5);
   border-bottom: 1px solid var(--line);
-  border-left: 3px solid var(--authority);
+  border-left: 3px solid var(--accent);
 }
 
 .trade-row:last-child { border-bottom: 0; }
 .trade-row[data-tone="filled"] { border-left-color: var(--allowed); }
 .trade-row[data-tone="rejected"] { border-left-color: var(--denied); }
-.trade-row[data-tone="working"] { border-left-color: var(--authority); }
+.trade-row[data-tone="working"] { border-left-color: var(--accent); }
 
 .trade-main { min-width: 0; }
 
@@ -25,7 +25,7 @@
 
 .trade-title b {
   overflow: hidden;
-  font: 600 var(--text-sm) var(--font-mono);
+  font: 500 var(--text-sm) var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -64,7 +64,7 @@
 }
 
 .trade-side em {
-  font: 600 var(--text-2xs) var(--font-mono);
+  font: 500 var(--text-2xs) var(--font-mono);
   font-style: normal;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -72,7 +72,7 @@
 
 .trade-side em[data-tone="filled"] { color: var(--allowed); }
 .trade-side em[data-tone="rejected"] { color: var(--denied); }
-.trade-side em[data-tone="working"] { color: var(--authority); }
+.trade-side em[data-tone="working"] { color: var(--accent); }
 
 .trade-side small {
   color: var(--ink-faint);
@@ -94,6 +94,6 @@
   margin: 0;
   padding: var(--space-3) var(--space-5);
   border-bottom: 1px solid var(--line);
-  color: var(--authority);
+  color: var(--accent);
   font: 500 var(--text-2xs) var(--font-mono);
 }

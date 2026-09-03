@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime
+from threading import Lock
 from typing import Any, Callable
 from urllib.parse import urlencode, urlparse
 
@@ -15,12 +17,12 @@ from mandate_research.news import (
     parse_alpaca_news,
     parse_atom,
     parse_rss,
-    parse_sec_atom,
+    parse_sec_submissions,
 )
 
 
 ALPACA_NEWS_ENDPOINT = "https://data.alpaca.markets/v1beta1/news"
-SEC_ATOM_ENDPOINT = "https://www.sec.gov/cgi-bin/browse-edgar"
+SEC_SUBMISSIONS_ENDPOINT = "https://data.sec.gov/submissions"
 APPLE_RSS_ENDPOINT = "https://www.apple.com/newsroom/rss-feed.rss"
 NVIDIA_RSS_ENDPOINT = "https://nvidianews.nvidia.com/cats/press_release.xml"
 MICROSOFT_RSS_ENDPOINT = "https://blogs.microsoft.com/feed/"
@@ -31,6 +33,7 @@ FEDERAL_RESERVE_RSS_ENDPOINT = "https://www.federalreserve.gov/feeds/press_all.x
 ALLOWED_HOSTS = {
     "data.alpaca.markets",
     "www.sec.gov",
+    "data.sec.gov",
     "www.apple.com",
     "nvidianews.nvidia.com",
     "blogs.microsoft.com",
@@ -41,6 +44,8 @@ ALLOWED_HOSTS = {
 }
 Fetcher = Callable[[str, dict[str, str]], bytes]
 MAX_EVENTS_PER_SOURCE = 20
+_SEC_REQUEST_LOCK = Lock()
+_SEC_NEXT_REQUEST_AT = 0.0
 CIK_BY_SYMBOL = {
     "AAPL": "0000320193",
     "MSFT": "0000789019",
@@ -73,6 +78,20 @@ def _alpaca_proxy(url: str) -> str | None:
     ):
         return os.environ.get("ALPACA_PROXY_URL") or None
     return None
+
+
+def _request_proxy(url: str) -> str | None:
+    """Return a configured proxy only for explicitly enabled HTTPS sources."""
+    alpaca_proxy = _alpaca_proxy(url)
+    if alpaca_proxy is not None:
+        return alpaca_proxy
+    hostname = (urlparse(url).hostname or "").lower()
+    if (
+        os.environ.get("MANDATE_USE_NEWS_PROXY", "false").lower() == "true"
+        and hostname == "nvidianews.nvidia.com"
+    ):
+        return os.environ.get("MANDATE_NEWS_PROXY_URL") or os.environ.get("ALPACA_PROXY_URL") or None
+    return None
 ISSUER_RSS_BY_SYMBOL = {
     "MSFT": ("microsoft_official_rss", MICROSOFT_RSS_ENDPOINT, "microsoft-official"),
     "GOOG": ("google_official_rss", GOOGLE_RSS_ENDPOINT, "google-official"),
@@ -83,13 +102,23 @@ ISSUER_RSS_BY_SYMBOL = {
 
 
 def _fetch(url: str, headers: dict[str, str]) -> bytes:
+    global _SEC_NEXT_REQUEST_AT
     timeout = max(2.0, min(20.0, float(os.environ.get("MANDATE_DATA_TIMEOUT_SECONDS", "8"))))
+    if (urlparse(url).hostname or "").lower() == "data.sec.gov":
+        # SEC fair-access guidance caps automated clients at ten requests per
+        # second. poll_news fans symbols out concurrently, so serialize starts
+        # at eight requests per second and leave headroom for manual probes.
+        with _SEC_REQUEST_LOCK:
+            delay = _SEC_NEXT_REQUEST_AT - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            _SEC_NEXT_REQUEST_AT = time.monotonic() + 0.125
     response = httpx.get(
         url,
         headers=headers,
         timeout=timeout,
         follow_redirects=True,
-        proxy=_alpaca_proxy(url),
+        proxy=_request_proxy(url),
     )
     response.raise_for_status()
     if response.url.scheme != "https" or response.url.host not in ALLOWED_HOSTS:
@@ -159,17 +188,17 @@ def collect_official_news(
 
     loaders: dict[str, Callable[[], list[NewsEvent]]] = {}
     if resolved_cik is not None:
-        sec_url = f"{SEC_ATOM_ENDPOINT}?{urlencode({'action': 'getcompany', 'CIK': resolved_cik, 'type': '8-K', 'owner': 'exclude', 'count': 40, 'output': 'atom'})}"
+        sec_url = f"{SEC_SUBMISSIONS_ENDPOINT}/CIK{resolved_cik}.json"
         loaders["sec_edgar_atom"] = lambda: bind_symbol(
-            parse_sec_atom(
+            parse_sec_submissions(
                 fetcher(
                     sec_url,
                     {
                         "User-Agent": os.environ.get(
                             "MANDATE_SEC_USER_AGENT",
-                            "MANDATE research probe github.com/GoatWhistle/alpaca-hack",
+                            "MandateResearch/1.0 (+https://alpaca.miposts.com)",
                         ),
-                        "Accept": "application/atom+xml",
+                        "Accept": "application/json",
                     },
                 )
             ),

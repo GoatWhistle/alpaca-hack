@@ -2,7 +2,7 @@
   padding: 5px var(--space-3);
   border: 1px solid;
   border-radius: var(--radius-sm);
-  font: 600 var(--text-2xs)/1 var(--font-mono);
+  font: 500 var(--text-2xs)/1 var(--font-mono);
   letter-spacing: .13em;
   white-space: nowrap;
 }
@@ -16,7 +16,7 @@
 .source-badge--degraded {
   color: var(--denied);
   border-color: color-mix(in srgb, var(--denied) 42%, transparent);
-  background: #1a1012;
+  background: color-mix(in srgb, var(--denied) 8%, var(--surface-inset));
 }
 
 .source-badge--unknown {
@@ -46,7 +46,7 @@
   padding: var(--space-4) var(--space-5);
   border: 1px solid color-mix(in srgb, var(--denied) 42%, transparent);
   border-radius: var(--radius);
-  background: #171012;
+  background: color-mix(in srgb, var(--denied) 8%, var(--surface-inset));
 }
 
 .degraded-heading {
@@ -59,7 +59,7 @@
 
 .degraded-heading b {
   color: var(--denied);
-  font: 600 var(--text-2xs) var(--font-mono);
+  font: 500 var(--text-2xs) var(--font-mono);
   letter-spacing: .14em;
   text-transform: uppercase;
 }
@@ -116,7 +116,7 @@
   padding: var(--space-5);
   border: 1px solid var(--denied);
   border-radius: var(--radius);
-  background: #150e0f;
+  background: color-mix(in srgb, var(--denied) 10%, var(--surface-inset));
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -125,7 +125,7 @@
 
 .surface-failure b {
   color: var(--denied);
-  font: 600 var(--text-2xs) var(--font-mono);
+  font: 500 var(--text-2xs) var(--font-mono);
   letter-spacing: .14em;
   text-transform: uppercase;
 }

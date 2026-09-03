@@ -1,16 +1,16 @@
+/* Top status band — 40px Obsidian strip flush against the Charcoal canvas.
+   Hierarchy reads through the tonal step, not a border or shadow. */
 .topbar-shell {
   position: sticky;
   top: 0;
   z-index: var(--z-sticky);
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
-  backdrop-filter: blur(18px);
+  background: var(--surface-inset);
 }
 
 .topbar {
-  height: 56px;
+  height: 40px;
   width: 100%;
-  padding: 0 var(--space-5);
+  padding: 0 var(--space-4);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -36,20 +36,20 @@
 .wordmark {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   margin-right: var(--space-1);
 }
 
-.wordmark-mark { width: 20px; height: 20px; flex: 0 0 auto; }
-.wordmark-mark svg { width: 20px; height: 20px; stroke-width: 1.6; }
-.wordmark b { font: 600 var(--text-base)/1 var(--font-ui); letter-spacing: .06em; }
+.wordmark-mark { width: 18px; height: 18px; flex: 0 0 auto; }
+.wordmark-mark svg { width: 18px; height: 18px; stroke-width: 1.6; }
+.wordmark b { font: 500 var(--text-sm)/1 var(--font-ui); letter-spacing: .08em; }
 
 .paper-badge {
   color: var(--ink-muted);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   background: var(--surface);
-  padding: 5px var(--space-2);
+  padding: 4px var(--space-2);
   font: 500 var(--text-2xs)/1 var(--font-mono);
   letter-spacing: .13em;
 }
@@ -57,7 +57,7 @@
 .market-pill {
   font: 500 var(--text-2xs)/1 var(--font-mono);
   letter-spacing: .13em;
-  padding: 5px var(--space-3);
+  padding: 4px var(--space-2);
   border: 1px solid;
   border-radius: var(--radius-sm);
   white-space: nowrap;
@@ -77,12 +77,12 @@
 .market-open {
   color: var(--allowed);
   border-color: color-mix(in srgb, var(--allowed) 34%, transparent);
-  background: #0d1a13;
+  background: color-mix(in srgb, var(--allowed) 8%, transparent);
 }
 
 .market-closed {
   color: var(--ink-muted);
-  border-color: var(--line);
+  border-color: var(--line-strong);
   background: var(--surface);
 }
 
@@ -115,24 +115,21 @@
 
 .freshness.stale { color: var(--denied); }
 
-.refresh-state--live { color: var(--allowed); }
-.refresh-state--paused { color: var(--authority); }
-
 .approval-badge {
-  border: 1px solid var(--authority-dim);
+  border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
-  background: var(--authority-wash);
-  color: var(--authority);
-  padding: 6px var(--space-4);
+  background: transparent;
+  color: var(--accent);
+  padding: 5px var(--space-3);
   cursor: pointer;
-  font: 600 var(--text-2xs) var(--font-mono);
+  font: 500 var(--text-2xs) var(--font-mono);
   letter-spacing: .1em;
   text-transform: uppercase;
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  transition: border-color var(--dur) var(--ease);
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 .approval-badge::before {
@@ -143,71 +140,10 @@
   background: currentColor;
 }
 
-.approval-badge:hover { border-color: var(--authority); }
-
-.workspace-nav-shell {
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
-}
-
-.workspace-tabs {
-  width: 100%;
-  padding: 0 var(--space-5);
-  display: flex;
-  gap: 22px;
-  position: relative;
-}
-
-.tab-rail {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 100px;
-  height: 2px;
-  background: var(--ink);
-  transform-origin: left center;
-  transition: transform 260ms var(--ease-spring);
-  pointer-events: none;
-  view-transition-name: tab-rail;
-}
-
-::view-transition-group(tab-rail) { animation-duration: 260ms; }
-::view-transition-old(tab-rail),
-::view-transition-new(tab-rail) { animation: none; opacity: 1; }
-
-.workspace-tabs button {
-  height: 40px;
-  padding: 0 2px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--ink-muted);
-  cursor: pointer;
-  font-size: var(--text-sm);
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  transition: color var(--dur) var(--ease);
-}
-
-.workspace-tabs button:hover { color: var(--ink); }
-.workspace-tabs button.active { color: var(--ink); }
-
-.tab-badge {
-  color: var(--ink-muted);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface-raised);
-  padding: 2px 5px;
-  font: 500 var(--text-2xs) var(--font-mono);
-  font-style: normal;
-}
-
-.workspace-tabs button.active .tab-badge { color: var(--ink); }
+.approval-badge:hover { border-color: var(--ink); color: var(--ink); }
 
 @media (max-width: 720px) {
-  .topbar { height: 54px; padding: 0 14px; gap: var(--space-2); }
-  .workspace-tabs { padding: 0 14px; gap: var(--space-4); }
+  .topbar { padding: 0 10px; gap: var(--space-2); }
   .top-actions > .freshness { display: none; }
   .wordmark b { display: none; }
   .top-status > .paper-badge { display: none; }

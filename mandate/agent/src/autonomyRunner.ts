@@ -151,6 +151,12 @@ type RuntimeState = {
   ipo_candidates?: number;
   ipo_research_ready?: number;
   ipo_monitor_status?: string;
+  news_sources?: Record<string, unknown>;
+  news_gate_errors?: number;
+  news_events_collected?: number;
+  news_events_passed?: number;
+  news_graph_counts?: Record<string, unknown>;
+  agent_roster?: Array<{ id: string; role: string; model: string }>;
   dynamic_symbols?: string[];
   last_research?: Record<string, unknown>;
   corporate_action_events?: number;
@@ -163,6 +169,35 @@ type RuntimeState = {
   last_candidate?: string;
   last_decision?: Record<string, unknown>;
   last_execution?: Record<string, unknown>;
+  active_strategy?: ActiveStrategy;
+  effective_poll_seconds?: number;
+  market_phase?: "open" | "closed";
+};
+
+export type ActiveStrategy = {
+  schema: "trader.strategy.v1";
+  version: number;
+  updated_at: string;
+  market_phase: "next_open" | "live";
+  status: "watching" | "parked" | "submitted";
+  reason: string;
+  focus_candidate_id: string | null;
+  hypotheses: TradePlan["hypotheses"];
+  candidate_symbols: string[];
+  actions: Array<{
+    candidate_id: string;
+    symbol: string;
+    state: "READY" | "WAIT";
+    side: "LONG" | "SHORT" | "NONE";
+    instrument: "OPTION→EQUITY";
+    quantity: number | null;
+    notional: string | null;
+    entry: string;
+    exit: string;
+    thesis: string;
+    invalidation: string;
+    blockers: string[];
+  }>;
 };
 
 type CycleResult = {
@@ -226,6 +261,10 @@ const DEFAULT_TRAJECTORY: Trajectory = {
   updated_at: new Date(0).toISOString(),
   updated_by: "runner-default",
 };
+
+export function effectivePollSeconds(trajectory: Trajectory, marketIsOpen: boolean): number {
+  return marketIsOpen ? trajectory.news_poll_seconds : 300;
+}
 
 function object(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -305,6 +344,7 @@ export function buildAutonomyPrompt(
   critics: CriticAdvice[],
   activeMemory: StoredMemoryEvent[],
   currentHypotheses?: TradeHypothesisDraft,
+  activeStrategy?: ActiveStrategy,
 ): string {
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
   const alertPayload = alerts
@@ -354,6 +394,7 @@ export function buildAutonomyPrompt(
     `Decision candidates, in deterministic rank order: ${JSON.stringify(candidatePayload)}`,
     `Executable candidate_ids (the only ids allowed in steps): ${JSON.stringify(executableCandidateIds)}`,
     `Your current pre-critic hypotheses from this same cycle: ${JSON.stringify(currentHypotheses ?? null)}`,
+    `Previous active strategy (revise, add, or remove hypotheses as evidence changes; never execute it blindly): ${JSON.stringify(activeStrategy ?? null)}`,
     `Unexpired prior hypotheses (advisory, never authority): ${JSON.stringify(activeMemory)}`,
     `Risk posture: ${trajectory.risk_posture}`,
     `Decision thresholds: max_spread_bps=${trajectory.max_spread_bps}, min_relative_volume=${trajectory.min_relative_volume}, regular_hours_only=${trajectory.regular_hours_only}`,
@@ -381,6 +422,7 @@ export function buildHypothesisPrompt(
   cycleId: string,
   decisionCandidates: TradeCandidate[],
   activeMemory: StoredMemoryEvent[],
+  activeStrategy?: ActiveStrategy,
 ): string {
   const alertPayload = alerts.slice(-20).map(({ key: _key, content_hash: _hash, summary, ...event }) => ({
     ...event,
@@ -402,6 +444,8 @@ export function buildHypothesisPrompt(
     `Passed news context: ${JSON.stringify(alertPayload)}`,
     `Portfolio context: ${JSON.stringify(precomputedEvaluation.execution_context ?? {})}`,
     `Unexpired prior memory: ${JSON.stringify(activeMemory)}`,
+    `Previous active strategy: ${JSON.stringify(activeStrategy ?? null)}`,
+    "Continuously revise that strategy: retain supported hypotheses, delete invalidated ones, and add newly evidenced candidates.",
     "Choose one current focus candidate and state one to five testable hypotheses. Non-executable candidates are valid research focus but never execution authority.",
     "Each hypothesis must contain exactly candidate_id, thesis, confidence (low|medium|high), non-empty supports, contradicts (possibly empty), and concrete invalidation.",
     "End with exactly one single-line TRADE_HYPOTHESES_JSON object. Root fields must be exactly schema, cycle_id, focus_candidate_id, hypotheses. Do not write anything after it.",
@@ -1365,6 +1409,44 @@ async function runReadOnlyModelTurn(
   return { text, toolCalls };
 }
 
+function isPlanningToolAttempt(error: unknown): boolean {
+  return error instanceof Error && error.message === "planning model attempted to use a tool";
+}
+
+async function runPlannerTurnWithRecovery(
+  client: TrueForge,
+  agentName: string,
+  sessionId: string,
+  prompt: string,
+  timeoutSeconds: number,
+): Promise<ModelTurn> {
+  try {
+    return await runReadOnlyModelTurn(client, sessionId, prompt, timeoutSeconds);
+  } catch (error) {
+    if (!isPlanningToolAttempt(error)) throw error;
+  }
+
+  // Some OpenAI-compatible providers occasionally encode a structured JSON
+  // answer as a tool call even when the agent has no tools. The contaminated
+  // turn cannot be continued safely, so retry once in a fresh, tool-free
+  // session with the complete prompt. A second violation still fails closed.
+  const recovery = await client.sessions.create({ agent: { name: agentName } });
+  try {
+    return await runReadOnlyModelTurn(client, recovery.data.id, [
+      prompt,
+      "",
+      "WIRE REPAIR: Your previous response was encoded as a tool call.",
+      "Do not call or name any tool. Emit the required TRADE_PLAN_JSON line as plain assistant text only.",
+    ].join("\n"), timeoutSeconds);
+  } finally {
+    try {
+      await client.sessions.delete(recovery.data.id);
+    } catch (error) {
+      console.error("Could not clean up planner recovery session", publicRunnerError(error));
+    }
+  }
+}
+
 export function criticTimeoutSeconds(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.MANDATE_CRITIC_TIMEOUT_SECONDS ?? 20);
   return Number.isFinite(raw) ? Math.min(60, Math.max(3, raw)) : 20;
@@ -1472,10 +1554,11 @@ async function runTraderHypothesisCycle(
   cycleId: string,
   decisionCandidates: TradeCandidate[],
   activeMemory: StoredMemoryEvent[],
+  activeStrategy?: ActiveStrategy,
 ): Promise<TradeHypothesisDraft> {
   const allowedCandidates = decisionCandidates.map((candidate) => candidate.candidate_id);
   const turn = await runReadOnlyModelTurn(client, sessionId, buildHypothesisPrompt(
-    trajectory, alerts, market, evaluation, cycleId, decisionCandidates, activeMemory,
+    trajectory, alerts, market, evaluation, cycleId, decisionCandidates, activeMemory, activeStrategy,
   ), traderTimeoutSeconds());
   const firstDraft = parseTradeHypothesisDraft(turn.text, cycleId, allowedCandidates);
   if (firstDraft) return firstDraft;
@@ -1501,6 +1584,7 @@ async function runIsolatedTraderHypothesisCycle(
   cycleId: string,
   decisionCandidates: TradeCandidate[],
   activeMemory: StoredMemoryEvent[],
+  activeStrategy?: ActiveStrategy,
 ): Promise<TradeHypothesisDraft> {
   let lastError: unknown = new Error("hypothesis turn did not start");
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -1508,7 +1592,7 @@ async function runIsolatedTraderHypothesisCycle(
     try {
       return await runTraderHypothesisCycle(
         client, session.data.id, trajectory, alerts, market, evaluation,
-        cycleId, decisionCandidates, activeMemory,
+        cycleId, decisionCandidates, activeMemory, activeStrategy,
       );
     } catch (error) {
       lastError = error;
@@ -1525,6 +1609,7 @@ async function runIsolatedTraderHypothesisCycle(
 
 async function runTraderCycle(
   client: TrueForge,
+  agentName: string,
   sessionId: string,
   trajectory: Trajectory,
   alerts: NewsEvent[],
@@ -1537,11 +1622,15 @@ async function runTraderCycle(
   critics: CriticAdvice[],
   activeMemory: StoredMemoryEvent[],
   currentHypotheses?: TradeHypothesisDraft,
+  activeStrategy?: ActiveStrategy,
 ): Promise<CycleResult> {
-  const turn = await runReadOnlyModelTurn(client, sessionId, buildAutonomyPrompt(
+  const prompt = buildAutonomyPrompt(
     trajectory, alerts, market, outcomeScorecard, evaluation, cycleId,
-    decisionCandidates, critics, activeMemory, currentHypotheses,
-  ), traderTimeoutSeconds());
+    decisionCandidates, critics, activeMemory, currentHypotheses, activeStrategy,
+  );
+  const turn = await runPlannerTurnWithRecovery(
+    client, agentName, sessionId, prompt, traderTimeoutSeconds(),
+  );
   const decisionCandidateIds = decisionCandidates.map((candidate) => candidate.candidate_id);
   const executableCandidateIds = executableCandidates.map((candidate) => candidate.candidate_id);
   const plan = parseTradePlan(turn.text, cycleId, decisionCandidateIds, executableCandidateIds);
@@ -1628,6 +1717,32 @@ async function main(): Promise<void> {
       ? String(previousRuntime.trader_session_date)
       : undefined,
     last_action: previousRuntime?.last_action ? String(previousRuntime.last_action) : undefined,
+    active_strategy: typeof previousRuntime?.active_strategy === "object"
+      && previousRuntime.active_strategy !== null
+      && !Array.isArray(previousRuntime.active_strategy)
+      ? previousRuntime.active_strategy as ActiveStrategy
+      : undefined,
+    agent_roster: [
+      {
+        id: agentName,
+        role: "main_trader",
+        model: process.env.MANDATE_TRADER_MODEL ?? "zai/glm-5-3-flash",
+      },
+      ...CRITIC_NAMES.map((critic) => {
+        const configured = criticConfiguration(critic);
+        return { id: configured.agent, role: `${critic}_critic`, model: configured.model };
+      }),
+      {
+        id: process.env.MANDATE_OPERATOR_AGENT_NAME ?? "mandate-operator-agent",
+        role: "operator",
+        model: process.env.MANDATE_OPERATOR_MODEL ?? "zai/glm-4-5-air",
+      },
+      {
+        id: "news-relevance-gate",
+        role: "news_gate",
+        model: process.env.ZAI_NEWS_MODEL ?? "zai/glm-4.5-air",
+      },
+    ],
   };
   const appendTimeline = async (
     kind: TimelineEvent["kind"],
@@ -1663,9 +1778,11 @@ async function main(): Promise<void> {
   let wakePromise = new Promise<void>((resolveWake) => { wakeResolver = resolveWake; });
   let pendingMarketWake = false;
   let retainedIpoDiscovery: Record<string, unknown> | undefined;
+  let lastMarketOpen: boolean | null = null;
   const previousMarketValue = await readJson(marketPath);
   if (previousMarketValue !== null) {
     const previousMarket = object(previousMarketValue, "previous market monitoring");
+    lastMarketOpen = previousMarket.market_is_open === true;
     const previousDiscovery = typeof previousMarket.discovery === "object"
       && previousMarket.discovery !== null && !Array.isArray(previousMarket.discovery)
       ? previousMarket.discovery as Record<string, unknown>
@@ -1677,6 +1794,7 @@ async function main(): Promise<void> {
   }
   const wake = (reason: WakeReason): void => {
     if (reason === "market") pendingMarketWake = true;
+    if (reason === "news" && lastMarketOpen === false) return;
     wakeResolver?.();
   };
   const initialTrajectory = await readTrajectory(trajectoryPath);
@@ -1711,6 +1829,13 @@ async function main(): Promise<void> {
       const [poll, market] = await Promise.all([
         pollNews(trajectory), pollMarket(trajectory, fullMarketPollDue),
       ]);
+      const marketJustOpened = market.market_is_open && lastMarketOpen !== true;
+      lastMarketOpen = market.market_is_open;
+      runtime = {
+        ...runtime,
+        effective_poll_seconds: effectivePollSeconds(trajectory, market.market_is_open),
+        market_phase: market.market_is_open ? "open" : "closed",
+      };
       if (fullMarketPollDue) lastFullMarketPollMs = cycleStartedMs;
       retainedIpoDiscovery = retainIpoDiscovery(market, retainedIpoDiscovery);
       const marketExitWake = pendingMarketWake;
@@ -1754,8 +1879,9 @@ async function main(): Promise<void> {
       const ipoSignal = JSON.stringify(ipoResearchReady.map((item) => item.symbol).sort());
       const ipoChanged = ipoSignal !== lastIpoSignal;
       lastIpoSignal = ipoSignal;
-      const analysisDue = lastAnalysisMs === 0
+      const scheduledAnalysisDue = lastAnalysisMs === 0
         || nowMs - lastAnalysisMs >= trajectory.analysis_interval_minutes * 60_000;
+      const analysisDue = scheduledAnalysisDue || marketJustOpened;
       const qualityItems = Object.values(market.quality);
       const discovery = market.discovery;
       const movers = object(discovery.movers ?? {}, "movers");
@@ -1771,6 +1897,11 @@ async function main(): Promise<void> {
         ipo_candidates: ipoCandidates.length,
         ipo_research_ready: ipoResearchReady.length,
         ipo_monitor_status: object(discovery.ipos ?? {}, "IPO discovery").status === "ok" ? "monitoring" : "degraded",
+        news_sources: poll.sources,
+        news_gate_errors: poll.gate_errors.length,
+        news_events_collected: poll.events.length,
+        news_events_passed: poll.passed_events.length,
+        news_graph_counts: poll.graph_counts,
         dynamic_symbols: activeSymbols.filter((symbol) => !trajectory.symbols.includes(symbol)),
         corporate_action_events: market.corporate_actions.length,
         outcomes_observed: outcomes.filter((item) => Object.keys(item.forward_returns_pct).length > 0).length,
@@ -1833,7 +1964,8 @@ async function main(): Promise<void> {
         try {
           const scorecard = buildOutcomeScorecard(outcomes);
           const triggers = [
-            ...(analysisDue ? ["scheduled_analysis"] : []),
+            ...(scheduledAnalysisDue ? ["scheduled_analysis"] : []),
+            ...(marketJustOpened ? ["market_open_revalidation"] : []),
             ...(detected.fresh.length > 0 ? ["fresh_news"] : []),
             ...(ipoChanged ? ["ipo_universe_changed"] : []),
           ];
@@ -1894,6 +2026,7 @@ async function main(): Promise<void> {
           );
           const candidateCount = executableCandidates.length;
           const decisionCandidateCount = decisionCandidates.length;
+          let currentHypotheses: TradeHypothesisDraft | undefined;
           await appendTimeline(
             "tool_result", newsGateHealthy ? "ok" : "degraded",
             `${decisionCandidateCount} decision context candidate${decisionCandidateCount === 1 ? "" : "s"}; ${candidateCount} executable.`,
@@ -1960,7 +2093,6 @@ async function main(): Promise<void> {
               pipeline_note: "Main trader is forming the hypothesis it will test this cycle",
             };
             await writeJsonAtomic(runtimePath, runtime);
-            let currentHypotheses: TradeHypothesisDraft | undefined;
             await appendTimeline(
               "hypothesis", "ok", "Main trader is selecting the hypothesis to test this cycle.",
               {
@@ -1977,6 +2109,7 @@ async function main(): Promise<void> {
               currentHypotheses = await runIsolatedTraderHypothesisCycle(
                 client, agentName, activeTrajectory, passedPending, market,
                 precomputedEvaluation, cycleId, decisionCandidates, activeMemory,
+                runtime.active_strategy,
               );
               const focus = decisionCandidates.find(
                 (candidate) => candidate.candidate_id === currentHypotheses?.focus_candidate_id,
@@ -2021,9 +2154,10 @@ async function main(): Promise<void> {
             );
             try {
               result = await runTraderCycle(
-                client, traderSessionId, activeTrajectory, passedPending, market,
+                client, agentName, traderSessionId, activeTrajectory, passedPending, market,
                 scorecard, precomputedEvaluation, cycleId, decisionCandidates,
                 executableCandidates, critics, activeMemory, currentHypotheses,
+                runtime.active_strategy,
               );
             } catch (error) {
               let finalError = error;
@@ -2042,9 +2176,10 @@ async function main(): Promise<void> {
                 await writeJsonAtomic(runtimePath, runtime);
                 try {
                   result = await runTraderCycle(
-                    client, traderSessionId, activeTrajectory, passedPending, market,
+                    client, agentName, traderSessionId, activeTrajectory, passedPending, market,
                     scorecard, precomputedEvaluation, cycleId, decisionCandidates,
                     executableCandidates, critics, activeMemory, currentHypotheses,
+                    runtime.active_strategy,
                   );
                   finalError = null;
                 } catch (retryError) {
@@ -2076,6 +2211,85 @@ async function main(): Promise<void> {
             }
           }
           if (result === null) throw new Error("trader cycle produced no result");
+          const strategyHypotheses = result.plan.hypotheses.length > 0
+            ? result.plan.hypotheses
+            : currentHypotheses?.hypotheses ?? [];
+          const strategyFocus = currentHypotheses?.focus_candidate_id
+            ?? result.plan.steps[0]?.candidate_id
+            ?? strategyHypotheses[0]?.candidate_id
+            ?? null;
+          const strategyCandidateSymbols = [...new Set(strategyHypotheses.flatMap((hypothesis) => {
+            const candidate = decisionCandidates.find(
+              (item) => item.candidate_id === hypothesis.candidate_id,
+            );
+            return candidate ? [candidate.symbol] : [];
+          }))];
+          const selectedCandidateIds = new Set(result.plan.steps.map((step) => step.candidate_id));
+          const strategyActions: ActiveStrategy["actions"] = strategyHypotheses.map((hypothesis) => {
+            const candidate = decisionCandidates.find(
+              (item) => item.candidate_id === hypothesis.candidate_id,
+            );
+            const evidence = candidate && typeof candidate.evidence === "object"
+              && candidate.evidence !== null && !Array.isArray(candidate.evidence)
+              ? candidate.evidence as Record<string, unknown>
+              : {};
+            const strategies = typeof evidence.strategies === "object"
+              && evidence.strategies !== null && !Array.isArray(evidence.strategies)
+              ? evidence.strategies as Record<string, unknown>
+              : {};
+            const ensemble = typeof strategies.regime_ensemble === "object"
+              && strategies.regime_ensemble !== null && !Array.isArray(strategies.regime_ensemble)
+              ? strategies.regime_ensemble as Record<string, unknown>
+              : {};
+            const sizing = typeof evidence.sizing === "object"
+              && evidence.sizing !== null && !Array.isArray(evidence.sizing)
+              ? evidence.sizing as Record<string, unknown>
+              : {};
+            const marketEvidence = typeof evidence.market === "object"
+              && evidence.market !== null && !Array.isArray(evidence.market)
+              ? evidence.market as Record<string, unknown>
+              : {};
+            const direction = String(ensemble.direction ?? "flat").toLowerCase();
+            const quantityValue = Number(sizing.qty ?? 0);
+            const quantity = Number.isFinite(quantityValue) && quantityValue > 0
+              ? Math.floor(quantityValue)
+              : null;
+            const last = Number(marketEvidence.last ?? 0);
+            const blockers = Array.isArray(evidence.blocked_by)
+              ? evidence.blocked_by.map(String).slice(0, 8)
+              : [];
+            const ready = candidate?.execution_eligible === true
+              && selectedCandidateIds.has(hypothesis.candidate_id);
+            return {
+              candidate_id: hypothesis.candidate_id,
+              symbol: candidate?.symbol ?? hypothesis.candidate_id,
+              state: ready ? "READY" : "WAIT",
+              side: direction === "buy" ? "LONG" : direction === "sell" ? "SHORT" : "NONE",
+              instrument: "OPTION→EQUITY",
+              quantity,
+              notional: quantity !== null && Number.isFinite(last) && last > 0
+                ? (quantity * last).toFixed(2)
+                : null,
+              entry: ready ? "NOW" : "ON GATES",
+              exit: "0.9 ATR stop · 1.5 ATR target · 15:50 ET",
+              thesis: hypothesis.thesis,
+              invalidation: hypothesis.invalidation,
+              blockers,
+            };
+          });
+          const nextStrategy: ActiveStrategy = {
+            schema: "trader.strategy.v1",
+            version: (runtime.active_strategy?.version ?? 0) + 1,
+            updated_at: new Date(nowMs).toISOString(),
+            market_phase: market.market_is_open ? "live" : "next_open",
+            status: strategyHypotheses.length > 0 ? "watching" : "parked",
+            reason: result.reason,
+            focus_candidate_id: strategyFocus,
+            hypotheses: strategyHypotheses,
+            candidate_symbols: strategyCandidateSymbols,
+            actions: strategyActions,
+          };
+          runtime = { ...runtime, active_strategy: nextStrategy };
           const appendedMemory = await appendTraderMemory(
             traderMemoryPath, cycleId, result.plan.memory_events, nowMs,
           );
@@ -2093,58 +2307,88 @@ async function main(): Promise<void> {
           }
           await appendTimeline(
             "plan", result.action === "EXECUTE_PLAN" ? "ok" : "parked",
-            result.plan.action === "EXECUTE_PLAN"
+            !market.market_is_open && strategyHypotheses.length > 0
+              ? `Updated next-open strategy v${nextStrategy.version}; ${strategyHypotheses.length} hypotheses remain under review.`
+              : result.plan.action === "EXECUTE_PLAN"
               ? `Proposed ${result.plan.steps.length} executable trade step${result.plan.steps.length === 1 ? "" : "s"}.`
               : "Final trader chose PARK; no entry was delegated to execution.",
-            { cycle_id: cycleId, plan: result.plan, memory_appended: appendedMemory.length },
-            decisionCandidateCount > 0 ? runtime.trader_session_id ?? null : null,
-          );
-          const executionTool = result.plan.action === "EXECUTE_PLAN"
-            ? "alpaca.execute_trade_plan"
-            : "risk.final_exit_pass";
-          runtime = {
-              ...runtime,
-              pipeline_stage: "execution",
-              pipeline_note: result.plan.action === "EXECUTE_PLAN"
-                ? "Applying the canonical trade plan through the deterministic Alpaca paper executor"
-                : "Rechecking hard-risk exits after planning; entries remain disabled",
-          };
-          await writeJsonAtomic(runtimePath, runtime);
-          await appendTimeline(
-            "tool_call", "ok",
-            result.plan.action === "EXECUTE_PLAN"
-              ? "Calling the deterministic Alpaca paper executor."
-              : "Rechecking hard-risk exits before completing the cycle.",
             {
               cycle_id: cycleId,
-              tool: executionTool,
-              arguments: { action: result.plan.action, steps: result.plan.steps },
-            }, decisionCandidateCount > 0 ? runtime.trader_session_id ?? null : null,
-          );
-          const execution = await executeDirectPaperOrder(precomputedEvaluation, result.plan, runtimePath);
-          result.execution = execution;
-          if (execution.submitted === true) {
-            result.action = "SUBMITTED";
-            result.candidate = typeof execution.candidate === "string" ? execution.candidate : result.candidate;
-            result.reason = String(execution.reason ?? "Canonical paper action submitted.");
-          } else if (result.plan.action === "EXECUTE_PLAN"
-            && (execution.action === "REJECTED" || execution.action === "PARK")) {
-            result.action = "PARK";
-            result.reason = String(execution.reason ?? "No direct paper action received a fill.");
-          }
-          await appendTimeline(
-            "execution",
-            execution.submitted === true ? "submitted" : execution.action === "REJECTED" ? "degraded" : "ok",
-            execution.submitted === true
-              ? result.reason
-              : execution.action === "REJECTED"
-                ? String(execution.reason ?? "Paper executor rejected the request.")
-              : result.plan.action === "EXECUTE_PLAN"
-                ? String(execution.reason ?? "No paper order was submitted.")
-                : "Final hard-risk pass completed; no exit was required.",
-            { cycle_id: cycleId, tool: executionTool, result: execution },
+              plan: result.plan,
+              active_strategy: nextStrategy,
+              memory_appended: appendedMemory.length,
+            },
             decisionCandidateCount > 0 ? runtime.trader_session_id ?? null : null,
           );
+          if (!market.market_is_open) {
+            const staged = {
+              action: "STAGED",
+              submitted: false,
+              reason: "Market closed. Strategy remains under review and will be fully revalidated at the next open.",
+              strategy_version: nextStrategy.version,
+            };
+            result.execution = staged;
+            await appendTimeline(
+              "execution", "ok", staged.reason,
+              { cycle_id: cycleId, tool: "trader.stage_next_open_strategy", result: staged },
+              decisionCandidateCount > 0 ? runtime.trader_session_id ?? null : null,
+            );
+          } else {
+            const executionTool = result.plan.action === "EXECUTE_PLAN"
+              ? "alpaca.execute_trade_plan"
+              : "risk.final_exit_pass";
+            runtime = {
+                ...runtime,
+                pipeline_stage: "execution",
+                pipeline_note: result.plan.action === "EXECUTE_PLAN"
+                  ? "Applying the canonical trade plan through the deterministic Alpaca paper executor"
+                  : "Rechecking hard-risk exits after planning; entries remain disabled",
+            };
+            await writeJsonAtomic(runtimePath, runtime);
+            await appendTimeline(
+              "tool_call", "ok",
+              result.plan.action === "EXECUTE_PLAN"
+                ? "Calling the deterministic Alpaca paper executor."
+                : "Rechecking hard-risk exits before completing the cycle.",
+              {
+                cycle_id: cycleId,
+                tool: executionTool,
+                arguments: { action: result.plan.action, steps: result.plan.steps },
+              }, decisionCandidateCount > 0 ? runtime.trader_session_id ?? null : null,
+            );
+            const execution = await executeDirectPaperOrder(precomputedEvaluation, result.plan, runtimePath);
+            result.execution = execution;
+            if (execution.submitted === true) {
+              result.action = "SUBMITTED";
+              result.candidate = typeof execution.candidate === "string" ? execution.candidate : result.candidate;
+              result.reason = String(execution.reason ?? "Canonical paper action submitted.");
+            } else if (result.plan.action === "EXECUTE_PLAN"
+              && (execution.action === "REJECTED" || execution.action === "PARK")) {
+              result.action = "PARK";
+              result.reason = String(execution.reason ?? "No direct paper action received a fill.");
+            }
+            runtime = {
+              ...runtime,
+              active_strategy: {
+                ...nextStrategy,
+                status: result.action === "SUBMITTED" ? "submitted" : result.action === "PARK" ? "parked" : "watching",
+                reason: result.reason,
+              },
+            };
+            await appendTimeline(
+              "execution",
+              execution.submitted === true ? "submitted" : execution.action === "REJECTED" ? "degraded" : "ok",
+              execution.submitted === true
+                ? result.reason
+                : execution.action === "REJECTED"
+                  ? String(execution.reason ?? "Paper executor rejected the request.")
+                : result.plan.action === "EXECUTE_PLAN"
+                  ? String(execution.reason ?? "No paper order was submitted.")
+                  : "Final hard-risk pass completed; no exit was required.",
+              { cycle_id: cycleId, tool: executionTool, result: execution },
+              decisionCandidateCount > 0 ? runtime.trader_session_id ?? null : null,
+            );
+          }
         } finally {
           clearInterval(heartbeat);
         }
@@ -2155,7 +2399,10 @@ async function main(): Promise<void> {
           pending: market.market_is_open && newsGateHealthy ? [] : cycleCursor.pending,
           passed_pending: market.market_is_open && newsGateHealthy ? [] : cycleCursor.passed_pending,
         });
-        const next = new Date(nowMs + trajectory.analysis_interval_minutes * 60_000).toISOString();
+        const nextDelayMs = market.market_is_open
+          ? trajectory.analysis_interval_minutes * 60_000
+          : effectivePollSeconds(trajectory, false) * 1000;
+        const next = new Date(nowMs + nextDelayMs).toISOString();
         runtime = {
           ...runtime,
           status: "running",
@@ -2215,7 +2462,7 @@ async function main(): Promise<void> {
     }
     runtime = { ...runtime, heartbeat_at: new Date().toISOString() };
     await writeJsonAtomic(runtimePath, runtime);
-    return trajectory.news_poll_seconds * 1000;
+    return effectivePollSeconds(trajectory, lastMarketOpen === true) * 1000;
   };
 
   do {

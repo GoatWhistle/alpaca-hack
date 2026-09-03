@@ -27,6 +27,7 @@ Environment=MANDATE_PYTHON=/opt/alpaca-hack/venv/bin/python
 Environment=MANDATE_RESEARCH_URL=http://127.0.0.1:8120/mcp
 Environment=MANDATE_ALPACA_MCP_URL=http://127.0.0.1:8100/mcp
 Environment=MANDATE_USE_ALPACA_PROXY=true
+Environment=MANDATE_USE_NEWS_PROXY=true
 Environment=TRUEFORGE_BASE_URL=http://127.0.0.1:8890
 ExecStart=/usr/bin/env MANDATE_PATH=/opt/alpaca-hack/mandate/mandates/example.yaml MANDATE_JOURNAL_PATH=/opt/alpaca-hack/mandate/logs/session.jsonl MANDATE_TRAJECTORY_PATH=/opt/alpaca-hack/mandate/logs/trajectory.json MANDATE_ALERTS_PATH=/opt/alpaca-hack/mandate/logs/news-alerts.jsonl MANDATE_AUTONOMY_RUNTIME_PATH=/opt/alpaca-hack/mandate/logs/autonomy-runtime.json MANDATE_NEWS_CURSOR_PATH=/opt/alpaca-hack/mandate/logs/news-cursor.json MANDATE_MARKET_MONITORING_PATH=/opt/alpaca-hack/mandate/logs/market-monitoring.json MANDATE_FORWARD_OUTCOMES_PATH=/opt/alpaca-hack/mandate/logs/forward-outcomes.json MANDATE_TRADER_TIMELINE_PATH=/opt/alpaca-hack/mandate/logs/trader-timeline.jsonl MANDATE_TRADER_MEMORY_PATH=/opt/alpaca-hack/mandate/logs/trader-memory.jsonl MANDATE_EXECUTION_LOCK_PATH=/opt/alpaca-hack/mandate/logs/execution.lock MANDATE_PYTHON=/opt/alpaca-hack/venv/bin/python MANDATE_RESEARCH_URL=http://127.0.0.1:8120/mcp MANDATE_ALPACA_MCP_URL=http://127.0.0.1:8100/mcp MANDATE_USE_ALPACA_PROXY=true TRUEFORGE_BASE_URL=http://127.0.0.1:8890 /usr/bin/npm run autonomy
 Restart=always

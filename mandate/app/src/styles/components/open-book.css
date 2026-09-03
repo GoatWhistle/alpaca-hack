@@ -29,7 +29,7 @@
 
 .position-card header b {
   overflow: hidden;
-  font: 600 var(--text-sm) var(--font-mono);
+  font: 500 var(--text-sm) var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -39,21 +39,21 @@
 .badge {
   padding: 2px 6px;
   border-radius: var(--radius-sm);
-  font: 600 var(--text-2xs) var(--font-mono);
+  font: 500 var(--text-2xs) var(--font-mono);
   letter-spacing: .08em;
   text-transform: uppercase;
 }
 
 .badge--long {
   color: var(--allowed);
-  border: 1px solid rgb(74 222 128 / 0.35);
-  background: rgb(74 222 128 / 0.08);
+  border: 1px solid color-mix(in srgb, var(--allowed) 35%, transparent);
+  background: color-mix(in srgb, var(--allowed) 8%, transparent);
 }
 
 .badge--short {
   color: var(--denied);
-  border: 1px solid rgb(255 101 104 / 0.35);
-  background: rgb(255 101 104 / 0.08);
+  border: 1px solid color-mix(in srgb, var(--denied) 35%, transparent);
+  background: color-mix(in srgb, var(--denied) 8%, transparent);
 }
 
 .badge--instrument {
@@ -83,7 +83,7 @@
 .position-size i[data-tone="loss"] { color: var(--denied); }
 
 .position-pnl {
-  font: 600 var(--text-md) var(--font-mono);
+  font: 500 var(--text-md) var(--font-mono);
   letter-spacing: -.01em;
   font-variant-numeric: tabular-nums;
 }
@@ -113,7 +113,7 @@
   overflow: hidden;
 }
 
-.meter > div { height: 100%; background: var(--authority); }
+.meter > div { height: 100%; background: var(--accent); }
 
 .position-exit {
   color: var(--ink-muted);

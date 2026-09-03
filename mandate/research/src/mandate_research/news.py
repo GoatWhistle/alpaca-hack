@@ -205,6 +205,64 @@ def parse_sec_atom(payload: str | bytes) -> list[NewsEvent]:
         raise
 
 
+def parse_sec_submissions(payload: str | bytes | Mapping[str, Any]) -> list[NewsEvent]:
+    """Parse recent 8-K/6-K filings from the official SEC submissions document."""
+    if isinstance(payload, (str, bytes)):
+        try:
+            decoded = json.loads(_bounded_payload(payload))
+        except json.JSONDecodeError as exc:
+            raise NewsParseError("invalid SEC submissions JSON") from exc
+    else:
+        decoded = payload
+    if not isinstance(decoded, Mapping):
+        raise NewsParseError("SEC submissions payload must be an object")
+
+    filings = decoded.get("filings")
+    recent = filings.get("recent") if isinstance(filings, Mapping) else None
+    if not isinstance(recent, Mapping):
+        raise NewsParseError("SEC submissions payload is missing recent filings")
+
+    forms = recent.get("form")
+    if not isinstance(forms, list):
+        raise NewsParseError("SEC recent filings must contain a form list")
+    cik = str(decoded.get("cik") or "").lstrip("0")
+    company = clean_text(decoded.get("name", ""))
+
+    def field(name: str, index: int) -> Any:
+        values = recent.get(name)
+        return values[index] if isinstance(values, list) and index < len(values) else ""
+
+    events: list[NewsEvent] = []
+    for index, raw_form in enumerate(forms):
+        form = clean_text(raw_form).upper()
+        if form not in {"8-K", "8-K/A", "6-K", "6-K/A"}:
+            continue
+        accession = clean_text(field("accessionNumber", index))
+        primary_document = clean_text(field("primaryDocument", index))
+        accepted = clean_text(field("acceptanceDateTime", index))
+        filed = clean_text(field("filingDate", index))
+        published_at = accepted or (f"{filed}T00:00:00Z" if filed else "")
+        description = clean_text(field("primaryDocDescription", index))
+        accession_path = accession.replace("-", "")
+        url = (
+            f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_path}/{primary_document}"
+            if cik and accession_path and primary_document
+            else None
+        )
+        events.append(
+            _event(
+                source="sec-edgar",
+                external_id=accession,
+                published_at=published_at,
+                headline=f"{form} — {description or company or 'SEC filing'}",
+                summary=field("items", index),
+                url=url,
+                metadata={"form": form, "company": company},
+            )
+        )
+    return events
+
+
 def parse_rss(payload: str | bytes, *, source: str) -> list[NewsEvent]:
     text = _bounded_payload(payload)
     try:

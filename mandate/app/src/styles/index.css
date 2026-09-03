@@ -4,6 +4,7 @@
 @import "./base.css";
 @import "./layout.css";
 @import "./chrome/top-bar.css";
+@import "./chrome/side-rail.css";
 @import "./chrome/native.css";
 @import "./chrome/drawer.css";
 @import "./components/degraded.css";
@@ -20,3 +21,4 @@
 @import "./views/table.css";
 @import "./views/trade-history.css";
 @import "./views/trader-room.css";
+@import "./views/agents.css";

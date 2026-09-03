@@ -1,28 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
-  <rect width="1200" height="630" fill="#08090d"/>
-  <rect x="0" y="0" width="1200" height="4" fill="#d6ab32"/>
+  <rect width="1200" height="630" fill="#080809"/>
+  <rect x="0" y="0" width="1200" height="4" fill="#83c3ff"/>
 
   <g transform="translate(88 108)">
-    <path d="M28 0 H4 V96 H28" fill="none" stroke="#d6ab32" stroke-width="8" stroke-linecap="square"/>
-    <path d="M92 0 H116 V96 H92" fill="none" stroke="#d6ab32" stroke-width="8" stroke-linecap="square"/>
-    <circle cx="60" cy="48" r="24" fill="#fafafa"/>
+    <path d="M28 0 H4 V96 H28" fill="none" stroke="#83c3ff" stroke-width="8" stroke-linecap="square"/>
+    <path d="M92 0 H116 V96 H92" fill="none" stroke="#83c3ff" stroke-width="8" stroke-linecap="square"/>
+    <circle cx="60" cy="48" r="24" fill="#ffffff"/>
   </g>
 
-  <text x="88" y="300" fill="#fafafa" font-family="Inter, system-ui, sans-serif" font-size="86" font-weight="600" letter-spacing="-2">MANDATE</text>
+  <text x="88" y="300" fill="#ffffff" font-family="Inter, system-ui, sans-serif" font-size="86" font-weight="600" letter-spacing="-2">MANDATE</text>
 
-  <text x="88" y="372" fill="#a1a1aa" font-family="ui-monospace, monospace" font-size="26" letter-spacing="3">WHO HAS THE RIGHT TO PRESS THE BUTTON</text>
+  <text x="88" y="372" fill="#acadae" font-family="ui-monospace, monospace" font-size="26" letter-spacing="3">WHO HAS THE RIGHT TO PRESS THE BUTTON</text>
 
-  <text x="88" y="452" fill="#fafafa" font-family="Inter, system-ui, sans-serif" font-size="30">A paper-trading agent that may act only inside a</text>
-  <text x="88" y="496" fill="#fafafa" font-family="Inter, system-ui, sans-serif" font-size="30">human-authored mandate. Deterministic code decides.</text>
+  <text x="88" y="452" fill="#ffffff" font-family="Inter, system-ui, sans-serif" font-size="30">A paper-trading agent that may act only inside a</text>
+  <text x="88" y="496" fill="#ffffff" font-family="Inter, system-ui, sans-serif" font-size="30">human-authored mandate. Deterministic code decides.</text>
 
   <g transform="translate(88 548)">
-    <rect x="0" y="0" width="132" height="34" rx="4" fill="#1c1610" stroke="#8a6a33"/>
-    <text x="16" y="23" fill="#d6ab32" font-family="ui-monospace, monospace" font-size="15" letter-spacing="2">APPROVAL</text>
+    <rect x="0" y="0" width="132" height="34" rx="4" fill="#10161c" stroke="#3d6a94"/>
+    <text x="16" y="23" fill="#83c3ff" font-family="ui-monospace, monospace" font-size="15" letter-spacing="2">APPROVAL</text>
 
     <rect x="148" y="0" width="104" height="34" rx="4" fill="#0f1014" stroke="#ffffff2e"/>
-    <text x="164" y="23" fill="#a1a1aa" font-family="ui-monospace, monospace" font-size="15" letter-spacing="2">PAPER</text>
+    <text x="164" y="23" fill="#acadae" font-family="ui-monospace, monospace" font-size="15" letter-spacing="2">PAPER</text>
 
     <rect x="268" y="0" width="150" height="34" rx="4" fill="#0f1014" stroke="#ffffff2e"/>
-    <text x="284" y="23" fill="#a1a1aa" font-family="ui-monospace, monospace" font-size="15" letter-spacing="2">TRUEFORGE</text>
+    <text x="284" y="23" fill="#acadae" font-family="ui-monospace, monospace" font-size="15" letter-spacing="2">TRUEFORGE</text>
   </g>
 </svg>

@@ -70,7 +70,7 @@ export function MetricsBlock({
       </div>
       <div className="metrics-footer">
         <div className="universe-chips">
-          <span>Universe</span>
+          <span>Seed watchlist</span>
           <div>
             {universe.length
               ? universe.map((symbol) => <b key={symbol}>{symbol}</b>)

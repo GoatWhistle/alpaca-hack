@@ -5,15 +5,14 @@ export function NewsView({ items }: { items: Record<string, unknown>[] }) {
   return (
     <div className="mandate-chrome news-view">
       <main id="main-content" tabIndex={-1}>
-        <section className="news-page-heading">
-          <div>
-            <h1>News</h1>
-          </div>
-          <span>{items.length} unique stories</span>
-        </section>
+        <h1 className="sr-only">News</h1>
 
         {items.length ? (
-          <section className="news-stream">
+          <section className="news-stream" aria-label="Market news">
+            <header className="news-stream-head">
+              <h2>Market feed</h2>
+              <span>{items.length} stories · runner-subscribed · untrusted until confirmed</span>
+            </header>
             {items.map((item, index) => (
               <NewsCard
                 key={`${String(item.source)}:${String(item.external_id ?? item.url)}:${index}`}

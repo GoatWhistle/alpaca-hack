@@ -4,7 +4,7 @@ import argparse
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +18,19 @@ from mandate_research.news_graph import (
     legacy_news_event,
     story_id_for,
 )
+
+
+MAX_POLL_EVENTS = 80
+NEWS_LOOKBACK_HOURS = 72
+
+
+def _bounded_recent_events(events: list[NewsEvent], *, now: datetime) -> list[NewsEvent]:
+    cutoff = now.astimezone(timezone.utc) - timedelta(hours=NEWS_LOOKBACK_HOURS)
+    recent = [event for event in events if event.published_at >= cutoff]
+    return sorted(
+        recent,
+        key=lambda item: (item.published_at, item.source, item.external_id, item.content_hash),
+    )[-MAX_POLL_EVENTS:]
 
 
 def _json_default(value: Any) -> Any:
@@ -74,10 +87,7 @@ def main() -> None:
         for event in loaded:
             key = f"{event.source}:{event.external_id}:{event.content_hash}"
             events[key] = event
-    ordered_events = sorted(
-        events.values(),
-        key=lambda item: (item.published_at, item.source, item.external_id, item.content_hash),
-    )
+    ordered_events = _bounded_recent_events(list(events.values()), now=datetime.now(timezone.utc))
     store = NewsGraphStore(args.news_graph)
     legacy_import = import_legacy_alerts_once(
         store,

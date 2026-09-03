@@ -29,7 +29,7 @@
 }
 
 ::selection {
-  background: var(--authority-wash);
+  background: var(--accent-wash);
   color: var(--ink);
 }
 
@@ -41,7 +41,7 @@ pre {
 
 input,
 textarea {
-  caret-color: var(--authority);
+  caret-color: var(--accent);
 }
 
 input::placeholder,
@@ -56,11 +56,11 @@ input:-webkit-autofill:focus,
 textarea:-webkit-autofill {
   box-shadow: inset 0 0 0 100px var(--surface-inset);
   -webkit-text-fill-color: var(--ink);
-  caret-color: var(--authority);
+  caret-color: var(--accent);
 }
 
 input[type="checkbox"] {
-  accent-color: var(--authority);
+  accent-color: var(--accent);
 }
 
 input[type="number"] {
@@ -75,7 +75,7 @@ input[type="number"]::-webkit-inner-spin-button {
 
 select {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='square'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23acadae' stroke-width='2' stroke-linecap='square'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right var(--space-3) center;
   background-size: 14px;

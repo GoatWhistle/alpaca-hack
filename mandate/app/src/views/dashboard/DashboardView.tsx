@@ -3,8 +3,6 @@ import { Panel } from "../../components/Panel";
 import type { Snapshot } from "../../lib/api";
 import { useTrades } from "../../app/useTrades";
 import { NewsCard } from "../news/NewsCard";
-import type { ApprovalAction } from "./decision/DecisionCard";
-import { DecisionQueue, StandingBy } from "./decision/DecisionQueue";
 import { LivePipeline } from "./LivePipeline";
 import { DegradedNotice } from "./panels/DegradedNotice";
 import { AttentionBanner, MetricsBlock } from "./panels/MetricsBlock";
@@ -17,11 +15,8 @@ interface DashboardViewProps {
   snapshot: Snapshot | null;
   error: string | null;
   news: Record<string, unknown>[];
-  decisionItems: Record<string, unknown>[];
   hidden: boolean;
   paused: boolean;
-  approvalActions: Record<string, ApprovalAction>;
-  onRespond: (item: Record<string, unknown>, approve: boolean) => void;
   onOpenNews: () => void;
   onOpenTrades: () => void;
 }
@@ -30,11 +25,8 @@ export function DashboardView({
   snapshot,
   error,
   news,
-  decisionItems,
   hidden,
   paused,
-  approvalActions,
-  onRespond,
   onOpenNews,
   onOpenTrades,
 }: DashboardViewProps) {
@@ -68,18 +60,6 @@ export function DashboardView({
         )}
         <AttentionBanner lines={lines} />
         <LivePipeline runtime={runtime} />
-
-        {decisionItems.length > 0 ? (
-          <DecisionQueue
-            items={decisionItems}
-            actions={approvalActions}
-            live={live}
-            hidden={hidden}
-            onRespond={onRespond}
-          />
-        ) : live ? (
-          <StandingBy marketOpen={marketOpen} />
-        ) : null}
 
         <MetricsBlock
           account={account}

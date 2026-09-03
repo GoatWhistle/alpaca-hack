@@ -104,17 +104,7 @@ export function TradeHistoryView({
   return (
     <div className="trade-history-view">
       <main id="main-content" tabIndex={-1}>
-        <header className="history-header">
-          <div>
-            <span>Broker fill ledger</span>
-            <h1>Trade history</h1>
-            <p>Every filled entry paired FIFO with its exit. Open positions use the live Alpaca mark.</p>
-          </div>
-          <div className="history-source">
-            <i data-live={snapshot?.source === "live"} />
-            {snapshot?.source === "live" ? "LIVE PAPER DATA" : "DEGRADED"}
-          </div>
-        </header>
+        <h1 className="sr-only">Trade history</h1>
 
         <section className="history-summary" aria-label="Trade results summary">
           <div><span>Matched realized P&L</span><strong data-tone={realized >= 0 ? "gain" : "loss"}>{realized >= 0 ? "+" : ""}{money(realized)}</strong></div>
@@ -138,6 +128,10 @@ export function TradeHistoryView({
               <span className="sr-only">Filter by instrument</span>
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter symbol…" />
             </label>
+            <span className="history-source">
+              <i data-live={snapshot?.source === "live"} />
+              {snapshot?.source === "live" ? "LIVE PAPER DATA" : "DEGRADED"}
+            </span>
             <small>{visible.length} rows · newest first</small>
           </header>
 

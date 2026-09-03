@@ -63,21 +63,3 @@ export function DecisionQueue({
     </section>
   );
 }
-
-export function StandingBy({ marketOpen }: { marketOpen: boolean }) {
-  return (
-    <section className="standing-by">
-      <svg className="standing-by-mark" viewBox="0 0 40 32" aria-hidden="true">
-        <path d="M13 4 H6 V28 H13" />
-        <path d="M27 4 H34 V28 H27" />
-        <circle cx="20" cy="16" r="4.5" />
-      </svg>
-      <b>Nothing awaits you</b>
-      <p>
-        {marketOpen
-          ? "Trading is automatic. Only explicit agent-memory changes require operator approval."
-          : "The market is closed. News context continues accumulating for the next session."}
-      </p>
-    </section>
-  );
-}

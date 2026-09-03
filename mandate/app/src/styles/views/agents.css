@@ -1,0 +1,290 @@
+/* Agent topology — a live dependency graph. Nodes are chips pinned to a
+   normalized canvas; edges are pixel-space Bézier curves under them. The
+   active pipeline stage lights its edges with a travelling Ice dash. */
+.agents-view main {
+  width: 100%;
+  padding: var(--space-3) var(--space-4) var(--space-8);
+}
+
+.agents-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-subtle);
+  overflow: hidden;
+}
+
+.agents-head {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.agents-head h2 {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.agents-head p {
+  margin: 0;
+  color: var(--ink-muted);
+  font: 500 var(--text-2xs) var(--font-mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.agents-head p.has-problems { color: var(--denied); }
+
+.agent-canvas-wrap { overflow-x: auto; }
+
+.agent-canvas {
+  position: relative;
+  height: 580px;
+  min-width: 920px;
+}
+
+.agent-edges {
+  position: absolute;
+  inset: 0;
+}
+
+/* Edges are always visible at full weight — one step brighter than Iron so
+   the curves read on Charcoal — and only the live stage adds Ice emphasis. */
+.agent-edge {
+  fill: none;
+  stroke: #54555d;
+  stroke-width: 1.5;
+}
+
+.agent-edge--return {
+  stroke: #3f6786;
+  stroke-dasharray: 4 6;
+}
+
+.agent-edge--ondemand {
+  stroke: #4a4b52;
+  stroke-dasharray: 3 5;
+}
+
+.agent-edge.is-live {
+  stroke: var(--accent);
+  stroke-dasharray: 5 6;
+  animation: agent-edge-flow 1.4s linear infinite;
+}
+
+@keyframes agent-edge-flow {
+  to { stroke-dashoffset: -11; }
+}
+
+.agent-edge-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-faint);
+  font: 500 9px var(--font-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Node chip — a small pill centred on its canvas point. */
+.agent-chip {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  cursor: default;
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+}
+
+.agent-chip:hover,
+.agent-chip:focus-visible { background: var(--surface-hover); }
+
+.agent-chip > i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+.agent-chip > b {
+  color: var(--ink);
+  font: 500 var(--text-xs) var(--font-ui);
+  white-space: nowrap;
+}
+
+.agent-chip[data-tone="healthy"] > i { background: var(--allowed); }
+.agent-chip[data-tone="degraded"] { border-color: color-mix(in srgb, var(--denied) 45%, var(--line-strong)); }
+.agent-chip[data-tone="degraded"] > i { background: var(--denied); }
+.agent-chip[data-tone="running"] > i {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+  animation: agent-breathe 1.8s ease-in-out infinite;
+}
+
+.agent-chip.is-live { border-color: var(--accent-dim); }
+.agent-chip.is-live > b { color: var(--ink); }
+
+.agent-chip--primary {
+  border-color: var(--accent-dim);
+  background: var(--accent-wash);
+}
+
+.agent-chip--primary > b { color: var(--ink); }
+
+@keyframes agent-breathe {
+  50% { box-shadow: 0 0 0 3px transparent; }
+}
+
+/* Problems ride under the chip — never hidden behind a hover. */
+.agent-chip > small {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 200px;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--denied) 30%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--denied) 7%, var(--surface-inset));
+  color: var(--denied);
+  font: 400 var(--text-2xs)/1.45 var(--font-mono);
+  text-align: center;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  pointer-events: none;
+}
+
+/* Hover card — opens centred ON the node and hides it under the card.
+   Edge-most nodes clamp the card horizontally; top/bottom rows flip it
+   below/above so it never leaves the canvas. */
+.agent-tip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(.97);
+  width: max-content;
+  max-width: min(300px, 80vw);
+  padding: calc(var(--space-2) + 2px) calc(var(--space-3) + 2px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  box-shadow: 0 10px 32px rgb(0 0 0 / 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+  color: var(--ink-muted);
+  font: 400 var(--text-xs)/1.55 var(--font-ui);
+  opacity: 0;
+  pointer-events: none;
+  z-index: var(--z-sticky);
+  transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+
+.agent-chip:hover .agent-tip,
+.agent-chip:focus-visible .agent-tip {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* The hovered node retreats under its card — but only where the card
+   actually covers it (centre/west/east anchors). */
+.agent-chip:not(.agent-chip--south):not(.agent-chip--north):hover > b,
+.agent-chip:not(.agent-chip--south):not(.agent-chip--north):focus-visible > b { opacity: 0; }
+
+.agent-chip--west .agent-tip { left: 0; transform: translate(0, -50%) scale(.97); }
+.agent-chip--west:hover .agent-tip,
+.agent-chip--west:focus-visible .agent-tip { transform: translate(0, -50%) scale(1); }
+
+.agent-chip--east .agent-tip { left: auto; right: 0; transform: translate(0, -50%) scale(.97); }
+.agent-chip--east:hover .agent-tip,
+.agent-chip--east:focus-visible .agent-tip { transform: translate(0, -50%) scale(1); }
+
+.agent-chip--south .agent-tip { top: calc(100% + 8px); transform: translate(-50%, 0) scale(.97); }
+.agent-chip--south:hover .agent-tip,
+.agent-chip--south:focus-visible .agent-tip { transform: translate(-50%, 0) scale(1); }
+
+.agent-chip--north .agent-tip { top: auto; bottom: calc(100% + 8px); transform: translate(-50%, -0) scale(.97); }
+.agent-chip--north:hover .agent-tip,
+.agent-chip--north:focus-visible .agent-tip { transform: translate(-50%, 0) scale(1); }
+
+/* Corner combos: keep the horizontal clamp, apply the vertical flip. */
+.agent-chip--west.agent-chip--south .agent-tip { transform: translate(0, 0) scale(.97); }
+.agent-chip--west.agent-chip--south:hover .agent-tip,
+.agent-chip--west.agent-chip--south:focus-visible .agent-tip { transform: translate(0, 0) scale(1); }
+.agent-chip--east.agent-chip--south .agent-tip { transform: translate(0, 0) scale(.97); }
+.agent-chip--east.agent-chip--south:hover .agent-tip,
+.agent-chip--east.agent-chip--south:focus-visible .agent-tip { transform: translate(0, 0) scale(1); }
+
+.agent-tip b {
+  color: var(--ink);
+  font: 500 var(--text-2xs) var(--font-mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.agent-tip i {
+  color: var(--ink-muted);
+  font: 400 var(--text-2xs)/1.5 var(--font-mono);
+  font-style: normal;
+}
+
+.agent-tip i:last-child {
+  color: var(--accent);
+  font-weight: 500;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+/* Footer strip — the current hypothesis the graph is chewing on. */
+.agents-foot {
+  border-top: 1px solid var(--line);
+  padding: var(--space-2) var(--space-4);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.agents-foot span {
+  flex: none;
+  color: var(--accent);
+  font: 500 var(--text-2xs) var(--font-mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.agents-foot p {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+
+@media (max-width: 720px) {
+  .agents-view main { padding: var(--space-3) 12px var(--space-8); }
+  .agents-foot { flex-direction: column; gap: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-edge.is-live { animation: none; }
+  .agent-chip[data-tone="running"] > i { animation: none; }
+}
