@@ -46,6 +46,7 @@ def create_server(
     news_store_path: str | Path | None = None,
     trader_memory_path: str | Path | None = None,
     trader_timeline_path: str | Path | None = None,
+    trader_runtime_path: str | Path | None = None,
     host: str = "127.0.0.1",
     port: int = 8020,
 ) -> FastMCP:
@@ -80,6 +81,13 @@ def create_server(
         or os.environ.get(
             "MANDATE_TRADER_TIMELINE_PATH",
             Path(__file__).resolve().parents[3] / "logs" / "trader-timeline.jsonl",
+        )
+    )
+    active_runtime_path = Path(
+        trader_runtime_path
+        or os.environ.get(
+            "MANDATE_AUTONOMY_RUNTIME_PATH",
+            Path(__file__).resolve().parents[3] / "logs" / "autonomy-runtime.json",
         )
     )
 
@@ -129,6 +137,7 @@ def create_server(
         return read_trader_context(
             active_timeline_path,
             active_memory_path,
+            runtime_path=active_runtime_path,
             max_events=max_events,
         )
 

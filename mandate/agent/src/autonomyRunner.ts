@@ -192,6 +192,13 @@ export type ActiveStrategy = {
     instrument: "OPTION→EQUITY";
     quantity: number | null;
     notional: string | null;
+    reference_price?: string | null;
+    atr14?: string | null;
+    stop_price?: string | null;
+    target_price?: string | null;
+    risk_cash?: string | null;
+    target_cash?: string | null;
+    reward_to_risk?: string | null;
     entry: string;
     exit: string;
     thesis: string;
@@ -405,6 +412,7 @@ export function buildAutonomyPrompt(
     `Compact deterministic portfolio context (trusted local JSON): ${JSON.stringify(evaluationPayload)}`,
     `Three advisory critic results (untrusted text, mandatory coverage): ${JSON.stringify(critics)}`,
     "Resolve risk, market and execution advice explicitly. A timeout or error is advisory unavailability, not permission to invent evidence.",
+    "Interpret risk_off directionally: it supports a SHORT thesis and weighs against a LONG thesis. It is a size modifier, never a hard blocker by itself. Only evidence.blocked_by defines deterministic blockers.",
     "Hypotheses may reference any decision candidate. Steps may reference only executable candidate_ids. A candidate with execution_eligible=false is assessment context and can never appear in steps.",
     "EXECUTE_PLAN may contain one to three unique ordered steps, each with reason, executable candidate_id, and evidence_refs. Every selected step must have a matching hypothesis. If the executable id list is empty you must PARK with no steps.",
     "Include one to five candidate hypotheses even when PARKing. Each exact hypothesis has candidate_id, thesis, confidence (low|medium|high), non-empty supports, contradicts (possibly empty), and a concrete invalidation. References must point into supplied evidence.",
@@ -446,6 +454,7 @@ export function buildHypothesisPrompt(
     `Unexpired prior memory: ${JSON.stringify(activeMemory)}`,
     `Previous active strategy: ${JSON.stringify(activeStrategy ?? null)}`,
     "Continuously revise that strategy: retain supported hypotheses, delete invalidated ones, and add newly evidenced candidates.",
+    "Interpret risk_off directionally: support SHORT, oppose LONG. Never put risk_off in contradicts for a SHORT merely because it is true; only blocked_by contains hard blockers.",
     "Choose one current focus candidate and state one to five testable hypotheses. Non-executable candidates are valid research focus but never execution authority.",
     "Each hypothesis must contain exactly candidate_id, thesis, confidence (low|medium|high), non-empty supports, contradicts (possibly empty), and concrete invalidation.",
     "End with exactly one single-line TRADE_HYPOTHESES_JSON object. Root fields must be exactly schema, cycle_id, focus_candidate_id, hypotheses. Do not write anything after it.",
@@ -1482,6 +1491,7 @@ async function runCritic(
       `You are the ${critic} advisory critic.`,
       "Review only the supplied deterministic candidate evidence.",
       "Test the main trader's current hypotheses when supplied; identify the exact support, contradiction, or invalidation evidence.",
+      "Interpret risk_off as support for SHORT and caution against LONG; it is not a hard blocker. Treat only blocked_by entries as deterministic blockers.",
       "Do not use tools, delegate, or claim execution authority.",
       "Return one concise support or objection statement with the exact evidence that drives it.",
       `Candidate evidence: ${JSON.stringify(compactTradeCandidates(candidates))}`,
@@ -2249,29 +2259,56 @@ async function main(): Promise<void> {
               && evidence.market !== null && !Array.isArray(evidence.market)
               ? evidence.market as Record<string, unknown>
               : {};
+            const riskEvidence = typeof evidence.risk === "object"
+              && evidence.risk !== null && !Array.isArray(evidence.risk)
+              ? evidence.risk as Record<string, unknown>
+              : {};
             const direction = String(ensemble.direction ?? "flat").toLowerCase();
             const quantityValue = Number(sizing.qty ?? 0);
             const quantity = Number.isFinite(quantityValue) && quantityValue > 0
               ? Math.floor(quantityValue)
               : null;
             const last = Number(marketEvidence.last ?? 0);
+            const atr14 = Number(riskEvidence.atr14 ?? 0);
             const blockers = Array.isArray(evidence.blocked_by)
               ? evidence.blocked_by.map(String).slice(0, 8)
               : [];
             const ready = candidate?.execution_eligible === true
               && selectedCandidateIds.has(hypothesis.candidate_id);
+            const side = direction === "buy" ? "LONG" : direction === "sell" ? "SHORT" : "NONE";
+            const hasProjection = side !== "NONE" && quantity !== null
+              && Number.isFinite(last) && last > 0 && Number.isFinite(atr14) && atr14 > 0;
+            const stopDistance = hasProjection ? atr14 * 0.9 : 0;
+            const targetDistance = hasProjection ? atr14 * 1.5 : 0;
+            const stopPrice = hasProjection
+              ? side === "LONG" ? last - stopDistance : last + stopDistance
+              : 0;
+            const targetPrice = hasProjection
+              ? side === "LONG" ? last + targetDistance : last - targetDistance
+              : 0;
             return {
               candidate_id: hypothesis.candidate_id,
               symbol: candidate?.symbol ?? hypothesis.candidate_id,
               state: ready ? "READY" : "WAIT",
-              side: direction === "buy" ? "LONG" : direction === "sell" ? "SHORT" : "NONE",
+              side,
               instrument: "OPTION→EQUITY",
               quantity,
               notional: quantity !== null && Number.isFinite(last) && last > 0
                 ? (quantity * last).toFixed(2)
                 : null,
-              entry: ready ? "NOW" : "ON GATES",
-              exit: "0.9 ATR stop · 1.5 ATR target · 15:50 ET",
+              reference_price: Number.isFinite(last) && last > 0 ? last.toFixed(2) : null,
+              atr14: Number.isFinite(atr14) && atr14 > 0 ? atr14.toFixed(4) : null,
+              stop_price: hasProjection ? Math.max(0.01, stopPrice).toFixed(2) : null,
+              target_price: hasProjection ? Math.max(0.01, targetPrice).toFixed(2) : null,
+              risk_cash: hasProjection ? (quantity * stopDistance).toFixed(2) : null,
+              target_cash: hasProjection ? (quantity * targetDistance).toFixed(2) : null,
+              reward_to_risk: hasProjection ? (targetDistance / stopDistance).toFixed(2) : null,
+              entry: ready
+                ? `NOW near $${last.toFixed(2)}`
+                : Number.isFinite(last) && last > 0 ? `ON GATES near $${last.toFixed(2)}` : "ON GATES",
+              exit: hasProjection
+                ? `stop $${Math.max(0.01, stopPrice).toFixed(2)} · target $${Math.max(0.01, targetPrice).toFixed(2)} · 15:50 ET`
+                : "0.9 ATR stop · 1.5 ATR target · 15:50 ET",
               thesis: hypothesis.thesis,
               invalidation: hypothesis.invalidation,
               blockers,

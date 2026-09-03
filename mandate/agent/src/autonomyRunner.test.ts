@@ -209,6 +209,23 @@ test("final trader receives passed news even when no candidate is executable", (
   assert.match(prompt, /revise.*delete.*add/u);
 });
 
+test("planner contracts treat risk-off as directional context rather than a short blocker", () => {
+  const candidate = [{
+    candidate_id: "watch-signal-1-AVGO",
+    symbol: "AVGO",
+    execution_eligible: false,
+    evidence: { risk: { market_regime: { risk_off: true } }, blocked_by: ["quality_gate"] },
+  }];
+  const hypothesisPrompt = buildHypothesisPrompt(
+    trajectory, [], market, {}, "risk-off-cycle", candidate, [], undefined,
+  );
+  const plannerPrompt = buildAutonomyPrompt(
+    trajectory, [], market, {}, {}, "risk-off-cycle", candidate, [], [], undefined, undefined,
+  );
+  assert.match(hypothesisPrompt, /risk_off.*support SHORT.*oppose LONG/iu);
+  assert.match(plannerPrompt, /risk_off.*supports a SHORT.*Only evidence\.blocked_by/iu);
+});
+
 test("decision context preserves executable ids and adds a signal fallback", () => {
   const executable = [{
     candidate_id: "entry-1-AAPL", symbol: "AAPL", evidence: {},

@@ -148,10 +148,12 @@ function ActiveStrategy({ snapshot }: { snapshot: Snapshot | null }) {
       {actions.length > 0 ? (
         <div className="active-strategy-table-wrap">
           <table>
-            <thead><tr><th>State</th><th>Bet</th><th>Instrument</th><th>Size at open</th><th>Entry</th><th>Exit</th></tr></thead>
+            <thead><tr><th>State</th><th>Bet</th><th>Instrument</th><th>Size at open</th><th>Entry</th><th>Risk → target</th><th>Exit</th></tr></thead>
             <tbody>{actions.map((action, index) => {
               const quantity = Number(action.quantity);
               const notional = Number(action.notional);
+              const riskCash = Number(action.risk_cash);
+              const targetCash = Number(action.target_cash);
               const detail = [
                 String(action.thesis ?? ""),
                 `Cancel: ${String(action.invalidation ?? "new evidence invalidates the setup")}`,
@@ -166,6 +168,9 @@ function ActiveStrategy({ snapshot }: { snapshot: Snapshot | null }) {
                   <td>{String(action.instrument ?? "—")}</td>
                   <td>{Number.isFinite(notional) && notional > 0 ? `$${Math.round(notional).toLocaleString()}` : "—"}{Number.isFinite(quantity) && quantity > 0 ? ` · ${quantity} sh eq.` : ""}</td>
                   <td>{String(action.entry ?? "ON GATES")}</td>
+                  <td>{Number.isFinite(riskCash) && riskCash > 0 && Number.isFinite(targetCash) && targetCash > 0
+                    ? `−$${Math.round(riskCash).toLocaleString()} → +$${Math.round(targetCash).toLocaleString()}`
+                    : "—"}</td>
                   <td>{String(action.exit ?? "15:50 ET")}</td>
                 </tr>
               );

@@ -139,12 +139,18 @@ def test_operator_memory_tools_share_the_append_only_contract(tmp_path) -> None:
 def test_operator_context_is_compact_and_tracks_latest_session(tmp_path) -> None:
     timeline = tmp_path / "trader-timeline.jsonl"
     memory = tmp_path / "trader-memory.jsonl"
+    runtime = tmp_path / "autonomy-runtime.json"
     timeline.write_text("\n".join([
         "{broken",
         '{"schema":"trader.timeline.v1","sequence":1,"at":"2026-09-02T10:00:00Z","trading_date":"2026-09-02","kind":"plan","status":"ok","session_id":"trader-1","summary":"  First   plan  ","details":{"large":"ignored"}}',
         '{"schema":"trader.timeline.v1","sequence":2,"at":"2026-09-02T10:01:00Z","trading_date":"2026-09-02","kind":"execution","status":"submitted","session_id":"trader-2","summary":"Second event","details":{}}',
     ]), encoding="utf-8")
-    server = create_server(trader_timeline_path=timeline, trader_memory_path=memory)
+    runtime.write_text('{"active_strategy":{"schema":"trader.strategy.v1","version":12,"updated_at":"2026-09-03T13:20:00Z","market_phase":"next_open","status":"watching","reason":"Await open","focus_candidate_id":"entry-1-AVGO","actions":[{"candidate_id":"entry-1-AVGO","symbol":"AVGO","state":"WAIT","side":"SHORT","instrument":"OPTION→EQUITY","quantity":78,"notional":"27776.58","reference_price":"356.11","atr14":"8.0000","stop_price":"363.31","target_price":"344.11","risk_cash":"561.60","target_cash":"936.00","reward_to_risk":"1.67","entry":"ON GATES near $356.11","exit":"stop $363.31 · target $344.11","thesis":"guidance selloff","invalidation":"reclaims VWAP","blockers":["outside_regular_hours"]}]}}', encoding="utf-8")
+    server = create_server(
+        trader_timeline_path=timeline,
+        trader_memory_path=memory,
+        trader_runtime_path=runtime,
+    )
 
     result = asyncio.run(server.call_tool("get_trader_context", {"max_events": 1}))[1]
 
@@ -160,6 +166,16 @@ def test_operator_context_is_compact_and_tracks_latest_session(tmp_path) -> None
         "summary": "Second event",
     }]
     assert result["contract"]["execution_authority"] is False
+    assert result["strategy"]["actions"][0] == {
+        "candidate_id": "entry-1-AVGO", "symbol": "AVGO", "state": "WAIT",
+        "side": "SHORT", "instrument": "OPTION→EQUITY", "quantity": 78,
+        "notional": "27776.58", "reference_price": "356.11", "atr14": "8.0000",
+        "stop_price": "363.31", "target_price": "344.11", "risk_cash": "561.60",
+        "target_cash": "936.00", "reward_to_risk": "1.67",
+        "entry": "ON GATES near $356.11", "exit": "stop $363.31 · target $344.11",
+        "thesis": "guidance selloff", "invalidation": "reclaims VWAP",
+        "blockers": ["outside_regular_hours"],
+    }
 
 
 def test_operator_context_skips_malformed_tail_and_memory_fields(tmp_path) -> None:

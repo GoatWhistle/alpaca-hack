@@ -16,6 +16,7 @@ DEFAULT_EVENT_LIMIT = 12
 MAX_EVENT_LIMIT = 20
 MAX_SUMMARY_CHARS = 400
 MAX_MEMORY_ITEMS = 8
+MAX_STRATEGY_ACTIONS = 5
 MAX_TIMELINE_BYTES = 512 * 1024
 TIMELINE_KINDS = {
     "trigger", "news", "reasoning", "tool_call", "tool_result", "hypothesis",
@@ -73,10 +74,50 @@ def _compact_event(item: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _compact_strategy(path: Path | None, errors: list[str]) -> dict[str, Any] | None:
+    if path is None or not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        errors.append("runtime_unavailable")
+        return None
+    strategy = payload.get("active_strategy") if isinstance(payload, dict) else None
+    if not isinstance(strategy, dict) or strategy.get("schema") != "trader.strategy.v1":
+        return None
+    allowed_action_fields = (
+        "candidate_id", "symbol", "state", "side", "instrument", "quantity", "notional",
+        "reference_price", "atr14", "stop_price", "target_price", "risk_cash", "target_cash",
+        "reward_to_risk", "entry", "exit", "thesis", "invalidation", "blockers",
+    )
+    actions = []
+    raw_actions = strategy.get("actions")
+    for raw in (raw_actions if isinstance(raw_actions, list) else [])[:MAX_STRATEGY_ACTIONS]:
+        if not isinstance(raw, dict):
+            continue
+        action = {key: raw.get(key) for key in allowed_action_fields}
+        action["thesis"] = str(action.get("thesis") or "")[:300]
+        action["invalidation"] = str(action.get("invalidation") or "")[:300]
+        blockers = action.get("blockers")
+        action["blockers"] = [str(item)[:100] for item in blockers[:8]] if isinstance(blockers, list) else []
+        actions.append(action)
+    return {
+        "schema": "trader.strategy.v1",
+        "version": strategy.get("version"),
+        "updated_at": strategy.get("updated_at"),
+        "market_phase": strategy.get("market_phase"),
+        "status": strategy.get("status"),
+        "reason": str(strategy.get("reason") or "")[:400],
+        "focus_candidate_id": strategy.get("focus_candidate_id"),
+        "actions": actions,
+    }
+
+
 def read_trader_context(
     timeline_path: str | Path,
     memory_path: str | Path,
     *,
+    runtime_path: str | Path | None = None,
     max_events: int = DEFAULT_EVENT_LIMIT,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -123,12 +164,14 @@ def read_trader_context(
             "evidence_refs": [str(ref)[:200] for ref in refs[:4]] if isinstance(refs, list) else [],
         })
 
+    strategy = _compact_strategy(Path(runtime_path) if runtime_path is not None else None, errors)
     return {
         "schema": CONTEXT_SCHEMA,
         "captured_at": captured_at,
         "current_session_id": current_session_id,
         "timeline": items,
         "memory": compact_memory,
+        "strategy": strategy,
         "errors": errors,
         "contract": {
             "timeline_order": "oldest_to_newest",
