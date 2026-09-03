@@ -1491,6 +1491,38 @@ async function runTraderHypothesisCycle(
   return repairedDraft;
 }
 
+async function runIsolatedTraderHypothesisCycle(
+  client: TrueForge,
+  agentName: string,
+  trajectory: Trajectory,
+  alerts: NewsEvent[],
+  market: MarketResult,
+  evaluation: Record<string, unknown>,
+  cycleId: string,
+  decisionCandidates: TradeCandidate[],
+  activeMemory: StoredMemoryEvent[],
+): Promise<TradeHypothesisDraft> {
+  let lastError: unknown = new Error("hypothesis turn did not start");
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const session = await client.sessions.create({ agent: { name: agentName } });
+    try {
+      return await runTraderHypothesisCycle(
+        client, session.data.id, trajectory, alerts, market, evaluation,
+        cycleId, decisionCandidates, activeMemory,
+      );
+    } catch (error) {
+      lastError = error;
+    } finally {
+      try {
+        await client.sessions.delete(session.data.id);
+      } catch (error) {
+        console.error("Could not clean up isolated hypothesis session", publicRunnerError(error));
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function runTraderCycle(
   client: TrueForge,
   sessionId: string,
@@ -1942,8 +1974,8 @@ async function main(): Promise<void> {
               }, traderSessionId,
             );
             try {
-              currentHypotheses = await runTraderHypothesisCycle(
-                client, traderSessionId, activeTrajectory, passedPending, market,
+              currentHypotheses = await runIsolatedTraderHypothesisCycle(
+                client, agentName, activeTrajectory, passedPending, market,
                 precomputedEvaluation, cycleId, decisionCandidates, activeMemory,
               );
               const focus = decisionCandidates.find(
