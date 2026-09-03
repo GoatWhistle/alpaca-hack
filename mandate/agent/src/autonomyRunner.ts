@@ -1473,16 +1473,22 @@ async function runTraderHypothesisCycle(
   decisionCandidates: TradeCandidate[],
   activeMemory: StoredMemoryEvent[],
 ): Promise<TradeHypothesisDraft> {
+  const allowedCandidates = decisionCandidates.map((candidate) => candidate.candidate_id);
   const turn = await runReadOnlyModelTurn(client, sessionId, buildHypothesisPrompt(
     trajectory, alerts, market, evaluation, cycleId, decisionCandidates, activeMemory,
   ), traderTimeoutSeconds());
-  const draft = parseTradeHypothesisDraft(
-    turn.text,
-    cycleId,
-    decisionCandidates.map((candidate) => candidate.candidate_id),
-  );
-  if (!draft) throw new Error("trader violated the trade.hypotheses.v1 root contract");
-  return draft;
+  const firstDraft = parseTradeHypothesisDraft(turn.text, cycleId, allowedCandidates);
+  if (firstDraft) return firstDraft;
+  const repair = await runReadOnlyModelTurn(client, sessionId, [
+    "Your previous hypothesis draft violated the required wire contract.",
+    "Repair formatting only; preserve evidence-grounded content. Do not call tools.",
+    `cycle_id must be exactly ${cycleId}.`,
+    `focus_candidate_id and every hypothesis candidate_id must come from: ${JSON.stringify(allowedCandidates)}`,
+    "Return exactly one final single line prefixed TRADE_HYPOTHESES_JSON: with root fields schema, cycle_id, focus_candidate_id, hypotheses and no text after it.",
+  ].join("\n"), traderTimeoutSeconds());
+  const repairedDraft = parseTradeHypothesisDraft(repair.text, cycleId, allowedCandidates);
+  if (!repairedDraft) throw new Error("trader violated the trade.hypotheses.v1 root contract twice");
+  return repairedDraft;
 }
 
 async function runTraderCycle(
