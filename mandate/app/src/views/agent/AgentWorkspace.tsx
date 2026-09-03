@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import type {
   AgentStepsCardProps,
   AgentUIServer,
@@ -143,6 +143,7 @@ const OPERATOR_THEME = {
   brand: { name: "Operator fork", logo: `${import.meta.env.BASE_URL}agent-mark.svg` },
   tokens: MANDATE_CHAT_TOKENS,
 } as const;
+const IGNORE_UI_ERROR = () => undefined;
 
 const TraderRuntime = memo(function TraderRuntime({
   server,
@@ -187,15 +188,10 @@ export const AgentWorkspace = memo(function AgentWorkspace({
   error: string | null;
 }) {
   const [tradingDate, setTradingDate] = useState(newYorkTradingDate);
-  const [traderDegraded, setTraderDegraded] = useState(false);
-  const [chatDegraded, setChatDegraded] = useState(false);
-  const markTraderDegraded = useCallback(() => setTraderDegraded(true), []);
-  const markChatDegraded = useCallback(() => setChatDegraded(true), []);
   const traderServer = useMemo(
-    () => createTraderChatServer((healthy) => setTraderDegraded(!healthy)),
+    () => createTraderChatServer(),
     [],
   );
-  const contextState = traderDegraded || chatDegraded ? "degraded" : "live";
 
   useEffect(() => {
     const timer = window.setInterval(() => setTradingDate(newYorkTradingDate()), 30_000);
@@ -208,7 +204,6 @@ export const AgentWorkspace = memo(function AgentWorkspace({
         snapshot={snapshot}
         live={snapshot?.source === "live" && !error}
         equity={Number(snapshot?.session.account.equity ?? 0) || 0}
-        contextState={contextState}
       />
 
       <div className="trader-room-grid">
@@ -217,13 +212,13 @@ export const AgentWorkspace = memo(function AgentWorkspace({
             key={tradingDate}
             server={traderServer}
             tradingDate={tradingDate}
-            onError={markTraderDegraded}
+            onError={IGNORE_UI_ERROR}
           />
         </section>
 
         <aside className="operator-fork-pane" aria-label="Operator context fork">
           <div className="operator-fork-chat">
-            <OperatorRuntime onError={markChatDegraded} />
+            <OperatorRuntime onError={IGNORE_UI_ERROR} />
           </div>
           <footer>
             Persistent changes call <code>append_trader_memory</code> and pause for approval.

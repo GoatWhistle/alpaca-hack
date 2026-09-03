@@ -7,27 +7,17 @@ export function TradingBookStrip({
   snapshot,
   live,
   equity = 0,
-  contextState = "live",
 }: {
   snapshot: Snapshot | null;
   live: boolean;
   equity?: number;
-  contextState?: "live" | "degraded";
 }) {
   const positions = Object.entries(snapshot?.session.positions ?? {});
   const pending = snapshot?.session.pending_orders ?? [];
+  if (positions.length === 0 && pending.length === 0) return null;
+
   return (
     <section className="trading-book" aria-label="Current positions and exit plans">
-      <header>
-        <div>
-          <span>Current book</span>
-          <strong>{positions.length} open · {pending.length} working</strong>
-        </div>
-        <div className="trading-book-state">
-          <small data-state={contextState}><i className="live-dot" />stream {contextState}</small>
-          <small>{live ? "live Alpaca paper state" : "broker snapshot unavailable"}</small>
-        </div>
-      </header>
       <div className="trading-book-cards">
         {positions.map(([symbol, item]) => (
           <PositionCard
@@ -55,11 +45,6 @@ export function TradingBookStrip({
             </article>
           );
         })}
-        {positions.length === 0 && pending.length === 0 && (
-          <p className="trading-book-empty">
-            {live ? "Flat book. No open positions or working orders." : "Waiting for a live broker snapshot."}
-          </p>
-        )}
       </div>
     </section>
   );

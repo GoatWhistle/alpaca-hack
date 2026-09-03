@@ -15,43 +15,6 @@
   background: var(--surface);
 }
 
-.trading-book > header {
-  min-height: 38px;
-  padding: 7px var(--space-5);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  border-bottom: 1px solid var(--line);
-}
-
-.trading-book > header div { display: flex; align-items: baseline; gap: var(--space-3); }
-.trading-book > header span,
-.trading-book > header small {
-  color: var(--ink-faint);
-  font: 500 var(--text-2xs) var(--font-mono);
-  letter-spacing: .1em;
-  text-transform: uppercase;
-}
-.trading-book > header strong { font: 500 var(--text-xs) var(--font-mono); }
-
-.trading-book-state { display: flex; align-items: center; gap: var(--space-4); }
-.trading-book-state small[data-state] { display: inline-flex; align-items: center; gap: 6px; }
-.trading-book-state small[data-state="degraded"] { color: var(--authority); }
-
-.live-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--allowed);
-  box-shadow: 0 0 0 4px rgb(74 222 128 / .1);
-}
-
-.trading-book-state small[data-state="degraded"] .live-dot {
-  background: var(--authority);
-  box-shadow: 0 0 0 4px rgb(214 171 50 / .1);
-}
-
 .trading-book-cards {
   min-height: 86px;
   max-height: 176px;
@@ -82,8 +45,6 @@
 
 .book-order p { margin: 7px 0 0; color: var(--ink-muted); font: 400 var(--text-2xs) var(--font-mono); }
 .book-order small { color: var(--authority); font: 500 var(--text-2xs) var(--font-mono); text-transform: uppercase; }
-.trading-book-empty { margin: auto; color: var(--ink-muted); font: 400 var(--text-xs) var(--font-mono); }
-
 .trader-stream-pane,
 .operator-fork-pane { min-width: 0; min-height: 0; }
 
@@ -199,7 +160,6 @@
     overflow: visible;
   }
   .trading-book-cards { grid-auto-columns: minmax(260px, 82vw); }
-  .trading-book > header { position: sticky; top: 0; z-index: 4; }
   .trader-room-grid { display: grid; grid-template-columns: 1fr; grid-template-rows: 54dvh 70dvh; }
   .trader-stream-pane { border-right: 0; border-bottom: 1px solid var(--line-strong); }
   .operator-fork-pane { border-top: 6px solid var(--ground); }
