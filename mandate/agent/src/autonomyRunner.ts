@@ -1945,7 +1945,7 @@ async function main(): Promise<void> {
               );
               await appendTimeline(
                 "hypothesis", "ok",
-                `Main trader is testing ${currentHypotheses.hypotheses.length} explicit hypothesis${currentHypotheses.hypotheses.length === 1 ? "" : "es"}; current focus is ${focus?.symbol ?? currentHypotheses.focus_candidate_id}.`,
+                `Main trader is testing ${currentHypotheses.hypotheses.length} explicit ${currentHypotheses.hypotheses.length === 1 ? "hypothesis" : "hypotheses"}; current focus is ${focus?.symbol ?? currentHypotheses.focus_candidate_id}.`,
                 { cycle_id: cycleId, phase: "active", draft: currentHypotheses }, traderSessionId,
               );
             } catch (error) {
