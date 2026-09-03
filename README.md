@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://alpaca.miposts.com"><strong>🚀 Live Demo — alpaca.miposts.com</strong></a> &nbsp;·&nbsp;
+  <a href="https://alpaca.miposts.com"><strong>🚀 Live Demo</strong></a> &nbsp;·&nbsp;
   <a href="#how-it-works">How It Works</a> &nbsp;·&nbsp;
   <a href="#meet-the-team">The Agents</a> &nbsp;·&nbsp;
   <a href="#architecture">Architecture</a> &nbsp;·&nbsp;
@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <a href="https://alpaca.miposts.com"><img alt="Live Demo" src="https://img.shields.io/badge/LIVE_DEMO-alpaca.miposts.com-0EA5E9?style=for-the-badge&logo=vercel"/></a>
+  <a href="https://alpaca.miposts.com"><img alt="Live Demo" src="https://img.shields.io/badge/LIVE_DEMO-OPEN-0EA5E9?style=for-the-badge&logo=vercel"/></a>
 </p>
 
 > **Paper trading only. Not investment advice.** MANDATE is a research prototype that trades exclusively on Alpaca's paper environment. No real money is ever at risk.
@@ -41,7 +41,7 @@
 
 <p align="center">
   <a href="https://alpaca.miposts.com"><img src="docs/screenshots/dashboard.png" alt="Dashboard — Live Equity & P&L" width="100%"/></a><br/>
-  <em>Dashboard — live equity, P&L, positions and orders. Every number is real Alpaca paper data. — <a href="https://alpaca.miposts.com">Open live dashboard →</a></em>
+  <em>Dashboard — live equity, P&L, positions and orders. Every number is real Alpaca paper data. — <a href="https://alpaca.miposts.com">🚀 Open live dashboard →</a></em>
 </p>
 
 <table>
@@ -92,7 +92,7 @@
 
 <div align="center">
 
-**[🚀 Try the live agent now — alpaca.miposts.com](https://alpaca.miposts.com)**
+**[🚀 Try the live agent now](https://alpaca.miposts.com)**
 
 *Real paper trading. Real-time streaming. No mocks.*
 
@@ -346,7 +346,7 @@ Not a mock. A live window into an autonomous mind:
 
 <p align="center">
   <a href="https://alpaca.miposts.com"><img src="docs/screenshots/dashboard-wide.png" alt="Dashboard wide" width="100%"/></a><br/>
-  <em><a href="https://alpaca.miposts.com">→ Open live dashboard at alpaca.miposts.com</a></em>
+  <em><a href="https://alpaca.miposts.com">🚀 Open live dashboard →</a></em>
 </p>
 
 ---
@@ -365,11 +365,11 @@ Not a mock. A live window into an autonomous mind:
 ## Experience It Live
 
 <p align="center">
-  <a href="https://alpaca.miposts.com"><img alt="Live" src="https://img.shields.io/badge/LIVE-alpaca.miposts.com-0EA5E9?style=for-the-badge"/></a>
+  <a href="https://alpaca.miposts.com"><img alt="Live Demo" src="https://img.shields.io/badge/LIVE_DEMO-OPEN-0EA5E9?style=for-the-badge"/></a>
 </p>
 
 <p align="center">
-  <strong>Public deployment:</strong> <a href="https://alpaca.miposts.com"><strong>https://alpaca.miposts.com</strong></a><br/>
+  <strong>Public deployment:</strong> <a href="https://alpaca.miposts.com"><strong>🚀 Live Demo</strong></a><br/>
   <strong>GitHub:</strong> <em>this repository</em> — open source, reproducible, MIT licensed<br/>
   <strong>Account ID:</strong> <em>fresh $100,000 paper account — included in submission</em>
 </p>
