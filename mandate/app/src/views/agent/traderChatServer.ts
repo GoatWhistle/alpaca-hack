@@ -19,6 +19,7 @@ const SESSION_PREFIX = "mandate-trader-day-";
 const TRADER_AGENT_NAME = "mandate-paper-agent";
 const ROOT_THREAD_ID = "main";
 const PAGE_SIZE = 500;
+const DAY_EVENT_WINDOW = 160;
 type NativeTurnEvent = Exclude<
   TurnStreamingEvent,
   { type: "model.message.delta" | "turn.created" | "turn.done" }
@@ -513,6 +514,19 @@ export function timelineEventToTurnEvents(event: TraderTimelineEvent): NativeTur
 }
 
 async function loadTimeline(tradingDate?: string, signal?: AbortSignal): Promise<TraderTimelineEvent[]> {
+  // The complete append-only journal remains on the server. Rendering only the
+  // recent operational window keeps assistant-ui from hydrating thousands of
+  // projected events into its external store in one pass.
+  if (tradingDate) {
+    const page = await getTraderTimeline(
+      0,
+      DAY_EVENT_WINDOW,
+      signal,
+      tradingDate,
+      DAY_EVENT_WINDOW,
+    );
+    return page.items;
+  }
   const events: TraderTimelineEvent[] = [];
   let after = 0;
   while (true) {
@@ -789,7 +803,6 @@ async function* readTimelineStream(
 export function createTraderChatServer(
   onHealthChange?: (healthy: boolean) => void,
 ): AgentUIServer {
-  const hydratedCursor = new Map<string, number>();
   return {
     async createSession() {
       const tradingDate = newYorkTradingDate();
@@ -858,7 +871,6 @@ export function createTraderChatServer(
       const selected = groupedTurns(sessionId, tradingDate, timeline)
         .find((item) => item.turn.id === requestedTurnId);
       if (!selected) throw new Error("Unknown trader turn");
-      hydratedCursor.set(requestedTurnId, timeline.at(-1)?.sequence ?? 0);
       const events = projectedGroupEvents(selected.group);
       if (order === "desc") events.reverse();
       return page(events, limit, pageToken);
@@ -871,20 +883,11 @@ export function createTraderChatServer(
       if (!selected) throw new Error("Unknown trader turn");
       let activeCycleKey = selected.group.key;
       let streamSequence = 0;
-      const hydratedThrough = hydratedCursor.get(requestedTurnId) ?? 0;
-      // Some TrueForge UI paths subscribe to a running turn without first
-      // calling listTurnEvents. Hydrate only this turn's missing events once,
-      // then start SSE at the journal tip. Streaming from sequence zero would
-      // fold every earlier daily cycle into the open turn on each connection.
-      for (const timelineEvent of selected.group.events) {
-        if (timelineEvent.kind === "trigger" || timelineEvent.sequence <= hydratedThrough) continue;
-        for (const projected of timelineEventToTurnEvents(timelineEvent)) {
-          streamSequence += 1;
-          yield { sequenceNumber: streamSequence, event: projected as TurnStreamingEvent };
-        }
-      }
-      let cursor = Math.max(hydratedThrough, initial.at(-1)?.sequence ?? 0);
-      hydratedCursor.set(requestedTurnId, cursor);
+      // TrueForge hydrates the running turn through listTurnEvents before it
+      // subscribes. Start SSE strictly after that journal tip: replaying the
+      // selected group here races the history response and inserts identical
+      // message IDs twice in assistant-ui's repository.
+      let cursor = initial.at(-1)?.sequence ?? 0;
       for await (const event of readTimelineStream(
         tradingDate,
         cursor,
@@ -892,7 +895,6 @@ export function createTraderChatServer(
         { onHealthChange },
       )) {
         cursor = event.sequence;
-        hydratedCursor.set(requestedTurnId, cursor);
         const incomingCycle = cycleId(event);
         if (event.kind === "trigger") {
           activeCycleKey = incomingCycle ?? `trigger-${event.sequence}`;

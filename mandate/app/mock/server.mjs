@@ -86,8 +86,11 @@ function sessionState() {
     as_of: new Date().toISOString(),
     account: {
       status: "ACTIVE",
-      equity: "101736.18",
-      daily_pnl: "836.41",
+      equity: "100684.22",
+      starting_equity: "100000.00",
+      total_pnl: "684.22",
+      total_pnl_pct: "0.68422",
+      daily_pnl: "286.41",
       gross_exposure_pct: "23.6737",
     },
     market: { is_open: true, clock_timestamp: new Date().toISOString() },
@@ -136,7 +139,7 @@ function sessionState() {
         },
       },
       BABA: {
-        qty: "20", side: "short", asset_class: "us_equity",
+        qty: "-20", side: "short", asset_class: "us_equity",
         market_price: "94.12", market_value: "-1882.40", avg_entry_price: "92.87",
         unrealized_pl: "-25.00", unrealized_plpc: "-0.0135",
         exit_policy: {
@@ -159,6 +162,39 @@ function sessionState() {
     ],
     journal: journal(),
   };
+}
+
+function brokerOrders() {
+  const filled = ({ id, symbol, assetClass = "us_equity", side, intent, qty, price, minutes }) => ({
+    id,
+    client_order_id: `mandate-demo-${id}`,
+    replaces: null,
+    replaced_by: null,
+    symbol,
+    asset_class: assetClass,
+    side,
+    position_intent: intent,
+    ratio_qty: null,
+    qty: String(qty),
+    filled_qty: String(qty),
+    filled_avg_price: String(price),
+    order_class: "simple",
+    status: "filled",
+    submitted_at: minutesAgo(minutes + 1),
+    filled_at: minutesAgo(minutes),
+    legs: [],
+  });
+  return [
+    filled({ id: "amd-entry", symbol: "AMD", side: "buy", intent: "buy_to_open", qty: 45, price: 161.20, minutes: 320 }),
+    filled({ id: "amd-exit", symbol: "AMD", side: "sell", intent: "sell_to_close", qty: 45, price: 162.46, minutes: 262 }),
+    filled({ id: "avgo-entry", symbol: "AVGO", side: "sell", intent: "sell_to_open", qty: 18, price: 348.50, minutes: 245 }),
+    filled({ id: "aapl-entry", symbol: "AAPL", side: "buy", intent: "buy_to_open", qty: 34, price: 226.10, minutes: 214 }),
+    filled({ id: "avgo-exit", symbol: "AVGO", side: "buy", intent: "buy_to_close", qty: 18, price: 345.80, minutes: 196 }),
+    filled({ id: "msft-entry", symbol: "MSFT", side: "buy", intent: "buy_to_open", qty: 12, price: 508.20, minutes: 180 }),
+    filled({ id: "nvda-entry", symbol: "NVDA", side: "buy", intent: "buy_to_open", qty: 28, price: 183.10, minutes: 166 }),
+    filled({ id: "nvda-call-entry", symbol: "NVDA260919C00190000", assetClass: "us_option", side: "buy", intent: "buy_to_open", qty: 2, price: 1.24, minutes: 120 }),
+    filled({ id: "baba-entry", symbol: "BABA", side: "sell", intent: "sell_to_open", qty: 20, price: 92.87, minutes: 80 }),
+  ];
 }
 
 function journal() {
@@ -478,7 +514,7 @@ function applyDecision(item, approve) {
 
 // --- Autonomous trader timeline (stateful, keeps growing while the mock runs) ---
 
-const timelineState = { events: [], sequence: 0, startedAt: Date.now() };
+const timelineState = { events: [], sequence: 0, startedAt: Date.now(), lastLiveCycleId: null };
 
 function tradingDate() {
   return new Date().toISOString().slice(0, 10);
@@ -657,6 +693,8 @@ function appendLiveCycle() {
   seedTimeline();
   const index = Math.floor((Date.now() - timelineState.startedAt) / 45_000) % LIVE_CYCLE_VARIANTS.length;
   const cycleId = `cycle-${450 + Math.floor((Date.now() - timelineState.startedAt) / 45_000)}`;
+  if (cycleId === timelineState.lastLiveCycleId) return;
+  timelineState.lastLiveCycleId = cycleId;
   timelineState.events.push(...seedCycle(cycleId, 0, LIVE_CYCLE_VARIANTS[index]));
 }
 
@@ -688,7 +726,7 @@ function degradedSnapshot() {
     services: [
       { name: "alpaca", url: "http://127.0.0.1:8000/mcp", ok: false },
       { name: "research", url: "http://127.0.0.1:8020/mcp", ok: true },
-      { name: "trueforge", url: "http://localhost:8790", ok: false },
+      { name: "trueforge", url: "http://localhost:8790", ok: true },
     ],
     autonomy: autonomyState(),
     approvals: approvals(),
@@ -708,7 +746,7 @@ function snapshot() {
     services: [
       { name: "alpaca", url: "http://127.0.0.1:8000/mcp", ok: true },
       { name: "research", url: "http://127.0.0.1:8020/mcp", ok: true },
-      { name: "trueforge", url: "http://localhost:8790", ok: false },
+      { name: "trueforge", url: "http://localhost:8790", ok: true },
     ],
     autonomy: autonomyState(),
     approvals: approvals(),
@@ -744,7 +782,7 @@ const server = createServer(async (request, response) => {
   if (request.method === "OPTIONS") return send(response, 204, {});
   if (url.pathname === "/api/snapshot") return send(response, 200, snapshot());
   if (url.pathname === "/api/trade-history/orders") {
-    return send(response, 200, { schema: "trade.orders.v1", items: [] });
+    return send(response, 200, { schema: "trade.orders.v1", items: brokerOrders() });
   }
   if (url.pathname === "/api/trader/timeline") {
     seedTimeline();

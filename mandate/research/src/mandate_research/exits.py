@@ -91,7 +91,12 @@ def evaluate_position_exits(
     tracking: dict[str, str] = {}
     seen_now = now.isoformat()
     market_time = now.astimezone(NEW_YORK)
-    session_flatten = (market_time.hour, market_time.minute) >= (15, 50)
+    flatten_hour = int(os.environ.get("MANDATE_SESSION_FLATTEN_HOUR", "15"))
+    flatten_minute = int(os.environ.get("MANDATE_SESSION_FLATTEN_MINUTE", "50"))
+    if not 0 <= flatten_hour <= 23 or not 0 <= flatten_minute <= 59:
+        raise ValueError("session flatten time must be a valid hour and minute")
+    session_flatten = (market_time.hour, market_time.minute) >= (flatten_hour, flatten_minute)
+    flatten_label = f"{flatten_hour:02d}:{flatten_minute:02d} ET"
 
     validated: list[tuple[str, Decimal, Decimal]] = []
     for position in positions:
@@ -161,7 +166,7 @@ def evaluate_position_exits(
                 )
             elif session_flatten:
                 proposals.append(
-                    propose("session_flatten_1550", "immediate", "intraday mandate flattens at 15:50 ET")
+                    propose("session_flatten_1550", "immediate", f"intraday mandate flattens at {flatten_label}")
                 )
             elif -distance >= target_multiple * atr:
                 proposals.append(
@@ -178,7 +183,7 @@ def evaluate_position_exits(
                 )
             elif session_flatten:
                 proposals.append(
-                    propose("session_flatten_1550", "immediate", "intraday mandate flattens at 15:50 ET")
+                    propose("session_flatten_1550", "immediate", f"intraday mandate flattens at {flatten_label}")
                 )
             elif distance >= target_multiple * atr:
                 proposals.append(

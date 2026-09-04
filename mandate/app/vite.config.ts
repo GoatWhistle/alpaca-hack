@@ -9,7 +9,17 @@ export default defineConfig({
     // TrueForgeUI is loaded in a lazy route and ships several React peer
     // consumers. Force every chunk through the host React instance; a second
     // dispatcher produces React #321 (invalid hook call) in production.
-    dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
+    dedupe: [
+      "react",
+      "react-dom",
+      "react/jsx-runtime",
+      "react/jsx-dev-runtime",
+      "@assistant-ui/core",
+      "@assistant-ui/react",
+      "@assistant-ui/store",
+      "@assistant-ui/tap",
+      "@truefoundry/assistant-ui-runtime",
+    ],
   },
   optimizeDeps: {
     include: ["@truefoundry/trueforge-ui", "@assistant-ui/react", "@assistant-ui/core"],

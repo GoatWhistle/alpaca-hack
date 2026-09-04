@@ -124,7 +124,11 @@ def _now_et() -> datetime:
 
 def _after_flatten_window(now: datetime | None = None) -> bool:
     value = (now or _now_et()).astimezone(NEW_YORK)
-    return (value.hour, value.minute) >= (15, 50)
+    hour = int(os.environ.get("MANDATE_SESSION_FLATTEN_HOUR", "15"))
+    minute = int(os.environ.get("MANDATE_SESSION_FLATTEN_MINUTE", "50"))
+    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+        raise ValueError("session flatten time must be a valid hour and minute")
+    return (value.hour, value.minute) >= (hour, minute)
 
 
 def _paper_base_url() -> str:
